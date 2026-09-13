@@ -46,6 +46,7 @@ export type IssueCategory =
   | 'Thermal'
   | 'Power'
   | 'BLDC Motor Drive'
+  | 'Robot Joint Drive'
   | 'Signal Integrity'
   | 'Reliability'
   | 'Functional Safety'
@@ -285,6 +286,10 @@ export interface CandidateAction {
   preconditions: string;
   verificationMethod: string;
   planB: string;
+  decisionFit?: string;
+  fastestValidation?: string;
+  latestDecisionPoint?: string;
+  rejectionReason?: string;
 }
 
 export type RecommendationGrade =
@@ -655,6 +660,40 @@ export interface CopilotAnalysisResult {
     assumptions: string[];
     fixedTemplateFields: string[];
   };
+  multiDomainAnalysis?: {
+    primaryDomain: string;
+    relatedDomains: string[];
+    domainAssessments: Array<{
+      domain: string;
+      role: 'PRIMARY' | 'RELATED';
+      evidenceLevel: string;
+      knownFacts: string[];
+      evidenceGaps: string[];
+      minimumValidation: string;
+      domainConclusion: string;
+    }>;
+    crossDomainLinks: Array<{
+      fromDomain: string;
+      toDomain: string;
+      mechanism: string;
+      evidenceBasis: string;
+      impact: string;
+    }>;
+    crossDomainVetoes: Array<{
+      condition: string;
+      blocks: string[];
+      rationale: string;
+    }>;
+  };
+  decisionFrame?: {
+    decisionQuestion: string;
+    currentDecisionGate: string;
+    decisionWindow: string;
+    bestNextAction: string;
+    minimumEvidenceToProceed: string[];
+    unknownsBlockingDecision: string[];
+    reversalCriteria: string[];
+  };
 }
 
 export interface ResultProvenance {
@@ -677,6 +716,7 @@ export interface PresetScenario {
   issue: IssueInput;
   isCustom?: boolean;
   createdAt?: string;
+  category?: string;
 }
 
 export interface WccaComponent {

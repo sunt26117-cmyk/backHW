@@ -118,6 +118,39 @@ export const FirstScreen10sView: React.FC<FirstScreen10sProps> = ({
         </div>
       </div>
 
+      {result.decisionFrame && (
+        <div className="bg-slate-900/90 border border-cyan-500/30 rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <div className="text-sm font-bold text-cyan-300 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4" /> 当前决策闸门
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">不是“写报告”，而是明确当前能否继续推进，以及缺什么证据。</div>
+            </div>
+            <span className="text-[10px] px-2 py-1 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-mono">{result.decisionFrame.decisionWindow}</span>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-3">
+              <div className="text-[10px] text-slate-500 mb-1">当前要回答的问题</div>
+              <div className="text-xs text-slate-200 leading-relaxed">{result.decisionFrame.decisionQuestion}</div>
+            </div>
+            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-3">
+              <div className="text-[10px] text-slate-500 mb-1">未来 24 小时最优先动作</div>
+              <div className="text-xs text-emerald-300 leading-relaxed">{result.decisionFrame.bestNextAction}</div>
+            </div>
+            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-3">
+              <div className="text-[10px] text-slate-500 mb-1">什么证据会推翻当前方案</div>
+              <div className="text-xs text-amber-300 leading-relaxed">{result.decisionFrame.reversalCriteria.slice(0, 2).join('；') || '暂未定义，需补充验证触发条件。'}</div>
+            </div>
+          </div>
+          {result.decisionFrame.unknownsBlockingDecision.length > 0 && (
+            <div className="mt-3 text-[11px] text-slate-400">
+              <span className="text-rose-300 font-semibold">当前阻塞未知量：</span> {result.decisionFrame.unknownsBlockingDecision.slice(0, 4).join('；')}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 4 大核心问题卡片 (第一屏 10 秒即时回答) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Q1: What is wrong? */}

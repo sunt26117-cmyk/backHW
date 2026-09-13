@@ -161,6 +161,16 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
                     </div>
                   </div>
 
+                  {/* Decision fit: force the AI result to stay tied to the current decision window */}
+                  {(opt.decisionFit || opt.fastestValidation || opt.latestDecisionPoint || opt.rejectionReason) && (
+                    <div className="bg-cyan-500/5 p-2.5 rounded-lg border border-cyan-500/20 mb-3 text-xs space-y-1.5">
+                      {opt.decisionFit && <div><span className="text-cyan-400 font-semibold">当前工况适配：</span><span className="text-slate-300">{opt.decisionFit}</span></div>}
+                      {opt.fastestValidation && <div><span className="text-emerald-400 font-semibold">最快验证：</span><span className="text-slate-300">{opt.fastestValidation}</span></div>}
+                      {opt.latestDecisionPoint && <div><span className="text-amber-400 font-semibold">最晚切换点：</span><span className="text-slate-300">{opt.latestDecisionPoint}</span></div>}
+                      {opt.rejectionReason && <div><span className="text-red-400 font-semibold">主要否决理由：</span><span className="text-slate-300">{opt.rejectionReason}</span></div>}
+                    </div>
+                  )}
+
                   {/* Residual Risk */}
                   <div className="bg-slate-800/40 p-2.5 rounded-lg border border-slate-700/40 mb-3 text-xs">
                     <div className="flex items-center justify-between mb-1">

@@ -1,5 +1,5 @@
 /**
- * 回归测试用例 (Gold Standard Cases 01 ~ 14) (Section 13)
+ * 回归测试用例 (Gold Standard Cases 01 ~ 16) (Section 13)
  * 严格遵照 V4 升级任务书第 13 节规范，形成自动化基准测试与验证集
  */
 
@@ -203,6 +203,36 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     expectedVeto: false,
     expectedNextBestAction: '固化完整 HARA -> SG -> FSR -> TSR -> HSR 链路，展示单点/潜伏失效贡献拆分',
     expectedVerification: '第三方车规功能安全机构独立 Safety Case 评审',
+  },
+  {
+    caseId: 'Case15',
+    title: '协作机器人肩关节谐波减速器背隙+扭转柔性超出客户定位精度规格 (J001 重点)',
+    category: 'Robot Joint / Position Accuracy',
+    input: {
+      context: { projectName: '协作机器人六轴手臂 · 肩关节模组', projectPhase: 'DVT' },
+      issue: { failurePhenomenon: '肩关节谐波减速器输出端实测背隙 4.5arcmin，35Nm额定扭矩工况下末端定位精度客户规格要求 ±3arcmin，产线抽检批量超差' },
+    },
+    expectedPattern: 'J001',
+    expectedCalculation: { '背隙 (arcmin)': 4.5, '扭转柔性附加误差 (arcmin)': 8.02, '输出端运动学总误差估算 (arcmin)': 12.52, '规格要求 (arcmin)': 3.0, '精度裕量 (arcmin)': -9.52 },
+    expectedRisk: 'High',
+    expectedVeto: true, // 总误差已超出客户规格，一票否决！
+    expectedNextBestAction: '关节输出端加装第二编码器实现全闭环消除背隙影响，同步评估更高背隙等级减速器型号',
+    expectedVerification: '输出端激光跟踪仪实测重复定位精度，全闭环改造后连续 30 次正反向定位 ≤3arcmin 判定 PASS',
+  },
+  {
+    caseId: 'Case16',
+    title: '协作机器人腕关节 STO 仅软件禁止 PWM，未满足 PLd 硬件通道独立性 (J006 重点)',
+    category: 'Robot Joint / Functional Safety (IEC 61800-5-2)',
+    input: {
+      context: { projectName: '协作机器人六轴手臂 · 腕关节驱动器', projectPhase: 'PVT' },
+      issue: { failurePhenomenon: '产品安全需求要求腕关节驱动器达到 PLd，但现有 STO 功能仅通过主控 MCU 软件封锁 PWM 实现，未接入独立硬件断使能通道' },
+    },
+    expectedPattern: 'J006',
+    expectedCalculation: { '当前 STO 实现方式': 'SOFTWARE_PWM_DISABLE_ONLY', '目标性能等级': 'PLd', 'STO响应时间 (ms)': 12, '要求响应时间上限 (ms)': 20 },
+    expectedRisk: 'High',
+    expectedVeto: true, // 通道独立性不满足，一票否决，不得进入人机共融现场！
+    expectedNextBestAction: '改为双通道硬件 STO（预驱使能引脚 + 门极电源双重切断）或升级安全 MCU 方案，重新申请第三方安全认证',
+    expectedVerification: '故障注入验证任一 STO 通道单独失效时另一通道仍可独立断转矩，示波器实测端到端响应时间',
   },
 ];
 

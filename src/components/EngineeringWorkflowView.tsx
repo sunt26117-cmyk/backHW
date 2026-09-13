@@ -15,7 +15,7 @@ import {
   TestTube2,
 } from 'lucide-react';
 import { CopilotAnalysisResult, IssueCategory, IssueInput, ProjectContext } from '../types';
-import { getDomainDataQuality, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+import { getDomainDataQuality, getEngineeringDomainLabel, resolveEngineeringDomain, resolveEngineeringDomains } from '../utils/scenarioDomainEngine';
 
 interface EngineeringWorkflowViewProps {
   context: ProjectContext;
@@ -197,6 +197,30 @@ export const EngineeringWorkflowView: React.FC<EngineeringWorkflowViewProps> = (
             <span className="px-2.5 py-1 rounded-lg bg-amber-950/60 border border-amber-800/60 text-[11px] text-amber-300">剩余 {context.daysRemaining} 天</span>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/20 p-4">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="text-xs font-semibold text-cyan-300">本工况涉及多个工程域时，后续步骤统一消费同一份跨域事实包</span>
+          <span className="text-[10px] text-slate-500">主导域用于根因排序，关联域用于副作用、验证与 VETO，不会丢参数。</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {resolveEngineeringDomains(issue).map((d, i) => (
+            <span key={d} className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${d === resolveEngineeringDomain(issue) ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>
+              {i === 0 ? 'PRIMARY · ' : 'RELATED · '}{getEngineeringDomainLabel(d)}
+            </span>
+          ))}
+        </div>
+        {result?.multiDomainAnalysis?.crossDomainLinks?.length ? (
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+            {result.multiDomainAnalysis.crossDomainLinks.slice(0, 4).map((link, i) => (
+              <div key={`${link.fromDomain}-${link.toDomain}-${i}`} className="rounded-lg bg-slate-950/50 border border-slate-800 p-2.5">
+                <div className="text-[10px] font-semibold text-slate-300">{getEngineeringDomainLabel(link.fromDomain as any)} → {getEngineeringDomainLabel(link.toDomain as any)}</div>
+                <div className="text-[10px] text-slate-500 mt-1 leading-relaxed">{link.mechanism}</div>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

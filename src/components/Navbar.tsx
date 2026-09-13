@@ -23,13 +23,13 @@ import {
   Trash2,
 } from 'lucide-react';
 
-import { PRESET_SCENARIOS } from '../data/presetScenarios';
 import { AppTheme, ModelApiConfig, PresetScenario } from '../types';
 
 interface NavbarProps {
   currentScenarioId: string;
   onSelectScenario: (scenarioId: string) => void;
   customScenarios?: PresetScenario[];
+  presetScenarios?: PresetScenario[];
   onOpenScenarioManage: () => void;
   onDeleteCustomScenario?: (scenarioId: string) => void;
   isAnalyzing: boolean;
@@ -50,6 +50,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentScenarioId,
   onSelectScenario,
   customScenarios = [],
+  presetScenarios = [],
   onOpenScenarioManage,
   onDeleteCustomScenario,
   isAnalyzing,
@@ -136,8 +137,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const currentScenario =
     customScenarios.find((s) => s.id === currentScenarioId) ||
-    PRESET_SCENARIOS.find((s) => s.id === currentScenarioId) ||
-    PRESET_SCENARIOS[0];
+    presetScenarios.find((s) => s.id === currentScenarioId) ||
+    presetScenarios[0];
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-slate-100 sticky top-0 z-40 transition-colors duration-200">
@@ -189,8 +190,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     ))}
                   </optgroup>
                 )}
-                <optgroup label="📋 车规典型工况库 (14大基准)">
-                  {PRESET_SCENARIOS.map((sc) => (
+                <optgroup label={`📋 车规典型工况库 (${presetScenarios.length})`}>
+                  {presetScenarios.map((sc) => (
                     <option key={sc.id} value={sc.id} className="bg-slate-900 text-slate-100">
                       {sc.title}
                     </option>
@@ -270,7 +271,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="fixed inset-0 z-30"
                     onClick={() => setShowThemeMenu(false)}
                   />
-                  <div className="absolute right-0 mt-2 w-44 rounded-xl bg-slate-900 border border-slate-700 shadow-xl py-1 z-40 text-xs animate-in fade-in zoom-in-95 duration-150">
+                  <div className="ecu-theme-menu absolute right-0 mt-2 w-44 rounded-xl border shadow-xl py-1 z-40 text-xs animate-in fade-in zoom-in-95 duration-150">
                     <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
                       选择界面配色
                     </div>
@@ -281,7 +282,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setTheme('dark');
                         setShowThemeMenu(false);
                       }}
-                      className={`w-full px-3 py-2 flex items-center justify-between text-left hover:bg-slate-800 transition cursor-pointer ${
+                      className={`w-full px-3 py-2 flex items-center justify-between text-left ecu-menu-item-hover transition cursor-pointer ${
                         theme === 'dark' ? 'text-blue-400 font-semibold bg-slate-800/60' : 'text-slate-300'
                       }`}
                     >
@@ -301,7 +302,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setTheme('light');
                         setShowThemeMenu(false);
                       }}
-                      className={`w-full px-3 py-2 flex items-center justify-between text-left hover:bg-slate-800 transition cursor-pointer ${
+                      className={`w-full px-3 py-2 flex items-center justify-between text-left ecu-menu-item-hover transition cursor-pointer ${
                         theme === 'light' ? 'text-blue-400 font-semibold bg-slate-800/60' : 'text-slate-300'
                       }`}
                     >
@@ -321,7 +322,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setTheme('eyecare');
                         setShowThemeMenu(false);
                       }}
-                      className={`w-full px-3 py-2 flex items-center justify-between text-left hover:bg-slate-800 transition cursor-pointer ${
+                      className={`w-full px-3 py-2 flex items-center justify-between text-left ecu-menu-item-hover transition cursor-pointer ${
                         theme === 'eyecare' ? 'text-emerald-400 font-semibold bg-slate-800/60' : 'text-slate-300'
                       }`}
                     >
@@ -374,7 +375,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="fixed inset-0 z-30"
                     onClick={() => setShowBackupMenu(false)}
                   />
-                  <div className="absolute right-0 mt-2 w-72 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl py-2 z-40 text-xs animate-in fade-in zoom-in-95 duration-150">
+                  <div className="ecu-popover absolute right-0 mt-2 w-72 rounded-xl border shadow-2xl py-2 z-40 text-xs animate-in fade-in zoom-in-95 duration-150">
                     <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between">
                       <span>本地备份与离线归档</span>
                       <span className="text-[10px] text-emerald-400 flex items-center">
@@ -545,8 +546,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ))}
                 </optgroup>
               )}
-              <optgroup label="📋 车规典型工况库 (14大基准)">
-                {PRESET_SCENARIOS.map((sc) => (
+              <optgroup label={`📋 车规典型工况库 (${presetScenarios.length})`}>
+                {presetScenarios.map((sc) => (
                   <option key={sc.id} value={sc.id} className="bg-slate-900 text-slate-100">
                     {sc.title}
                   </option>

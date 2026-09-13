@@ -1,7 +1,8 @@
-import { IssueInput, ProjectContext, MeasurementSource } from '../types';
+import { IssueInput, IssueCategory, ProjectContext, MeasurementSource } from '../types';
 
 export type EngineeringDomain =
   | 'BLDC'
+  | 'ROBOT_JOINT'
   | 'EMC_BCI'
   | 'EMC_RE_CE'
   | 'EMC_ESD'
@@ -63,6 +64,47 @@ const P: Record<EngineeringDomain, DomainProfile> = {
       {key:'deadTimeNs',label:'死区',unit:'ns',description:'控制器实际配置',tag:'CONTEXT'},
     ],
     knownPitfalls: ['不能用计算泵升峰值替代示波器实测峰值作为放行证据', 'RDS(on)/Qg/Qgd 不能只看室温 datasheet typ 值'],
+  },
+  ROBOT_JOINT: {
+    key: 'ROBOT_JOINT', title: '机器人/协作臂关节机电系统层：背隙 / 编码器 / 谐振 / 力矩闭环 / STO / 总线周期',
+    question: '减速器与传感链的机械非理想特性、控制环带宽与谐振、以及功能安全与总线实时性，分别在哪个环节吃掉了关节的精度、稳定性与安全裕量？',
+    chain: '谐波/RV减速器背隙与扭转柔性 → 输出侧运动学误差 → 位置/速度环带宽与二质量系统谐振 → 力矩闭环误差链(电流估算 vs 传感器) → 连续再生能量与泄放热设计 → STO/SS1安全通道独立性 → 总线周期与本地环路耦合',
+    formulas: [
+      'θ_output_error ≈ backlash + T_out/K_stiffness (rad→arcmin)',
+      'f_res = (1/2π)·√(K_stiffness·(1/J_motor + 1/(J_load/i²)))，i=减速比',
+      'P_regen_avg ≈ P_regen_peak × duty_decel，需 < 泄放电阻额定连续功率',
+      'Torque_est = Kt·Iq×i×η_gearbox，η_gearbox 随温度/转速漂移直接进入力矩误差',
+      'cycle_ratio = t_bus_cycle / t_local_position_loop，比值过大且无本地插补 → 指令台阶化',
+    ],
+    tests: [
+      '锁定输出端，电机侧正反向缓慢加载，激光/高精度编码器测输出空程与背隙',
+      '扫频/敲击法激励关节输出端，捕捉二质量谐振峰并与速度环带宽比较',
+      '同时记录电流估算力矩与外置力矩传感器读数，覆盖全温区与全速度区间做误差带标定',
+      '连续往复工况下用热电偶/红外记录泄放电阻与减速器温升曲线，覆盖典型作业节拍',
+      '故意在总线侧制造丢包/断线，验证 STO/SS1 触发时间与本地降级策略（斜坡到零/保持/急停）',
+    ],
+    outputs: ['关节输出定位精度裕量', '谐振频率与环路带宽隔离度', '力矩闭环可信度', '泄放电阻连续热裕量', 'STO/SS1独立性判定', '总线周期耦合风险'],
+    measurements: [
+      {key:'gearRatio',label:'减速比',unit:'',description:'谐波/RV减速器传动比',tag:'CONTEXT',required:true},
+      {key:'backlashArcmin',label:'背隙',unit:'arcmin',description:'减速器输出端实测回程间隙',tag:'MEASURED',required:true},
+      {key:'requiredPositionAccuracyArcmin',label:'位置精度要求',unit:'arcmin',description:'客户/系统规格允许的关节输出定位误差',tag:'SPEC',required:true},
+      {key:'torsionalStiffnessNmPerRad',label:'扭转刚度',unit:'Nm/rad',description:'减速器/关节输出扭转刚度',tag:'SPEC'},
+      {key:'outputTorqueNm',label:'输出扭矩',unit:'Nm',description:'当前工况关节输出扭矩',tag:'MEASURED'},
+      {key:'velocityLoopBandwidthHz',label:'速度环带宽',unit:'Hz',description:'控制器速度环设定带宽',tag:'CONTEXT'},
+      {key:'motorInertiaKgm2',label:'电机转子惯量',unit:'kg·m²',description:'电机侧转动惯量',tag:'SPEC'},
+      {key:'loadInertiaKgm2',label:'负载惯量(输出侧折算前)',unit:'kg·m²',description:'关节输出端连杆/负载惯量',tag:'CONTEXT'},
+      {key:'regenPowerPeakW',label:'峰值回馈功率',unit:'W',description:'单次减速动能回馈母线峰值功率',tag:'MEASURED'},
+      {key:'brakingResistorRatedContinuousW',label:'泄放电阻额定连续功率',unit:'W',description:'制动电阻器数据手册连续额定值',tag:'SPEC'},
+      {key:'stoResponseTimeMs',label:'STO响应时间',unit:'ms',description:'安全扭矩关断实测/规格响应时间',tag:'MEASURED'},
+      {key:'busCycleTimeUs',label:'总线周期',unit:'μs',description:'EtherCAT/CANopen等现场总线通信周期',tag:'CONTEXT'},
+    ],
+    knownPitfalls: [
+      '背隙只在空载单方向标定，不代表带载换向时的真实运动学误差（弹性扭转会叠加放大）',
+      '用电流环估算力矩直接当作力控/碰撞检测阈值，忽略减速器效率随温度与速度的漂移',
+      '把车规 ASIL 的软件互锁经验直接套用到 STO/SS1，忽略 IEC 61800-5-2 / ISO 13849-1 要求硬件通道独立性',
+      '只在单关节台架验证节拍与泄放功率，未考虑多关节联动时母线互相支援/叠加的真实工况',
+      '总线丢包只做了"断线立即停"测试，没有验证高频抖动(jitter)累积对位置环平顺性的影响',
+    ],
   },
   EMC_BCI: {
     key:'EMC_BCI', title:'EMC BCI 抗扰度 / 共模耦合物理机理',
@@ -264,6 +306,10 @@ export function resolveEngineeringDomain(issue: IssueInput): EngineeringDomain {
   if (has('EMC') && /BCI|大电流注入|ISO\s*11452-4|注入电流|抗扰度/i.test(text)) return 'EMC_BCI';
   if (has('EMC') && /ESD|静电|ISO\s*10605|放电/i.test(text)) return 'EMC_ESD';
   if (has('Component Alternative')) return 'COMPONENT';
+  // 机器人/协作臂关节的机电系统层问题（背隙、编码器、谐振、力矩闭环、STO、总线周期）
+  // 与车规逆变桥电气物理问题（母线泵升、米勒、死区、热、EMI）属于不同工程层次，
+  // 因此单独分域；若关节的逆变桥本体出问题，仍应勾选 'BLDC Motor Drive' 走 P001~P018。
+  if (has('Robot Joint Drive')) return 'ROBOT_JOINT';
   if (has('BLDC Motor Drive')) return 'BLDC';
   if (has('WCCA')) return /EOL|标定|量产|Cpk|Ppk|残余|校准/i.test(text) ? 'WCCA_EOL' : 'WCCA';
   if (has('Thermal')) return 'THERMAL';
@@ -283,6 +329,7 @@ export function resolveEngineeringDomain(issue: IssueInput): EngineeringDomain {
   // Keyword fallback only when no explicit category resolves the problem.
   if (/BCI|大电流注入|ISO\s*11452-4|注入电流|抗扰度/i.test(text)) return 'EMC_BCI';
   if (/ESD|静电|ISO\s*10605|放电/i.test(text)) return 'EMC_ESD';
+  if (/机器人关节|协作机器人|谐波减速|RV减速|背隙|回程间隙|力矩传感|EtherCAT|CANopen|STO|SS1|安全扭矩关断|关节模组/i.test(text)) return 'ROBOT_JOINT';
   if (/BLDC|泵升|米勒|换相|堵转/i.test(text)) return 'BLDC';
   if (/MOSFET|替代料|换料|停产|缺料|PPAP|PCN/i.test(text)) return 'COMPONENT';
   if (/WCCA|最坏情况|公差链|误差预算|温漂|Cpk|Ppk/i.test(text)) return 'WCCA';
@@ -303,12 +350,72 @@ export function resolveEngineeringDomain(issue: IssueInput): EngineeringDomain {
   return 'GENERAL';
 }
 
+export function resolveEngineeringDomains(issue: IssueInput): EngineeringDomain[] {
+  const categories = issue.issueCategories || [];
+  const seen = new Set<EngineeringDomain>();
+  const domains: EngineeringDomain[] = [];
+  const add = (d: EngineeringDomain) => {
+    if (!seen.has(d)) { seen.add(d); domains.push(d); }
+  };
+
+  // 每个显式分类独立解析一次，避免多分类被 resolveEngineeringDomain 的单一优先级吞掉。
+  for (const category of categories) {
+    const singleIssue: IssueInput = { ...issue, issueCategories: [category] };
+    add(resolveEngineeringDomain(singleIssue));
+  }
+
+  // 文本识别只作为没有显式分类时的兜底；显式多分类不再额外制造噪声域。
+  if (domains.length === 0) add(resolveEngineeringDomain(issue));
+  return domains;
+}
+
+export function getEngineeringDomainLabel(domain: EngineeringDomain): string {
+  const labels: Record<EngineeringDomain, string> = {
+    BLDC:'BLDC / Motor Drive', ROBOT_JOINT:'Robot Joint', EMC_BCI:'EMC / BCI', EMC_RE_CE:'EMC / RE · CE', EMC_ESD:'EMC / ESD',
+    COMPONENT:'Component', WCCA_EOL:'WCCA / EOL', WCCA:'WCCA', THERMAL:'Thermal', POWER:'Power Integrity', POWER_TRANSIENT:'Power Transient',
+    SIGNAL:'Signal Integrity', SAFETY:'Functional Safety', RELIABILITY:'Reliability', DFM:'DFM', PRODUCTION:'Production', COST:'Cost', SCHEDULE:'Schedule', TEST:'Test Failure', CUSTOMER:'Customer Requirement', DEVIATION:'Design Deviation', GENERAL:'General',
+  };
+  return labels[domain] || domain;
+}
+
+export function getDomainRoleMap(issue: IssueInput): Array<{ domain: EngineeringDomain; role: 'PRIMARY' | 'RELATED' }> {
+  const domains = resolveEngineeringDomains(issue);
+  const primary = resolveEngineeringDomain(issue);
+  return [primary, ...domains.filter(d => d !== primary)].map((domain, index) => ({
+    domain,
+    role: index === 0 ? 'PRIMARY' : 'RELATED',
+  }));
+}
+
+export function getDomainMeasurementGroups(issue: IssueInput): Array<{ domain: EngineeringDomain; title: string; fields: DomainMeasurementField[] }> {
+  return getDomainRoleMap(issue).map(({ domain }) => ({
+    domain,
+    title: P[domain].title,
+    fields: P[domain].measurements,
+  }));
+}
+
 export function getDomainPhysics(issue: IssueInput): DomainProfile {
   return P[resolveEngineeringDomain(issue)];
 }
 
 export function getDomainMeasurementFields(issue: IssueInput): DomainMeasurementField[] {
-  return getDomainPhysics(issue).measurements;
+  const merged = new Map<string, DomainMeasurementField>();
+  for (const group of getDomainMeasurementGroups(issue)) {
+    for (const field of group.fields) {
+      const existing = merged.get(field.key);
+      if (!existing) {
+        merged.set(field.key, { ...field });
+      } else {
+        merged.set(field.key, {
+          ...existing,
+          required: Boolean(existing.required || field.required),
+          description: existing.description || field.description,
+        });
+      }
+    }
+  }
+  return [...merged.values()];
 }
 
 export function getDomainDataQuality(issue: IssueInput) {
@@ -385,8 +492,8 @@ export function extractMeasurementsFromText(issue: IssueInput, rawText: string):
 }
 
 
-export function buildScenarioPassFailCriteria(issue: IssueInput, context: ProjectContext): Array<{parameter:string; greenCriteria:string; yellowCriteria:string; redCriteria:string}> {
-  const d = resolveEngineeringDomain(issue);
+export function buildSingleDomainPassFailCriteria(issue: IssueInput, context: ProjectContext, forcedDomain?: EngineeringDomain): Array<{parameter:string; greenCriteria:string; yellowCriteria:string; redCriteria:string}> {
+  const d = forcedDomain || resolveEngineeringDomain(issue);
   const n = (k: string) => {
     const raw = issue.measuredValues?.[k];
     if (raw === undefined || raw === null || raw === '') return NaN;
@@ -396,6 +503,8 @@ export function buildScenarioPassFailCriteria(issue: IssueInput, context: Projec
   switch (d) {
     case 'BLDC':
       return [{parameter:'急停 / 米勒 / 热 / 保护联合门禁',greenCriteria:`母线峰值、Vgs尖峰、Tj与保护时序均满足规格：${req}`,yellowCriteria:'任何一项接近门限或证据不足，追加最坏边界与重复性验证，不直接放行',redCriteria:'任一硬性耐压、Vgs安全或Tj红线超限，立即停止放行并进入物理整改/Plan B'}];
+    case 'ROBOT_JOINT':
+      return [{parameter:`关节精度 / 谐振 / 力矩闭环 / STO / 总线联合门禁 ${req !== '当前项目/客户规格' ? `(${req})` : ''}`,greenCriteria:'输出定位误差、谐振裕量、力矩闭环误差带、泄放电阻连续热裕量均满足规格，STO/SS1 具备硬件独立通道且响应时间达标',yellowCriteria:'单项接近门限或缺少全温/全速度覆盖的实测证据（尤其力矩误差带、泄放电阻连续温升），需追加验证，不直接放行',redCriteria:'定位误差超客户规格、速度环带宽侵入谐振区、STO 仅靠软件禁止 PWM、或泄放电阻长期过载，立即停止放行并回到物理整改'}];
     case 'EMC_BCI':
       return [{parameter:`BCI ${Number.isFinite(n('bciSensitiveFreqMhz'))?n('bciSensitiveFreqMhz'):'目标'} MHz / ${Number.isFinite(n('bciInjectionMa'))?n('bciInjectionMa'):'目标'} mA 功能门禁`,greenCriteria:'注入窗口内关键功能保持，关键采样/通信无不可接受异常，撤除注入后在项目规定恢复窗口内恢复',yellowCriteria:'出现可重复但不影响安全的瞬态偏差，需补充源-路径-受扰体证据与边界验证',redCriteria:'功能失效、进入危险状态、通信持续丢失或恢复超出项目窗口，立即停止放行'}];
     case 'EMC_ESD':
@@ -426,7 +535,29 @@ export function buildScenarioPassFailCriteria(issue: IssueInput, context: Projec
   }
 }
 
+export function buildScenarioPassFailCriteria(issue: IssueInput, context: ProjectContext): Array<{parameter:string; greenCriteria:string; yellowCriteria:string; redCriteria:string}> {
+  const out: Array<{parameter:string; greenCriteria:string; yellowCriteria:string; redCriteria:string}> = [];
+  for (const domain of resolveEngineeringDomains(issue)) {
+    const rows = buildSingleDomainPassFailCriteria(issue, context, domain);
+    for (const row of rows) out.push({ ...row, parameter: `${getEngineeringDomainLabel(domain)} · ${row.parameter}` });
+  }
+  return out;
+}
+
 export function calculateDomainMetrics(issue: IssueInput, context: ProjectContext) {
+  const domains = resolveEngineeringDomains(issue);
+  const all: ReturnType<typeof calculateSingleDomainMetrics> = [];
+  for (const domain of domains) {
+    const metrics = calculateSingleDomainMetrics(issue, context, domain);
+    for (const metric of metrics) {
+      const duplicate = all.some(m => m.label === metric.label && m.value === metric.value);
+      if (!duplicate) all.push({ ...metric, note: `${domain} · ${metric.note}` });
+    }
+  }
+  return all;
+}
+
+export function calculateSingleDomainMetrics(issue: IssueInput, context: ProjectContext, forcedDomain?: EngineeringDomain) {
   const n = (k: string) => {
     const raw = issue.measuredValues?.[k];
     if (raw === undefined || raw === null || raw === '') return NaN;
@@ -434,12 +565,33 @@ export function calculateDomainMetrics(issue: IssueInput, context: ProjectContex
     return Number.isFinite(v) ? v : NaN;
   };
   const finite = (v: number) => Number.isFinite(v);
-  const d = resolveEngineeringDomain(issue);
+  const d = forcedDomain || resolveEngineeringDomain(issue);
   const fieldSource = (key: string) => issue.measurementProvenance?.[key]?.source || issue.measuredValueSource || 'MEASURED';
   const tagFor = (key: string): 'MEASURED'|'BENCHMARK' => fieldSource(key) === 'BENCHMARK' ? 'BENCHMARK' : 'MEASURED';
   const noteFor = (key: string) => tagFor(key) === 'BENCHMARK' ? 'BENCHMARK · 仅演示，请用实测/导入数据覆盖' : `${fieldSource(key)} · 当前输入`;
   const metrics: Array<{label:string; value:string; note:string; tag:'MEASURED'|'CALCULATED'|'SPEC'|'BENCHMARK'}> = [];
-  if (d === 'EMC_BCI') {
+  if (d === 'ROBOT_JOINT') {
+    const backlash = n('backlashArcmin'), stiffness = n('torsionalStiffnessNmPerRad'), torque = n('outputTorqueNm'), reqAccuracy = n('requiredPositionAccuracyArcmin');
+    if (finite(backlash)) metrics.push({label:'背隙',value:`${backlash} arcmin`,note:noteFor('backlashArcmin'),tag:tagFor('backlashArcmin')});
+    if (finite(backlash) && finite(stiffness) && finite(torque) && stiffness > 0) {
+      const windupArcmin = (torque / stiffness) * (180 / Math.PI) * 60;
+      const totalErrorArcmin = backlash + windupArcmin;
+      metrics.push({label:'扭转柔性附加误差',value:`${windupArcmin.toFixed(1)} arcmin`,note:'CALCULATED · T_out/K_stiffness 折算',tag:'CALCULATED'});
+      metrics.push({label:'输出端运动学总误差(估算)',value:`${totalErrorArcmin.toFixed(1)} arcmin`,note:'CALCULATED · 背隙 + 扭转柔性，不含传感器与控制误差',tag:'CALCULATED'});
+      if (finite(reqAccuracy)) metrics.push({label:'定位精度裕量',value:`${(reqAccuracy - totalErrorArcmin).toFixed(1)} arcmin`,note:'规格要求 - 估算总误差',tag:'CALCULATED'});
+    }
+    const jMotor = n('motorInertiaKgm2'), jLoad = n('loadInertiaKgm2'), gearRatio = n('gearRatio'), vBw = n('velocityLoopBandwidthHz');
+    if (finite(stiffness) && finite(jMotor) && jMotor > 0 && finite(jLoad) && finite(gearRatio) && gearRatio > 0) {
+      const jLoadReflected = jLoad / (gearRatio * gearRatio);
+      if (jLoadReflected > 0) {
+        const fRes = (1 / (2 * Math.PI)) * Math.sqrt(stiffness * (1 / jMotor + 1 / jLoadReflected));
+        metrics.push({label:'估算机械谐振频率',value:`${fRes.toFixed(1)} Hz`,note:'CALCULATED · 二质量弹簧系统简化模型',tag:'CALCULATED'});
+        if (finite(vBw) && vBw > 0) metrics.push({label:'谐振/带宽隔离度',value:`${(fRes / vBw).toFixed(2)}×`,note:'CALCULATED · 建议 ≥3×，否则需陷波滤波器',tag:'CALCULATED'});
+      }
+    }
+    const regenPeak = n('regenPowerPeakW'), resistorRated = n('brakingResistorRatedContinuousW');
+    if (finite(regenPeak) && finite(resistorRated) && resistorRated > 0) metrics.push({label:'峰值回馈/泄放电阻额定比',value:`${((regenPeak / resistorRated) * 100).toFixed(0)}%`,note:'CALCULATED · 需结合占空比看平均功率，非直接判据',tag:'CALCULATED'});
+  } else if (d === 'EMC_BCI') {
     const inj=n('bciInjectionMa'), err=n('currentSenseErrorPct'), rec=n('recoveryTimeMs'), icm=n('commonModeCurrentMa'), vnode=n('bciNodeVoltageV');
     if (finite(inj)) metrics.push({label:'BCI注入',value:`${inj} mA`,note:noteFor('bciInjectionMa'),tag:tagFor('bciInjectionMa')});
     if (finite(inj)&&finite(err)&&inj>0) metrics.push({label:'采样敏感度',value:`${(err/inj).toFixed(4)} %/mA`,note:'CALCULATED · Δerror / Iinj，仅作频点比较',tag:'CALCULATED'});

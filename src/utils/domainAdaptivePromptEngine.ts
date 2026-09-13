@@ -1,5 +1,5 @@
 import { IssueInput, ProjectContext } from '../types';
-import { resolveEngineeringDomain, EngineeringDomain } from './scenarioDomainEngine';
+import { resolveEngineeringDomain, resolveEngineeringDomains, EngineeringDomain } from './scenarioDomainEngine';
 
 export interface DomainAdaptiveGuidance {
   domain: EngineeringDomain;
@@ -16,9 +16,10 @@ export interface DomainAdaptiveGuidance {
  */
 export function getDomainAdaptivePromptGuidance(
   issue: IssueInput,
-  context: ProjectContext
+  context: ProjectContext,
+  forcedDomain?: EngineeringDomain
 ): DomainAdaptiveGuidance {
-  const domain = resolveEngineeringDomain(issue);
+  const domain = forcedDomain || resolveEngineeringDomain(issue);
 
   switch (domain) {
     case 'EMC_RE_CE':
@@ -346,6 +347,49 @@ export function getDomainAdaptivePromptGuidance(
         ],
       };
 
+    // === 以下 ROBOT_JOINT 分支为合并两份修改时补充：backHW-main 分支原本没有这个 case
+    // （因为 domainAdaptivePromptEngine.ts 只存在于 backHW-main），
+    // SeniorEng-v1.6-RobotJoint-Extension 分支新增的 'Robot Joint Drive' 分类也从未接入这里，
+    // 若不补上，选择该分类跑云端 AI 分析时会静默落到下面的 BLDC 默认分支。
+    // 内容改写自 scenarioDomainEngine.ts 中已有的 ROBOT_JOINT 领域画像（formulas/tests/knownPitfalls），
+    // 未引入原始文件之外的新工程结论。
+    case 'ROBOT_JOINT':
+      return {
+        domain: 'ROBOT_JOINT',
+        title: '机器人/协作臂关节机电系统层：背隙 / 编码器 / 谐振 / 力矩闭环 / STO / 总线周期',
+        physicsFormulas: `
+- 输出端运动学误差: θ_output_error ≈ backlash + T_out/K_stiffness (rad→arcmin)，背隙与扭转柔性叠加
+- 机械谐振频率 (二质量系统): f_res = (1/2π)·√(K_stiffness·(1/J_motor + 1/(J_load/i²)))，i=减速比
+- 连续再生平均功率: P_regen_avg ≈ P_regen_peak × duty_decel，需 < 泄放电阻额定连续功率
+- 力矩闭环估算: Torque_est = Kt·Iq×i×η_gearbox，η_gearbox 随温度/转速漂移直接进入力矩误差
+- 总线-本地环耦合比: cycle_ratio = t_bus_cycle / t_local_position_loop，比值过大且无本地插补 → 指令台阶化
+        `.trim(),
+        componentSpecs: `
+- 谐波/RV 减速器: 明确背隙等级 (如 ≤3arcmin 高精度级 vs ≤6arcmin 标准级) 与额定/峰值扭矩，如 Harmonic Drive CSF/SHG 系列或 Nabtesco RV 系列；
+- 绝对值编码器: 明确单圈/多圈、供电冗余方式 (电池 vs 无电池多圈)，需标注后备电池最低保数据电压门限；
+- 泄放(制动)电阻: 明确额定连续功率与峰值功率双指标，需按连续往复占空比而非单次峰值选型，并核算散热路径；
+- STO/安全模块: 明确实现方式为纯软件 PWM 禁止还是双通道硬件断使能 (如安全 MCU + 独立驱动使能引脚)，需对应 IEC 61800-5-2 / ISO 13849-1 性能等级。
+        `.trim(),
+        testProtocol: `
+- 背隙/定位精度: 锁定输出端，电机侧正反向缓慢加载，激光跟踪仪或高精度外部编码器实测输出空程与重复定位精度；
+- 谐振/带宽: 扫频或敲击法激励关节输出端，捕捉二质量谐振峰并与速度环带宽比较，评估陷波滤波器需求；
+- 力矩闭环: 同时记录电流估算力矩与外置力矩传感器读数，覆盖全温区与全速度区间做误差带标定；
+- 泄放热设计: 连续往复工况下用热电偶/红外记录泄放电阻与减速器温升曲线，覆盖真实典型作业节拍（而非单次脉冲）；
+- STO/安全: 故障注入验证任一 STO 通道单独失效时另一通道仍可独立断转矩，示波器实测端到端响应时间；总线侧制造丢包/断线，验证降级策略（斜坡到零/保持/急停）。
+        `.trim(),
+        crossDisciplinaryImpact: `
+- 软件/控制协同: 确认速度环带宽设定是否已主动避开二质量谐振峰，力矩闭环阈值是否已按减速器效率漂移做温度补偿；
+- 功能安全协同: STO/SS1 通道独立性与响应时间需第三方安全评审 Sign-off，不能仅凭软件互锁经验套用车规 ASIL 思路；
+- PM/产线协同: 若需更换减速器背隙等级或加装第二编码器实现全闭环，通常涉及结构改动，需与车规 PCB 改版周期分开单独评估工期。
+        `.trim(),
+        prohibitedVagueness: [
+          '严禁只写"背隙有点大/精度不够"，必须给出实测背隙 arcmin 数值及扭转柔性折算后的总误差；',
+          '严禁把电流环估算力矩直接当作力控/碰撞检测阈值，而不核算减速器效率随温度与速度的漂移；',
+          '严禁把车规 ASIL 的软件互锁经验直接套用到 STO/SS1，忽略硬件通道独立性要求；',
+          '严禁只用单次脉冲峰值功率评估泄放电阻选型，而不核算连续往复占空比下的平均功率。',
+        ],
+      };
+
     case 'BLDC':
     default:
       return {
@@ -381,4 +425,16 @@ export function getDomainAdaptivePromptGuidance(
         ],
       };
   }
+}
+
+export function getMultiDomainAdaptivePromptGuidance(issue: IssueInput, context: ProjectContext): { primary: DomainAdaptiveGuidance; related: DomainAdaptiveGuidance[]; all: DomainAdaptiveGuidance[] } {
+  const domains = resolveEngineeringDomains(issue);
+  const primaryDomain = resolveEngineeringDomain(issue);
+  const ordered = [primaryDomain, ...domains.filter(d => d !== primaryDomain)];
+  const all = ordered.map(domain => getDomainAdaptivePromptGuidance(issue, context, domain));
+  return {
+    primary: all[0],
+    related: all.slice(1),
+    all,
+  };
 }

@@ -142,7 +142,7 @@ export const DesignReviewRegressionView: React.FC<DesignReviewRegressionViewProp
           { id: 'DESIGN_REVIEW', label: '1. 阶段性设计评审 (Concept~SOP)' },
           { id: 'WORST_CASE', label: '2. 最坏情况引擎 (Worst Case Engine)' },
           { id: 'COMPONENT_CHANGE', label: '3. 器件变更影响分析 (Change Impact)' },
-          { id: 'GOLD_CASES', label: '4. 黄金标准用例自动回归 (Case01~14)' },
+          { id: 'GOLD_CASES', label: '4. 黄金标准用例自动回归 (Case01~16)' },
         ].map((sub) => (
           <button
             key={sub.id}
@@ -370,10 +370,10 @@ export const DesignReviewRegressionView: React.FC<DesignReviewRegressionViewProp
               <div>
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
                   <FileCheck className="w-4 h-4 text-emerald-400" />
-                  <span>黄金标准回归用例集 (Gold Standard Cases 01 ~ 14)</span>
+                  <span>黄金标准回归用例集 (Gold Standard Cases 01 ~ 16)</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  覆盖电热、急停泵升、米勒、霍尔、48MHz EMI、SOA、死区、采样、堵转等 14 项车规典型硬件难题。
+                  覆盖电热、急停泵升、米勒、霍尔、48MHz EMI、SOA、死区、采样、堵转等 14 项车规典型硬件难题，另加 2 项机器人关节机电系统层难题（背隙定位精度、STO安全通道独立性）。
                 </p>
               </div>
 
@@ -382,7 +382,7 @@ export const DesignReviewRegressionView: React.FC<DesignReviewRegressionViewProp
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow cursor-pointer shrink-0"
               >
                 <Play className="w-3.5 h-3.5" />
-                <span>运行全部 14 个回归测试</span>
+                <span>运行全部 16 个回归测试</span>
               </button>
             </div>
 

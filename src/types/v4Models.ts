@@ -160,6 +160,17 @@ export type BldcPatternId =
   | 'P017' // 电流采样架构决策器
   | 'P018'; // 堵转保护多级判据
 
+// 机器人/协作臂关节机电系统层专项判据 (与上面 P001~P018 车规逆变桥物理模式互补，
+// 由 src/data/robotJointPatternEngine.ts 的 evaluateAllRobotJointPatterns() 产生)
+export type RobotJointPatternId =
+  | 'J001' // 谐波/RV减速器背隙+扭转柔性 → 输出定位精度
+  | 'J002' // 多圈绝对值编码器电池/掉电 → 位置基准丢失
+  | 'J003' // 机械谐振(二质量系统) → 速度环带宽/陷波滤波器
+  | 'J004' // 连续往复再生能量 → 泄放电阻连续热过载
+  | 'J005' // 电流估算力矩 vs 减速器效率漂移/力矩传感器
+  | 'J006' // STO/SS1 安全扭矩关断通道独立性与响应时间
+  | 'J007'; // 现场总线周期(EtherCAT/CANopen) 与本地控制环耦合
+
 export interface PatternOutputItem {
   id: BldcPatternId;
   name: string;
@@ -528,7 +539,7 @@ export interface GoldStandardCase {
     motor?: Partial<MotorModel>;
     powerStage?: Partial<PowerStageModel>;
   };
-  expectedPattern: BldcPatternId;
+  expectedPattern: BldcPatternId | RobotJointPatternId;
   expectedCalculation: Record<string, string | number>;
   expectedRisk: RiskLevel;
   expectedVeto: boolean;

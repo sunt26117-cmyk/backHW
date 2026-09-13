@@ -4,6 +4,8 @@ import { PRESET_SCENARIOS } from './data/presetScenarios';
 import { runExpertAnalysis } from './data/expertEngine';
 import { exportBackupJson, importBackupJson, exportMarkdownReport } from './utils/backupRestore';
 import { loadCustomScenarios, saveCustomScenario, deleteCustomScenario } from './utils/scenarioStorage';
+import { loadAnalysisResult, saveAnalysisResult, deleteAnalysisResult } from './utils/analysisStorage';
+import { orderScenarios, saveScenarioOrder, resetScenarioOrder } from './utils/scenarioLibrary';
 import { Navbar } from './components/Navbar';
 import { ProjectContextView } from './components/ProjectContextView';
 import { AnalysisFactView } from './components/AnalysisFactView';
@@ -76,7 +78,8 @@ const DEFAULT_MODEL_CONFIG: ModelApiConfig = {
 const CURRENT_SCENARIO_STORAGE_KEY = 'ecu_copilot_current_scenario_id';
 
 export default function App() {
-  const [customScenarios, setCustomScenarios] = useState<PresetScenario[]>(() => loadCustomScenarios());
+  const [customScenarios, setCustomScenarios] = useState<PresetScenario[]>(() => orderScenarios(PRESET_SCENARIOS, loadCustomScenarios()).custom);
+  const [presetScenarios, setPresetScenarios] = useState<PresetScenario[]>(() => orderScenarios(PRESET_SCENARIOS, loadCustomScenarios()).presets);
   
   // Restore current scenario ID from localStorage on mount
   const [currentScenarioId, setCurrentScenarioId] = useState<string>(() => {
@@ -84,11 +87,11 @@ export default function App() {
       const savedId = localStorage.getItem(CURRENT_SCENARIO_STORAGE_KEY);
       if (savedId) {
         const customs = loadCustomScenarios();
-        const all = [...customs, ...PRESET_SCENARIOS];
+        const all = [...customs, ...orderScenarios(PRESET_SCENARIOS, customs).presets];
         if (all.some((s) => s.id === savedId)) return savedId;
       }
     } catch {}
-    return PRESET_SCENARIOS[0].id;
+    return orderScenarios(PRESET_SCENARIOS, loadCustomScenarios()).presets[0]?.id || PRESET_SCENARIOS[0].id;
   });
 
   // Restore context matching the selected scenario
@@ -97,11 +100,12 @@ export default function App() {
       const savedId = localStorage.getItem(CURRENT_SCENARIO_STORAGE_KEY);
       if (savedId) {
         const customs = loadCustomScenarios();
-        const found = customs.find((s) => s.id === savedId) || PRESET_SCENARIOS.find((s) => s.id === savedId);
+        const ordered = orderScenarios(PRESET_SCENARIOS, customs);
+        const found = ordered.custom.find((s) => s.id === savedId) || ordered.presets.find((s) => s.id === savedId);
         if (found) return found.context;
       }
     } catch {}
-    return PRESET_SCENARIOS[0].context;
+    return orderScenarios(PRESET_SCENARIOS, loadCustomScenarios()).presets[0]?.context || PRESET_SCENARIOS[0].context;
   });
 
   // Restore issue matching the selected scenario
@@ -110,11 +114,12 @@ export default function App() {
       const savedId = localStorage.getItem(CURRENT_SCENARIO_STORAGE_KEY);
       if (savedId) {
         const customs = loadCustomScenarios();
-        const found = customs.find((s) => s.id === savedId) || PRESET_SCENARIOS.find((s) => s.id === savedId);
+        const ordered = orderScenarios(PRESET_SCENARIOS, customs);
+        const found = ordered.custom.find((s) => s.id === savedId) || ordered.presets.find((s) => s.id === savedId);
         if (found) return found.issue;
       }
     } catch {}
-    return PRESET_SCENARIOS[0].issue;
+    return orderScenarios(PRESET_SCENARIOS, loadCustomScenarios()).presets[0]?.issue || PRESET_SCENARIOS[0].issue;
   });
 
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -245,10 +250,32 @@ export default function App() {
     }
   };
 
-  // Load initial analysis on mount
+  // Restore the last completed analysis for the current scenario.
+  // Only generate a new analysis when this scenario truly has no persisted result.
   useEffect(() => {
+    const savedResult = loadAnalysisResult(currentScenarioId);
+    if (savedResult) {
+      setResult(savedResult);
+      return;
+    }
     runAnalysis(context, issue);
   }, []);
+
+  const handleReorderScenarios = (kind: 'presets' | 'custom', ids: string[]) => {
+    saveScenarioOrder(kind, ids);
+    const ordered = orderScenarios(PRESET_SCENARIOS, customScenarios);
+    setPresetScenarios(ordered.presets);
+    setCustomScenarios(ordered.custom);
+    showToast(kind === 'presets' ? '典型工况顺序已保存' : '我的工况顺序已保存', 'success');
+  };
+
+  const handleResetScenarioOrder = () => {
+    resetScenarioOrder();
+    const ordered = orderScenarios(PRESET_SCENARIOS, customScenarios);
+    setPresetScenarios(ordered.presets);
+    setCustomScenarios(ordered.custom);
+    showToast('已恢复系统默认工况分类与顺序', 'info');
+  };
 
   const handleSelectScenario = (scenarioId: string, customScenario?: PresetScenario) => {
     // Before switching, if currently editing a custom scenario, sync its latest state immediately
@@ -272,19 +299,26 @@ export default function App() {
     } catch {}
 
     const freshCustoms = loadCustomScenarios();
-    setCustomScenarios(freshCustoms);
+    setCustomScenarios(orderScenarios(PRESET_SCENARIOS, freshCustoms).custom);
 
     const found =
       customScenario ||
       freshCustoms.find((sc) => sc.id === scenarioId) ||
-      PRESET_SCENARIOS.find((sc) => sc.id === scenarioId);
+      presetScenarios.find((sc) => sc.id === scenarioId);
     if (found) {
-      setResult(null);
       setContext(found.context);
       const scenarioIssue = customScenario ? found.issue : { ...found.issue, measuredValueSource: found.issue.measuredValueSource || 'BENCHMARK' };
       setIssue(scenarioIssue);
-      runAnalysis(found.context, scenarioIssue);
-      showToast(`已成功载入工程案例：${found.title}`, 'info');
+
+      const savedResult = loadAnalysisResult(found.id);
+      if (savedResult) {
+        setResult(savedResult);
+        showToast(`已恢复工程案例及上次分析结果：${found.title}`, 'info');
+      } else {
+        setResult(null);
+        runAnalysis(found.context, scenarioIssue, found.id);
+        showToast(`已成功载入工程案例：${found.title}`, 'info');
+      }
     }
   };
 
@@ -302,6 +336,7 @@ export default function App() {
         };
         const updatedList = saveCustomScenario(updatedItem);
         setCustomScenarios(updatedList);
+        saveScenarioOrder('custom', customScenarios.map((item) => item.id));
         const timeStr = new Date().toLocaleTimeString();
         setLastSavedAt(timeStr);
         showToast(`已成功保存当前工程【${updatedItem.title}】修改 (${timeStr})`, 'success');
@@ -317,12 +352,12 @@ export default function App() {
   };
 
   const handleLoadSection14 = () => {
-    const bldcScenario = PRESET_SCENARIOS.find((s) => s.id === 'bldc-motor-drive') || PRESET_SCENARIOS[0];
+    const bldcScenario = presetScenarios.find((s) => s.id === 'bldc-motor-drive') || presetScenarios[0];
     setCurrentScenarioId(bldcScenario.id);
     setContext(bldcScenario.context);
     const benchmarkIssue = { ...bldcScenario.issue, measuredValueSource: bldcScenario.issue.measuredValueSource || 'BENCHMARK' };
     setIssue(benchmarkIssue);
-    runAnalysis(bldcScenario.context, benchmarkIssue);
+    runAnalysis(bldcScenario.context, benchmarkIssue, bldcScenario.id);
     setActiveTab('overview');
     showToast('已载入 Section 14 验收工况 (3800rpm BLDC 急停母线泵升 37.8V ｜ 15天)', 'success');
   };
@@ -340,6 +375,7 @@ export default function App() {
       createdAt: new Date().toISOString(),
     };
     const updated = saveCustomScenario(newScenario);
+    saveScenarioOrder('custom', updated.map((item) => item.id));
     setCustomScenarios(updated);
     setCurrentScenarioId(id);
     try {
@@ -348,7 +384,7 @@ export default function App() {
     setContext(ctx);
     setIssue(iss);
     setLastSavedAt(new Date().toLocaleTimeString());
-    runAnalysis(ctx, iss);
+    runAnalysis(ctx, iss, id);
     showToast(`已成功保存并切换为自定义工况【${title}】`, 'success');
   };
 
@@ -356,16 +392,17 @@ export default function App() {
     const target = customScenarios.find((s) => s.id === scenarioId);
     const targetTitle = target?.title || '自定义工程';
     const updated = deleteCustomScenario(scenarioId);
+    deleteAnalysisResult(scenarioId);
     setCustomScenarios(updated);
     if (currentScenarioId === scenarioId) {
-      const fallback = PRESET_SCENARIOS[0];
+      const fallback = presetScenarios[0];
       setCurrentScenarioId(fallback.id);
       try {
         localStorage.setItem(CURRENT_SCENARIO_STORAGE_KEY, fallback.id);
       } catch {}
       setContext(fallback.context);
       setIssue(fallback.issue);
-      runAnalysis(fallback.context, fallback.issue);
+      runAnalysis(fallback.context, fallback.issue, fallback.id);
     }
     showToast(`已删除工程【${targetTitle}】`, 'info');
   };
@@ -382,8 +419,9 @@ export default function App() {
       if (imported.issue) setIssue(imported.issue);
       if (imported.result) {
         setResult(imported.result);
+        saveAnalysisResult(currentScenarioId, imported.result);
       } else if (imported.context && imported.issue) {
-        runAnalysis(imported.context, imported.issue);
+        runAnalysis(imported.context, imported.issue, currentScenarioId);
       }
       showToast(`已成功从本地备份文件恢复 (${file.name})`, 'success');
     } catch (err: any) {
@@ -400,7 +438,7 @@ export default function App() {
     showToast('工程决策评审纪要 (CDR) 已导出为 Markdown 文件', 'success');
   };
 
-  const runAnalysis = async (ctx = context, iss = issue) => {
+  const runAnalysis = async (ctx = context, iss = issue, scenarioId = currentScenarioId) => {
     const runId = ++analysisRunId.current;
     setResult(null);
     setIsAnalyzing(true);
@@ -420,7 +458,10 @@ export default function App() {
           modelIdentifier: 'ECU-Hardware-RuleEngine-Deterministic-v4.2',
           transparencyNote: '本报告由本地车规物理公式库与标准规则树严格推演生成，0 网络请求，0 数据出境，无幻觉。',
         };
-        if (runId === analysisRunId.current) setResult(localResult);
+        if (runId === analysisRunId.current) {
+          setResult(localResult);
+          saveAnalysisResult(scenarioId, localResult);
+        }
       } catch (err: any) {
         console.error('Local expert engine execution failed:', err);
         showToast(`本地专家引擎分析失败：${err?.message || '未知错误'}`, 'error');
@@ -454,7 +495,10 @@ export default function App() {
               transparencyNote: `本分析由云端大模型 [${modelConfig.model || 'AI'}] 基于输入参数即时推理生成，包含针对车规工况的探索性建议，建议结合物理实测验证。`,
             };
           }
-          if (runId === analysisRunId.current) setResult(finalResult);
+          if (runId === analysisRunId.current) {
+            setResult(finalResult);
+            saveAnalysisResult(scenarioId, finalResult);
+          }
           setIsAnalyzing(false);
           return;
         }
@@ -472,7 +516,10 @@ export default function App() {
         modelIdentifier: 'Deterministic-RuleEngine-Fallback',
         transparencyNote: '由于云端模型未响应或未配置有效密钥，系统已自动平滑降级至本地确定性专家引擎，确保决策分析不中断。',
       };
-      if (runId === analysisRunId.current) setResult(localResult);
+      if (runId === analysisRunId.current) {
+        setResult(localResult);
+        saveAnalysisResult(scenarioId, localResult);
+      }
       showToast('云端模型未响应，已自动平滑降级至本地确定性专家引擎', 'info');
     } catch (err) {
       console.warn('API route fallback to expert engine:', err);
@@ -487,7 +534,10 @@ export default function App() {
         modelIdentifier: 'Deterministic-RuleEngine-Local',
         transparencyNote: '当前网络无法访问云端大模型，已启动本地离线引擎保障分析。',
       };
-      if (runId === analysisRunId.current) setResult(localResult);
+      if (runId === analysisRunId.current) {
+        setResult(localResult);
+        saveAnalysisResult(scenarioId, localResult);
+      }
     } finally {
       if (runId === analysisRunId.current) setIsAnalyzing(false);
     }
@@ -495,7 +545,7 @@ export default function App() {
 
   const currentScenario =
     customScenarios.find((s) => s.id === currentScenarioId) ||
-    PRESET_SCENARIOS.find((s) => s.id === currentScenarioId);
+    presetScenarios.find((s) => s.id === currentScenarioId);
 
   return (
     <div className="ecu-app-shell min-h-screen bg-slate-950 text-slate-100 flex flex-col antialiased selection:bg-blue-600 selection:text-white transition-colors duration-200">
@@ -520,6 +570,7 @@ export default function App() {
         currentScenarioId={currentScenarioId}
         onSelectScenario={(id) => handleSelectScenario(id)}
         customScenarios={customScenarios}
+        presetScenarios={presetScenarios}
         onOpenScenarioManage={() => setIsScenarioManageOpen(true)}
         isAnalyzing={isAnalyzing}
         onRunAnalysis={() => runAnalysis(context, issue)}
@@ -711,7 +762,9 @@ export default function App() {
         currentContext={context}
         currentIssue={issue}
         customScenarios={customScenarios}
-        presetScenarios={PRESET_SCENARIOS}
+        presetScenarios={presetScenarios}
+        onReorderScenarios={handleReorderScenarios}
+        onResetScenarioOrder={handleResetScenarioOrder}
         currentScenarioId={currentScenarioId}
         onSelectScenario={(id, customSc) => handleSelectScenario(id, customSc)}
         onSaveAsCustomScenario={handleSaveAsCustomScenario}

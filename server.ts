@@ -6,7 +6,8 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
 import { runExpertAnalysis } from './src/data/expertEngine';
-import { getDomainAdaptivePromptGuidance } from './src/utils/domainAdaptivePromptEngine';
+import { getDomainAdaptivePromptGuidance, getMultiDomainAdaptivePromptGuidance } from './src/utils/domainAdaptivePromptEngine';
+import { resolveEngineeringDomain, resolveEngineeringDomains, getEngineeringDomainLabel } from './src/utils/scenarioDomainEngine';
 import { buildDualTimelinePlan } from './src/utils/dualTimelineEngine';
 
 dotenv.config();
@@ -361,7 +362,37 @@ function validateAndEnrichAiResult(parsed: any, baseline: any, modelName: string
   parsed.next24HourPlan = parsed.next24HourPlan || baseline.next24HourPlan;
   parsed.edrRecord = parsed.edrRecord || baseline.edrRecord;
   parsed.redTeamChallenge = parsed.redTeamChallenge || baseline.redTeamChallenge;
+  const md = parsed.multiDomainAnalysis;
+  if (!md || typeof md !== 'object') {
+    const primaryDomain = resolveEngineeringDomain(issue);
+    const relatedDomains = resolveEngineeringDomains(issue).filter((d) => d !== primaryDomain);
+    parsed.multiDomainAnalysis = {
+      primaryDomain,
+      relatedDomains,
+      domainAssessments: [primaryDomain, ...relatedDomains].map((domain, index) => ({
+        domain, role: index === 0 ? 'PRIMARY' : 'RELATED', evidenceLevel: 'UNKNOWN', knownFacts: [],
+        evidenceGaps: ['当前云端分析未返回该域的独立证据分层'], minimumValidation: '补齐该领域最小实测证据后重新判断', domainConclusion: '证据不足，不宣称根因已锁定',
+      })),
+      crossDomainLinks: [],
+      crossDomainVetoes: [],
+    };
+  } else {
+    md.primaryDomain = md.primaryDomain || resolveEngineeringDomain(issue);
+    md.relatedDomains = Array.isArray(md.relatedDomains) ? md.relatedDomains : resolveEngineeringDomains(issue).filter((d) => d !== md.primaryDomain);
+    md.domainAssessments = Array.isArray(md.domainAssessments) ? md.domainAssessments : [];
+    md.crossDomainLinks = Array.isArray(md.crossDomainLinks) ? md.crossDomainLinks : [];
+    md.crossDomainVetoes = Array.isArray(md.crossDomainVetoes) ? md.crossDomainVetoes : [];
+  }
   parsed.dualTimeline = parsed.dualTimeline || baseline.dualTimeline || buildDualTimelinePlan(parsed, context, issue);
+  parsed.decisionFrame = parsed.decisionFrame || {
+    decisionQuestion: `${context?.nextMilestone || '下一工程门禁'} 前是否具备继续推进的证据条件`,
+    currentDecisionGate: context?.nextMilestone || '当前工程门禁',
+    decisionWindow: `剩余 ${context?.daysRemaining ?? 14} 天`,
+    bestNextAction: parsed.finalRecommendation?.immediateSteps?.[0]?.action || '先完成当前关键未知量的最小验证',
+    minimumEvidenceToProceed: [parsed.finalRecommendation?.preconditions?.[0] || '关键实测证据达到项目规范门槛'],
+    unknownsBlockingDecision: Array.isArray(parsed.unknowns) ? parsed.unknowns.slice(0, 5) : ['关键输入数据不足'],
+    reversalCriteria: Array.isArray(parsed.finalRecommendation?.reEvaluationTriggers) ? parsed.finalRecommendation.reEvaluationTriggers.slice(0, 5) : ['关键实测证据与当前物理假设不一致'],
+  };
 
   parsed.provenance = {
     executionMode: 'ONLINE_AI_INFERRED',
@@ -385,7 +416,11 @@ app.post('/api/copilot/analyze', async (req, res) => {
     const baseline = runExpertAnalysis(context, issue);
 
     // 2. 根据输入实测与工况自适应匹配车规 Chief Engineer 专属专业领域指导
-    const domainGuidance = getDomainAdaptivePromptGuidance(issue, context);
+    const primaryDomain = resolveEngineeringDomain(issue);
+    const relatedDomains = resolveEngineeringDomains(issue).filter(d => d !== primaryDomain);
+    const multiDomainGuidance = getMultiDomainAdaptivePromptGuidance(issue, context);
+    const domainGuidance = multiDomainGuidance.primary;
+    const multiDomainEvidence = multiDomainGuidance.all.map((g) => `- ${g.title}\n  物理链：${g.physicsFormulas}\n  测试规约：${g.testProtocol}\n  跨域影响：${g.crossDisciplinaryImpact}\n  禁止空话：${g.prohibitedVagueness.join('；')}`).join('\n\n');
 
     const prompt = `
 你必须严格基于以下【输入工况】、【实测数据】与【${domainGuidance.title}】专属车规物理基准进行硬件工程决策推演，绝不脱离实际随意作答：
@@ -401,7 +436,9 @@ app.post('/api/copilot/analyze', async (req, res) => {
 - 直属硬件领导风格: ${context?.hwLeadStyle || 'AGILE_DELIVERY'}
 
 【2. 输入实测问题与工程顾虑 (ENGINEERING ISSUE)】
-- 识别工程领域: 【${domainGuidance.title}】
+- 主导工程领域: 【${getEngineeringDomainLabel(primaryDomain)}】
+- 涉及工程领域: 【${resolveEngineeringDomains(issue).map(getEngineeringDomainLabel).join(' / ') || getEngineeringDomainLabel(primaryDomain)}】
+- 关联工程领域: 【${relatedDomains.map(getEngineeringDomainLabel).join(' / ') || '无'}】
 - 领域分类: ${issue?.issueCategories?.join(', ') || '硬件工程'}
 - 规范要求: ${issue?.requirement || '未定义'}
 - 实际测量结果: ${issue?.actualMeasurement || '未提供实测'}
@@ -411,7 +448,8 @@ app.post('/api/copilot/analyze', async (req, res) => {
 - 核心工程顾虑: ${issue?.engineeringConcern || '未提供顾虑'}
 - 关键实测数值: ${JSON.stringify(issue?.measuredValues || {}, null, 2)}
 
-【3. 本工程专属物理领域与推演规约 (${domainGuidance.title})】
+【3. 本工程多域物理与推演规约】
+【主导域：${domainGuidance.title}】
 [物理公式与机理推导要求]:
 ${domainGuidance.physicsFormulas}
 
@@ -427,30 +465,59 @@ ${domainGuidance.crossDisciplinaryImpact}
 [严禁出现的空话反模式 (PROHIBITED VAGUENESS)]:
 ${domainGuidance.prohibitedVagueness.map(v => `* ${v}`).join('\n')}
 
+[所有涉及工程域的并行指导：]
+${multiDomainEvidence}
+
 【4. 车规基准定锚 (AUTOMOTIVE BENCHMARK)】
 - 确定性问题定性: ${baseline?.coreConclusion?.problemSummary || ''}
 - 核心物理失效机理: ${baseline?.physicalMechanism?.rootCauseAnalysis || ''}
 - 关键物理影响因子: ${JSON.stringify(baseline?.physicalMechanism?.keyPhysicalFactors || [], null, 2)}
 - 综合风险评级基准: ${baseline?.riskRatings?.overallRisk || 'Medium-High'} (${baseline?.riskRatings?.overallRiskScore ?? 75}分)
-=============================================
+- 多域确定性基线: ${JSON.stringify(baseline?.multiDomainAnalysis || {}, null, 2)}
+
+【5. 工程事实分层 (EVIDENCE HIERARCHY)】
+必须逐条区分以下信息等级，任何低等级信息不得伪装成高等级事实：
+- A · USER_MEASURED / 实测：用户明确提供的仪器读数、测试记录、样件现象；可直接作为现状证据。
+- B · IMPORTED / 外部导入：用户提供的测试报告、供应商数据、客户协议摘录；引用时说明来源。
+- C · SPEC / 规范：客户要求、项目规范、标准条款；不得自行创造不存在的限值。
+- D · CALCULATED / 物理计算：由输入实测值和明确公式计算得到；必须写出关键输入。
+- E · ASSUMPTION / 工程假设：用于推演但尚未证实；必须显式标为“假设”。
+- F · AI_INFERENCE / AI 推断：只能作为候选解释或方案，禁止写成已验证根因。
+- 当关键数据缺失时，不得补造数值。必须进入 unknowns，并说明“缺什么数据 + 为什么影响决策 + 最小验证方法”。
+
+【6. 当前决策态 (DECISION STATE)】
+请先在脑中建立以下状态，再输出结果：
+- 当前真正需要做的决定：${context?.nextMilestone || '下一工程门禁'} 前，当前缺陷能否继续推进/进入下一阶段。
+- 当前决策窗口：${context?.daysRemaining ?? 14} 天。
+- 主要硬约束：${context?.costConstraint || '未定义成本约束'}。
+- 当前样件边界：${context?.sampleStatus || '未定义'}。
+- 必须识别：当前最关键的 decision gate、最小证据集、最大未知量、方案被推翻的触发条件。
 
 【执行指令与车规专家落地硬性约束】
 1. 【深度咬合专属领域公式与器件规格】：
-   - 必须严格应用上述【${domainGuidance.title}】中的物理公式与机理进行量化推导，严禁张冠李戴（例如在 EMC 辐射问题上算电机动能，或在 WCCA 精度问题上测相电压）；
-   - 方案中必须包含具体的元器件量化参数与车规主流成熟料号参考（参考上述推荐规格）；
-2. 【台架实操抓波与判定规程】：
-   - 在候选方案的 verificationMethod 及 finalRecommendation.immediateSteps 中，必须严格遵守上述给出的测试仪器、探头接法、测点位置与合格量化判据；
+   - 必须严格应用上述【${domainGuidance.title}】中的物理公式与机理进行量化推导，严禁张冠李戴；
+   - 只有在输入或领域指导明确支持时，才允许给出具体器件参数/料号；无法确认时必须标记“待选型确认”，不得虚构库存、交期或适配性。
+2. 【候选方案必须围绕当前决策窗口排序】:
+   - 每个候选方案必须回答：为什么适合/不适合当前工期、样件、成本和安全门禁；最快何时取得决定性证据；最晚何时必须切换；若不推荐，主拒绝理由是什么。
+3. 【台架实操抓波与判定规程】：
+   - 在候选方案的 verificationMethod 及 finalRecommendation.immediateSteps 中，必须给出“测什么、在哪里测、用什么仪器/探头、Pass/Fail 门槛”；
+   - 如果当前输入没有可靠的量化门槛，不得自行制造一个标准值，应返回“需要确认的规范/设计门槛”。
 3. 【时间红线与不可接受行为】：
-   - 距离交付里程碑仅剩【${context?.daysRemaining ?? 14}天】：
-     * 若方案需要重新设计 PCB 投板打样（通常需 18~25 天），必须在工期风险中明确标定延期导致违约索赔，或直接标记一票否决 (veto)；
-     * 重点推演原位元器件替换（BOM Patching，0天板卡改动工期）及底层软件/控制标定（SW Calibration，24~48小时固件输出）；
-   - 在 engineeringDocs.pmDecisionEmail 中输出可直接复制发送给 PM 的汇报邮件，条理清晰、技术依据确凿、明确界定责任边界。
-4. 【双层工程时间轴机制 (Dual-Timeline Action Architecture)】：
+   - 必须把 ${context?.daysRemaining ?? 14} 天决策窗口与每个方案的实际工期相乘分析；PCB 改版、样件、软件标定等耗时只能作为“当前项目假设/经验估算”，除非输入已明确确认，不得视为普遍事实；
+   - 对每个方案必须明确：最快可验证时间、最晚决策点、错过门禁的直接后果；
+   - 在 engineeringDocs.pmDecisionEmail 中输出可直接复制发送给 PM 的汇报邮件，明确事实、风险、请求决策和责任边界。
+5. 【双层工程时间轴机制 (Dual-Timeline Action Architecture)】：
    车规硬件决策绝非单选，必须在 JSON 中严格清晰拆分：
    - containmentPhase (T+24h 应急临时遏制)：0天板卡改版工期（如原位阻容焊盘替换、软件寄存器展频、线束磁环套管），在当前交样节点前 24~48h 内完成闭环，满足装车验证与试验准入；
    - permanentPhase (下一版本永久纠正)：在后续改版（如 C 样或 DV2/PV）中重新投板优化地回路/布局布线，彻底根除物理根因，通过全套规范与 PPAP Level 3 审查；
    - strategicTradeoff：清晰阐明为什么绝不能只选其一，而是需要双轨闭环协同推进。
-5. 严格输出符合预定义 JSON Schema 的纯 JSON 文本，包含全部必须键。
+6. 【多域决策硬约束】：
+   - 必须明确 primary domain 与 related domains；
+   - 必须识别至少 1 条真实的跨域因果链，格式为“域A → 物理机制 → 域B”，不得只罗列标签；
+   - 每个涉及域都必须给出证据充足度、关键缺口与最小验证项；
+   - 候选方案必须同时评价其对所有涉及域的正面收益、负面副作用和潜在一票否决项；
+   - 任何一个硬门限域触发 VETO 时，不得因为另一个域改善而判定整体放行。
+7. 严格输出符合预定义 JSON Schema 的纯 JSON 文本，包含全部必须键。
 
 Return a single JSON object with these exact keys:
 {
@@ -458,6 +525,29 @@ Return a single JSON object with these exact keys:
     "problemSummary": "...",
     "recommendedMeasure": "...",
     "reasonSummary": "..."
+  },
+  "decisionFrame": {
+    "decisionQuestion": "明确回答当前到底要不要继续推进/放行/改版",
+    "currentDecisionGate": "当前所处工程门禁，例如 DV 准入 / EOL 放行 / 设计冻结",
+    "decisionWindow": "结合 daysRemaining 给出实际剩余决策窗口",
+    "bestNextAction": "未来 24 小时最应该做的一件事",
+    "minimumEvidenceToProceed": ["进入下一阶段前必须拿到的最小证据"],
+    "unknownsBlockingDecision": ["当前阻塞决策的关键未知量"],
+    "reversalCriteria": ["出现哪些证据时必须推翻当前推荐方案"]
+  },
+  "multiDomainAnalysis": {
+    "primaryDomain": "BLDC",
+    "relatedDomains": ["EMC_RE_CE", "THERMAL"],
+    "domainAssessments": [
+      { "domain": "BLDC", "role": "PRIMARY", "evidenceLevel": "MEDIUM", "knownFacts": ["..."], "evidenceGaps": ["..."], "minimumValidation": "...", "domainConclusion": "..." },
+      { "domain": "EMC_RE_CE", "role": "RELATED", "evidenceLevel": "LOW", "knownFacts": ["..."], "evidenceGaps": ["..."], "minimumValidation": "...", "domainConclusion": "..." }
+    ],
+    "crossDomainLinks": [
+      { "fromDomain": "BLDC", "toDomain": "EMC_RE_CE", "mechanism": "...", "evidenceBasis": "MEASURED|CALCULATED|ASSUMPTION|AI_INFERENCE", "impact": "..." }
+    ],
+    "crossDomainVetoes": [
+      { "condition": "...", "blocks": ["DV_RELEASE"], "rationale": "..." }
+    ]
   },
   "riskRatings": {
     "overallRisk": "High|Medium-High|Medium|Low",
@@ -508,8 +598,12 @@ Return a single JSON object with these exact keys:
       "timeCost": "...",
       "failureConsequence": "...",
       "preconditions": "...",
-      "verificationMethod": "...",
-      "planB": "..."
+      "verificationMethod": "必须具体到测点/仪器/判据",
+      "planB": "...",
+      "decisionFit": "为什么它适合/不适合当前工期、样件、成本与安全门禁",
+      "fastestValidation": "最快多久能拿到决定性证据",
+      "latestDecisionPoint": "最晚在第几天必须做出切换决定",
+      "rejectionReason": "若不推荐，明确说明拒绝它的主因"
     }
   ],
   "finalRecommendation": {

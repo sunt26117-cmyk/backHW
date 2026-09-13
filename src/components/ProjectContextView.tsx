@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ProjectContext, IssueInput, IssueCategory, ProjectPhase, AsilLevel, HwLeadStyle, IssueAttachment } from '../types';
-import { getDomainDataQuality, getDomainMeasurementFields, extractMeasurementsFromText, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+import { getDomainDataQuality, getDomainMeasurementFields, getDomainMeasurementGroups, getEngineeringDomainLabel, extractMeasurementsFromText, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 import {
   Layers,
   AlertCircle,
@@ -47,6 +47,7 @@ const ALL_CATEGORIES: IssueCategory[] = [
   'Thermal',
   'Power',
   'BLDC Motor Drive',
+  'Robot Joint Drive',
   'Signal Integrity',
   'Reliability',
   'Functional Safety',
@@ -815,6 +816,13 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
                 </div>
                 <div className="mt-2 h-1.5 rounded bg-slate-800 overflow-hidden"><div className="h-full bg-cyan-500" style={{width:`${pct}%`}} /></div>
                 {quality.missingRequired.length > 0 && <div className="mt-2 text-[10px] text-amber-300">尚缺：{quality.missingRequired.join('、')}</div>}
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {getDomainMeasurementGroups(issue).map((group, i) => {
+                    const groupRequired = group.fields.filter(f => f.required);
+                    const done = groupRequired.filter(f => { const v = issue.measuredValues?.[f.key]; return v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v)); }).length;
+                    return <span key={group.domain} className="px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-[10px] text-slate-400">{i === 0 ? '主导' : '关联'} · {getEngineeringDomainLabel(group.domain)} · {done}/{groupRequired.length} 必填</span>;
+                  })}
+                </div>
               </div>
             );
           })()}
@@ -823,28 +831,49 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
               <label className="text-slate-300 font-semibold">实测参数回填（真实数据优先）</label>
               <span className="text-[10px] text-blue-300">{issue.measuredValueSource === 'USER_MEASURED' ? '来源：工程师手工实测回填' : issue.measuredValueSource === 'IMPORTED' ? '来源：导入原始数据文件' : issue.measuredValueSource === 'BENCHMARK' ? '来源：系统基准样例（仅演示，可覆盖）' : '来源：尚未标记'}</span>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+            <div className="space-y-4">
               {(() => {
-                const fields = getDomainMeasurementFields(issue);
-                return fields.map((field) => {
-                  const key = field.key;
-                  const label = field.label;
+                const renderedKeys = new Set<string>();
+                return getDomainMeasurementGroups(issue).map((group, groupIndex) => {
+                  const visibleFields = group.fields.filter((field) => {
+                    if (renderedKeys.has(field.key)) return false;
+                    renderedKeys.add(field.key);
+                    return true;
+                  });
                   return (
-                    <div key={key}>
-                      <label className="block text-[10px] text-slate-500 mb-1">{label} {field.unit ? `(${field.unit})` : ''}{field.required ? ' *' : ''} <span className={((issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)) === 'BENCHMARK') ? 'text-violet-400' : field.tag === 'CALCULATED' ? 'text-cyan-500' : field.tag === 'SPEC' ? 'text-amber-500' : 'text-emerald-500'}>· {issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)}</span></label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={issue.measuredValues?.[key] ?? ''}
-                        disabled={field.tag === 'CALCULATED'}
-                        onChange={(e) => setIssue({
-                          ...issue,
-                          measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value === '' ? '' : Number(e.target.value) },
-                          measuredValueSource: 'USER_MEASURED',
-                          measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
-                        })}
-                        className={`w-full border rounded px-2 py-1.5 font-mono text-xs focus:outline-none ${field.tag === 'CALCULATED' ? 'bg-slate-900/50 border-cyan-900/40 text-cyan-300 cursor-not-allowed' : 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'}`}
-                      />
+                    <div key={group.domain} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-1 rounded-md text-[10px] font-semibold border ${groupIndex === 0 ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>
+                            {groupIndex === 0 ? '主导域' : '涉及域'}
+                          </span>
+                          <span className="text-xs font-semibold text-slate-200">{getEngineeringDomainLabel(group.domain)}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500">{visibleFields.length} 个显示参数 · 重复字段只保留一份共享输入</span>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                    {visibleFields.map((field) => {
+                      const key = field.key;
+                      return (
+                        <div key={key}>
+                          <label className="block text-[10px] text-slate-500 mb-1">{field.label} {field.unit ? `(${field.unit})` : ''}{field.required ? ' *' : ''} <span className={((issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)) === 'BENCHMARK') ? 'text-violet-400' : field.tag === 'CALCULATED' ? 'text-cyan-500' : field.tag === 'SPEC' ? 'text-amber-500' : 'text-emerald-500'}>· {issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)}</span></label>
+                          <input
+                            type="number"
+                            step="any"
+                            value={issue.measuredValues?.[key] ?? ''}
+                            disabled={field.tag === 'CALCULATED'}
+                            onChange={(e) => setIssue({
+                              ...issue,
+                              measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value === '' ? '' : Number(e.target.value) },
+                              measuredValueSource: 'USER_MEASURED',
+                              measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+                            })}
+                            className={`w-full border rounded px-2 py-1.5 font-mono text-xs focus:outline-none ${field.tag === 'CALCULATED' ? 'bg-slate-900/50 border-cyan-900/40 text-cyan-300 cursor-not-allowed' : 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'}`}
+                          />
+                        </div>
+                      );
+                    })}
+                      </div>
                     </div>
                   );
                 });

@@ -1,7 +1,7 @@
 import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } from '../types';
 import { generateBldcMotorAnalysis } from './bldcMotorExpert';
 import { applyScenarioDynamicLayer } from '../utils/scenarioDynamic';
-import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, getEngineeringDomainLabel, resolveEngineeringDomain, resolveEngineeringDomains } from '../utils/scenarioDomainEngine';
 import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 import {
   getEmcPillars,
@@ -109,6 +109,51 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   // 补全升级2：双层工程时间轴 (T+24h 应急临时遏制 vs 下一阶段永久纠正)
   result.dualTimeline = result.dualTimeline || buildDualTimelinePlan(result, context, issue);
 
+  // 多域基线：保留原有“主导域”规则，同时为所有涉及领域生成独立证据就绪度、计算结果与域级结论，供后续页面和 AI 决策消费。
+  const domainList = resolveEngineeringDomains(issue);
+  const primaryDomain = resolveEngineeringDomain(issue);
+  const domainAssessments = domainList.map((domainKey) => {
+    const quality = getDomainDataQuality({ ...issue, issueCategories: issue.issueCategories.filter((cat) => {
+      const probe = resolveEngineeringDomain({ ...issue, issueCategories: [cat] });
+      return probe === domainKey;
+    }) });
+    const domainProfile = getDomainPhysics({ ...issue, issueCategories: (() => {
+      const cat = issue.issueCategories.find((c) => resolveEngineeringDomain({ ...issue, issueCategories: [c] }) === domainKey);
+      return cat ? [cat] : issue.issueCategories;
+    })() });
+    return {
+      domain: domainKey,
+      role: domainKey === primaryDomain ? 'PRIMARY' as const : 'RELATED' as const,
+      evidenceLevel: quality.complete ? 'HIGH' : quality.requiredDone > 0 ? 'MEDIUM' : 'LOW',
+      knownFacts: Object.entries(issue.measuredValues || {}).filter(([, v]) => v !== '' && v !== null && v !== undefined).map(([k, v]) => `${k}=${v}`).slice(0, 12),
+      evidenceGaps: quality.missingRequired,
+      minimumValidation: domainProfile.tests[0] || '补齐该领域关键实测证据',
+      domainConclusion: `${getEngineeringDomainLabel(domainKey)}：${quality.complete ? '关键必填证据基本齐备，可进入域级判断' : `证据不足，尚缺 ${quality.missingRequired.slice(0, 3).join('、') || '关键边界数据'}`}`,
+      chain: domainProfile.chain,
+      outputs: domainProfile.outputs,
+    };
+  });
+  const crossDomainLinks = buildCrossDomainLinks(domainList, issue);
+  const crossDomainVetoes = domainList.filter((d) => ['SAFETY', 'THERMAL', 'EMC_RE_CE', 'EMC_BCI', 'EMC_ESD'].includes(d)).map((d) => ({
+    condition: `${getEngineeringDomainLabel(d)} 存在硬门限超限或功能失败证据`,
+    blocks: ['下一工程门禁放行'],
+    rationale: '跨域改善不能抵消该领域的硬门禁；需先完成该领域的合格证据闭环。',
+  }));
+  result.multiDomainAnalysis = {
+    primaryDomain,
+    relatedDomains: domainList.filter((d) => d !== primaryDomain),
+    domainAssessments,
+    crossDomainLinks,
+    crossDomainVetoes,
+  };
+  const combinedMetrics = calculateDomainMetrics(issue, context);
+  if (combinedMetrics.length) {
+    result.analysisBasis = {
+      ...(result.analysisBasis || { ruleInputs: [], measuredInputs: [], calculatedOutputs: [], assumptions: [], fixedTemplateFields: [] }),
+      calculatedOutputs: Array.from(new Set([...(result.analysisBasis?.calculatedOutputs || []), ...combinedMetrics.map((m) => `${m.label}=${m.value}`)])),
+    };
+  }
+
   // 补充一票否决类型与工程改动影响度评估 (Change Impact)
   if (result.candidateActions) {
     result.candidateActions = result.candidateActions.map((action) => {
@@ -170,6 +215,25 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   };
 
   return result;
+}
+
+function buildCrossDomainLinks(domains: import('../utils/scenarioDomainEngine').EngineeringDomain[], issue: IssueInput) {
+  const has = (d: string) => domains.includes(d as import('../utils/scenarioDomainEngine').EngineeringDomain);
+  const links: Array<{ fromDomain: string; toDomain: string; mechanism: string; evidenceBasis: string; impact: string }> = [];
+  const add = (a: string, b: string, mechanism: string, impact: string) => {
+    if (has(a) && has(b)) links.push({ fromDomain: a, toDomain: b, mechanism, evidenceBasis: Object.keys(issue.measuredValues || {}).length ? 'MEASURED|CALCULATED' : 'ASSUMPTION', impact });
+  };
+  add('BLDC','EMC_RE_CE','高 dv/dt / di/dt 与寄生电容、线束共模电流耦合形成高频发射','可能改善/恶化 RE/CE，需用频谱+共模电流 A/B 证据判断');
+  add('BLDC','THERMAL','开关与导通损耗进入结温，参数漂移反过来改变开关行为','Tj/SOA 是 BLDC 放行的独立硬门禁');
+  add('BLDC','POWER_TRANSIENT','急停/再生能量转入 DC-Link，引起母线泵升','Vbus 峰值与器件耐压共同决定放行边界');
+  add('BLDC','POWER','负载与换相瞬态通过寄生 L/C 形成过冲与跌落','电源轨/母线测点需与控制状态同步');
+  add('EMC_BCI','SIGNAL','射频注入经共模路径转为差模/敏感节点扰动','通信/ADC 功能状态必须与注入窗口同步记录');
+  add('EMC_ESD','SAFETY','ESD 瞬态可能造成复位、通信中断或潜在损伤并触发安全状态需求','功能安全不能只用“自动恢复”替代门禁证据');
+  add('THERMAL','RELIABILITY','长期热应力提高参数漂移和老化损伤','寿命结论必须结合任务剖面而非单点 Tj');
+  add('COMPONENT','EMC_RE_CE','Qgd / tr/tf / 寄生差异改变 dv/dt 与高频激励','替代料必须验证 EMC 不出现回归');
+  add('COMPONENT','THERMAL','Rds(on) / switching loss 差异改变 Ptotal 与 Tj','Spec 等价不等于使用条件等价');
+  add('WCCA','THERMAL','温漂与自热共同进入总误差预算','校准不能替代最坏热边界证据');
+  return links;
 }
 
 function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): number {

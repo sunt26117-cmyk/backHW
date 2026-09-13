@@ -26,6 +26,11 @@ import {
   evaluateAllBldcPatterns,
   BldcEvaluationInput,
 } from '../data/bldcPatternEngine';
+import {
+  evaluateAllRobotJointPatterns,
+  deriveRobotJointEvaluationInput,
+  JointPatternOutputItem,
+} from '../data/robotJointPatternEngine';
 import { BldcPatternId, ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
 import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
 import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
@@ -81,6 +86,15 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
   const scenarioDomain = useMemo(() => getDomainPhysics(issue), [issue]);
   const domainMetrics = useMemo(() => calculateDomainMetrics(issue, context), [issue, context]);
 
+  // 机器人关节机电系统层专项判据 (J001~J007)：与 P001~P018 互补，仅在 ROBOT_JOINT 场景下计算与展示。
+  const isRobotJointScenario = scenarioDomainKey === 'ROBOT_JOINT';
+  const jointParams = useMemo(() => deriveRobotJointEvaluationInput(issue), [issue]);
+  const jointPatternResults = useMemo(() => {
+    if (!isRobotJointScenario) return [] as JointPatternOutputItem[];
+    return evaluateAllRobotJointPatterns(jointParams);
+  }, [jointParams, isRobotJointScenario]);
+  const [expandedJointPatternId, setExpandedJointPatternId] = useState<string | null>(null);
+
   if (!isBldcScenario) {
     return (
       <div className="space-y-6">
@@ -116,6 +130,65 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5"><h2 className="text-sm font-bold text-white mb-3">当前工况确定性计算框架</h2><div className="space-y-2">{scenarioDomain.formulas.map((x,i)=><div key={i} className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-300"><span className="text-cyan-300 font-mono mr-2">{i+1}</span>{x}</div>)}</div>{(result?.physicalMechanism.keyPhysicalFactors || []).length>0 && <div className="mt-4"><div className="text-xs font-semibold text-slate-400 mb-2">当前工况关键物理因子</div>{(result?.physicalMechanism.keyPhysicalFactors || []).slice(0,6).map((f,i)=><div key={i} className="text-xs text-slate-300 border-l-2 border-cyan-500/40 pl-3 mb-2"><b>{f.factor}</b>：{f.description}</div>)}</div>}<div className="mt-4 bg-cyan-950/20 border border-cyan-900/50 rounded-lg p-3 text-xs text-cyan-100"><b>工程输出：</b>{scenarioDomain.outputs.join(' · ')}</div></div>
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5"><h2 className="text-sm font-bold text-white mb-3">当前工况验证闭环</h2><div className="space-y-2">{scenarioDomain.tests.map((x,i)=><div key={i} className="text-xs text-slate-300 bg-slate-950 rounded-lg p-3 border border-slate-800"><span className="text-emerald-400 mr-2">✓</span>{x}</div>)}</div><div className="mt-4 text-xs text-slate-300 bg-slate-950/60 border border-slate-800 rounded-lg p-3">根因：{result?.physicalMechanism.rootCauseAnalysis || issue.engineeringConcern}</div><div className="mt-3"><div className="text-[10px] text-slate-500 mb-1">当前已录入结构化实测值</div><div className="flex flex-wrap gap-1.5">{Object.entries(issue.measuredValues || {}).filter(([,v]) => v !== '' && v !== null && v !== undefined).map(([k,v]) => <span key={k} className="px-2 py-1 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-emerald-300">MEASURED · {k}={String(v)}</span>)}{!Object.entries(issue.measuredValues || {}).some(([,v]) => v !== '' && v !== null && v !== undefined) && <span className="text-[10px] text-slate-500">暂无结构化实测值，请在 1.统一工程输入 回填</span>}</div></div></div>
         </div>
+
+        {isRobotJointScenario && (
+          <div className="bg-slate-900 border border-purple-800/40 rounded-xl p-5">
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">机电系统层专项引擎</span>
+                <span>关节机电系统判据 (J001 ~ J007)</span>
+              </h2>
+              <span className="text-[10px] text-slate-500">与 P001~P018 互补：逆变桥本体问题请勾选 "BLDC Motor Drive"</span>
+            </div>
+            <div className="text-[11px] text-slate-500 mb-3">背隙/编码器/谐振/力矩闭环/泄放热设计/STO/总线周期 — 车规 BLDC 工程师转岗机器人关节最容易缺失的一层知识</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {jointPatternResults.map((jp) => {
+                const isOpen = expandedJointPatternId === jp.id;
+                return (
+                  <div key={jp.id} className={`rounded-lg border p-3 cursor-pointer transition ${jp.vetoTriggered ? 'border-red-600/60 bg-red-950/20' : jp.triggered ? 'border-amber-700/50 bg-slate-950' : 'border-slate-800 bg-slate-950/60'}`} onClick={() => setExpandedJointPatternId(isOpen ? null : jp.id)}>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="px-1.5 py-0.5 rounded font-mono text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">{jp.id}</span>
+                      <div className="flex items-center gap-1.5">
+                        {jp.vetoTriggered && <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-600/80 text-white font-semibold">VETO</span>}
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded border ${jp.riskLevel === 'High' ? 'text-red-300 border-red-800 bg-red-950/40' : jp.riskLevel === 'Medium-High' ? 'text-amber-300 border-amber-800 bg-amber-950/30' : jp.riskLevel === 'Medium' ? 'text-yellow-300 border-yellow-800 bg-yellow-950/30' : 'text-emerald-300 border-emerald-800 bg-emerald-950/30'}`}>{jp.riskLevel}</span>
+                      </div>
+                    </div>
+                    <div className="text-xs font-semibold text-white leading-snug mb-1.5">{jp.name}</div>
+                    {isOpen && (
+                      <div className="mt-2 space-y-2 border-t border-slate-800 pt-2">
+                        <div className="text-[10px] text-slate-400 font-mono leading-relaxed">{jp.corePhysicalChain}</div>
+                        {jp.vetoTriggered && jp.vetoReason && (
+                          <div className="text-[10px] text-red-200 bg-red-950/50 border border-red-800/60 rounded p-2">{jp.vetoReason}</div>
+                        )}
+                        <div className="rounded border border-slate-800 overflow-hidden">
+                          {Object.entries(jp.calculatedValues).map(([k, v], i) => (
+                            <div key={k} className={`flex items-center justify-between px-2 py-1 text-[10px] ${i % 2 === 0 ? 'bg-slate-950' : 'bg-slate-900/50'}`}>
+                              <span className="text-slate-500">{k}</span>
+                              <span className="font-mono font-semibold text-cyan-300">{String(v)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-semibold text-emerald-400 mb-1">推荐候选对策</div>
+                          <ul className="list-disc list-inside space-y-0.5 text-[10px] text-slate-300">{jp.candidateMeasures.map((m, i) => <li key={i}>{m}</li>)}</ul>
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-semibold text-amber-400 mb-1">潜在副作用</div>
+                          <ul className="list-disc list-inside space-y-0.5 text-[10px] text-slate-300">{jp.sideEffects.map((s, i) => <li key={i}>{s}</li>)}</ul>
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-semibold text-blue-400 mb-1">验证项</div>
+                          <ul className="list-disc list-inside space-y-0.5 text-[10px] text-slate-300">{jp.verificationItems.map((v, i) => <li key={i}>{v}</li>)}</ul>
+                        </div>
+                      </div>
+                    )}
+                    {!isOpen && <div className="text-[10px] text-slate-500">点击展开计算细节、候选对策与验证项 →</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     );
   }

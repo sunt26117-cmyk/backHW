@@ -610,3 +610,482 @@ body {
 .ecu-topbar-row { width: 100%; min-width: 0; }
 .ecu-nav-scroll { width: 100%; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
 .ecu-card-grid { min-width: 0; }
+
+/* ============================================================================
+   ECU COPILOT V2: SEMANTIC THEME / MENU ACCESSIBILITY
+   Keep engineering state colors readable while allowing the three themes to
+   share the same component structure.
+   ============================================================================ */
+.ecu-text-primary { color: #e5e7eb; }
+.ecu-text-secondary { color: #cbd5e1; }
+.ecu-text-muted { color: #94a3b8; }
+.ecu-divider { border-color: #334155; }
+.ecu-panel-header { background: rgba(15, 23, 42, 0.96); }
+.ecu-modal-backdrop { background: rgba(2, 6, 23, 0.78); backdrop-filter: blur(8px); }
+.ecu-modal-panel, .ecu-popover, .ecu-theme-menu {
+  background: #0f172a;
+  color: #e5e7eb;
+  border-color: #334155;
+}
+.ecu-accent-soft { background: rgba(37, 99, 235, 0.14); color: #60a5fa; border-color: rgba(59, 130, 246, 0.35); }
+.ecu-badge { font: 600 10px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 2px 7px; border-radius: 999px; background: rgba(59, 130, 246, 0.14); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); }
+.ecu-segment-group { display: inline-flex; padding: 3px; border-radius: 10px; border: 1px solid #334155; background: #111827; }
+.ecu-segment, .ecu-segment-active { border-radius: 7px; padding: 7px 12px; cursor: pointer; transition: .15s ease; font-weight: 600; }
+.ecu-segment { color: #94a3b8; }
+.ecu-segment-active { background: #2563eb; color: white; }
+.ecu-chip, .ecu-chip-active { border-radius: 999px; padding: 5px 9px; cursor: pointer; border: 1px solid #334155; transition: .15s ease; font-weight: 600; }
+.ecu-chip { background: #111827; color: #94a3b8; }
+.ecu-chip-active { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+.ecu-primary-button { background: #2563eb; color: white; border: 1px solid #3b82f6; border-radius: 8px; padding: 6px 11px; font-weight: 600; cursor: pointer; transition: .15s ease; }
+.ecu-primary-button:hover { background: #1d4ed8; }
+.ecu-secondary-button { background: #1e293b; color: #cbd5e1; border: 1px solid #475569; border-radius: 8px; padding: 6px 11px; font-weight: 600; cursor: pointer; transition: .15s ease; }
+.ecu-secondary-button:hover { background: #334155; color: white; }
+.ecu-danger-icon-button { background: transparent; color: #f87171; border: 1px solid transparent; border-radius: 8px; padding: 6px; cursor: pointer; }
+.ecu-danger-icon-button:hover { background: rgba(127, 29, 29, .35); border-color: rgba(248, 113, 113, .35); }
+.ecu-input { width: 100%; background: #020617; color: #f8fafc; border: 1px solid #475569; border-radius: 8px; padding: 9px 11px; outline: none; }
+.ecu-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.16); }
+.ecu-input::placeholder { color: #64748b; }
+.ecu-label { color: #cbd5e1; font-weight: 600; }
+.ecu-info-banner { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid rgba(59,130,246,.3); background: rgba(30,64,175,.15); color: #cbd5e1; border-radius: 10px; line-height: 1.55; }
+.ecu-scenario-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid #334155; border-radius: 12px; background: rgba(15,23,42,.72); cursor: grab; transition: .15s ease; }
+.ecu-scenario-row:hover { border-color: #64748b; transform: translateY(-1px); }
+.ecu-scenario-row-current { border-color: rgba(59,130,246,.7); background: rgba(30,64,175,.22); }
+.ecu-drag-handle { color: #64748b; cursor: grab; }
+.ecu-index-badge { color: #93c5fd; border: 1px solid rgba(96,165,250,.25); background: rgba(59,130,246,.1); }
+.ecu-category-badge, .ecu-current-badge, .ecu-custom-badge { display: inline-flex; align-items: center; gap: 3px; border-radius: 999px; padding: 2px 6px; font-size: 10px; font-weight: 600; }
+.ecu-category-badge { color: #94a3b8; background: #1e293b; border: 1px solid #475569; }
+.ecu-current-badge { color: #34d399; background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.3); }
+.ecu-custom-badge { color: #c084fc; background: rgba(168,85,247,.12); border: 1px solid rgba(168,85,247,.3); }
+.ecu-empty-state { padding: 32px 16px; text-align: center; color: #64748b; border: 1px dashed #334155; border-radius: 12px; }
+.ecu-summary-card { padding: 14px; border: 1px solid #334155; border-radius: 12px; background: rgba(15,23,42,.66); }
+.ecu-template-card { text-align: left; border: 1px solid #334155; background: #0f172a; border-radius: 12px; padding: 13px; cursor: pointer; transition: .15s ease; }
+.ecu-template-card:hover { border-color: #64748b; }
+.ecu-template-card-active { border-color: #3b82f6; background: rgba(30,64,175,.18); box-shadow: 0 0 0 1px rgba(59,130,246,.15); }
+.ecu-menu-item-hover:hover { background: rgba(148,163,184,.12); }
+
+[data-theme="light"] .ecu-text-primary { color: #0f172a; }
+[data-theme="light"] .ecu-text-secondary { color: #334155; }
+[data-theme="light"] .ecu-text-muted { color: #64748b; }
+[data-theme="light"] .ecu-divider { border-color: #d1d5db; }
+[data-theme="light"] .ecu-panel-header { background: #ffffff; }
+[data-theme="light"] .ecu-modal-backdrop { background: rgba(15,23,42,.34); }
+[data-theme="light"] .ecu-modal-panel, [data-theme="light"] .ecu-popover, [data-theme="light"] .ecu-theme-menu { background: #ffffff; color: #0f172a; border-color: #cbd5e1; }
+[data-theme="light"] .ecu-accent-soft { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+[data-theme="light"] .ecu-badge { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+[data-theme="light"] .ecu-segment-group { background: #f1f5f9; border-color: #cbd5e1; }
+[data-theme="light"] .ecu-segment { color: #475569; }
+[data-theme="light"] .ecu-chip { background: #f8fafc; color: #475569; border-color: #cbd5e1; }
+[data-theme="light"] .ecu-chip-active { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+[data-theme="light"] .ecu-secondary-button { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
+[data-theme="light"] .ecu-secondary-button:hover { background: #e2e8f0; color: #0f172a; }
+[data-theme="light"] .ecu-input { background: #ffffff; color: #0f172a; border-color: #94a3b8; }
+[data-theme="light"] .ecu-info-banner { background: #eff6ff; color: #334155; border-color: #bfdbfe; }
+[data-theme="light"] .ecu-scenario-row { background: #ffffff; border-color: #d1d5db; }
+[data-theme="light"] .ecu-scenario-row-current { background: #eff6ff; border-color: #60a5fa; }
+[data-theme="light"] .ecu-category-badge { color: #475569; background: #f1f5f9; border-color: #cbd5e1; }
+[data-theme="light"] .ecu-empty-state { border-color: #cbd5e1; }
+[data-theme="light"] .ecu-summary-card { background: #f8fafc; border-color: #d1d5db; }
+[data-theme="light"] .ecu-template-card { background: #ffffff; border-color: #cbd5e1; }
+[data-theme="light"] .ecu-menu-item-hover:hover { background: #f1f5f9; }
+
+[data-theme="eyecare"] .ecu-text-primary { color: #27342c; }
+[data-theme="eyecare"] .ecu-text-secondary { color: #405247; }
+[data-theme="eyecare"] .ecu-text-muted { color: #63766a; }
+[data-theme="eyecare"] .ecu-divider { border-color: #c8d3ca; }
+[data-theme="eyecare"] .ecu-panel-header { background: #eef3ed; }
+[data-theme="eyecare"] .ecu-modal-backdrop { background: rgba(54, 68, 57, .32); }
+[data-theme="eyecare"] .ecu-modal-panel, [data-theme="eyecare"] .ecu-popover, [data-theme="eyecare"] .ecu-theme-menu { background: #f3f7f1; color: #27342c; border-color: #c8d3ca; }
+[data-theme="eyecare"] .ecu-accent-soft { background: #e2eee3; color: #256345; border-color: #a7c6ad; }
+[data-theme="eyecare"] .ecu-badge { background: #e5eee4; color: #315d43; border-color: #aac5b0; }
+[data-theme="eyecare"] .ecu-segment-group { background: #e5ece3; border-color: #c0cfc2; }
+[data-theme="eyecare"] .ecu-segment { color: #526257; }
+[data-theme="eyecare"] .ecu-chip { background: #f0f4ee; color: #526257; border-color: #c0cfc2; }
+[data-theme="eyecare"] .ecu-chip-active { background: #dceade; color: #2d6544; border-color: #9bbb9f; }
+[data-theme="eyecare"] .ecu-secondary-button { background: #e2e9df; color: #405247; border-color: #b7c6b9; }
+[data-theme="eyecare"] .ecu-secondary-button:hover { background: #d5dfd3; color: #27342c; }
+[data-theme="eyecare"] .ecu-input { background: #fbfcf9; color: #27342c; border-color: #a9b9ab; }
+[data-theme="eyecare"] .ecu-info-banner { background: #e5eee4; color: #405247; border-color: #b4c9b7; }
+[data-theme="eyecare"] .ecu-scenario-row { background: #f5f8f3; border-color: #c8d3ca; }
+[data-theme="eyecare"] .ecu-scenario-row-current { background: #e5eee4; border-color: #8eaf96; }
+[data-theme="eyecare"] .ecu-category-badge { color: #526257; background: #e6ece3; border-color: #bcc9bd; }
+[data-theme="eyecare"] .ecu-empty-state { border-color: #c8d3ca; }
+[data-theme="eyecare"] .ecu-summary-card { background: #edf2eb; border-color: #c8d3ca; }
+[data-theme="eyecare"] .ecu-template-card { background: #f5f8f3; border-color: #c8d3ca; }
+[data-theme="eyecare"] .ecu-menu-item-hover:hover { background: #e5ece3; }
+
+/* Menus/dropdowns: never leave dark-theme text colors on light backgrounds. */
+[data-theme="light"] .ecu-popover .text-slate-300,
+[data-theme="light"] .ecu-popover .text-slate-400,
+[data-theme="light"] .ecu-popover .text-slate-500,
+[data-theme="light"] .ecu-theme-menu .text-slate-300,
+[data-theme="light"] .ecu-theme-menu .text-slate-400,
+[data-theme="light"] .ecu-theme-menu .text-slate-500,
+[data-theme="eyecare"] .ecu-popover .text-slate-300,
+[data-theme="eyecare"] .ecu-popover .text-slate-400,
+[data-theme="eyecare"] .ecu-popover .text-slate-500,
+[data-theme="eyecare"] .ecu-theme-menu .text-slate-300,
+[data-theme="eyecare"] .ecu-theme-menu .text-slate-400,
+[data-theme="eyecare"] .ecu-theme-menu .text-slate-500 { color: #405247 !important; }
+
+[data-theme="light"] .ecu-popover .text-slate-100,
+[data-theme="light"] .ecu-popover .text-white,
+[data-theme="eyecare"] .ecu-popover .text-slate-100,
+[data-theme="eyecare"] .ecu-popover .text-white { color: #0f172a !important; }
+
+/* ============================================================================
+   THEME 3.1: GLOBAL CONTRAST SAFETY NET
+   The original UI uses many dark-theme Tailwind utility classes directly.
+   These final rules make those utilities readable in the two light themes
+   without forcing every existing component to be rewritten immediately.
+   ============================================================================ */
+
+[data-theme="light"],
+[data-theme="eyecare"] {
+  --theme-text-primary: #172033;
+  --theme-text-secondary: #334155;
+  --theme-text-muted: #556274;
+  --theme-control-bg: #ffffff;
+  --theme-control-border: #9aa8b8;
+}
+
+[data-theme="eyecare"] {
+  --theme-text-primary: #243229;
+  --theme-text-secondary: #3d5043;
+  --theme-text-muted: #53675a;
+  --theme-control-bg: #fbfcf9;
+  --theme-control-border: #9db0a1;
+}
+
+/* Dark-theme neutral text utilities become readable on light backgrounds. */
+[data-theme="light"] .text-slate-100,
+[data-theme="light"] .text-slate-200,
+[data-theme="light"] .text-slate-300,
+[data-theme="light"] .text-slate-400,
+[data-theme="light"] .text-slate-500,
+[data-theme="eyecare"] .text-slate-100,
+[data-theme="eyecare"] .text-slate-200,
+[data-theme="eyecare"] .text-slate-300,
+[data-theme="eyecare"] .text-slate-400,
+[data-theme="eyecare"] .text-slate-500 {
+  color: var(--theme-text-secondary) !important;
+}
+
+[data-theme="light"] .text-slate-100,
+[data-theme="eyecare"] .text-slate-100 {
+  color: var(--theme-text-primary) !important;
+}
+
+[data-theme="light"] .text-slate-500,
+[data-theme="eyecare"] .text-slate-500 {
+  color: var(--theme-text-muted) !important;
+}
+
+/* Any white text on a light/sage surface should become dark, except explicit
+   solid action controls. The latter are restored below. */
+[data-theme="light"] .text-white,
+[data-theme="eyecare"] .text-white {
+  color: var(--theme-text-primary) !important;
+}
+
+/* Complete readable mappings for accent text that is normally pastel in dark UI. */
+[data-theme="light"] .text-blue-100,
+[data-theme="light"] .text-blue-200,
+[data-theme="light"] .text-blue-300,
+[data-theme="light"] .text-blue-400,
+[data-theme="eyecare"] .text-blue-100,
+[data-theme="eyecare"] .text-blue-200,
+[data-theme="eyecare"] .text-blue-300,
+[data-theme="eyecare"] .text-blue-400 { color: #1d4ed8 !important; }
+
+[data-theme="light"] .text-emerald-100,
+[data-theme="light"] .text-emerald-200,
+[data-theme="light"] .text-emerald-300,
+[data-theme="light"] .text-emerald-400,
+[data-theme="eyecare"] .text-emerald-100,
+[data-theme="eyecare"] .text-emerald-200,
+[data-theme="eyecare"] .text-emerald-300,
+[data-theme="eyecare"] .text-emerald-400 { color: #047857 !important; }
+
+[data-theme="light"] .text-amber-100,
+[data-theme="light"] .text-amber-200,
+[data-theme="light"] .text-amber-300,
+[data-theme="light"] .text-amber-400,
+[data-theme="eyecare"] .text-amber-100,
+[data-theme="eyecare"] .text-amber-200,
+[data-theme="eyecare"] .text-amber-300,
+[data-theme="eyecare"] .text-amber-400 { color: #a16207 !important; }
+
+[data-theme="light"] .text-red-100,
+[data-theme="light"] .text-red-200,
+[data-theme="light"] .text-red-300,
+[data-theme="light"] .text-red-400,
+[data-theme="eyecare"] .text-red-100,
+[data-theme="eyecare"] .text-red-200,
+[data-theme="eyecare"] .text-red-300,
+[data-theme="eyecare"] .text-red-400 { color: #b91c1c !important; }
+
+[data-theme="light"] .text-purple-100,
+[data-theme="light"] .text-purple-200,
+[data-theme="light"] .text-purple-300,
+[data-theme="light"] .text-purple-400,
+[data-theme="eyecare"] .text-purple-100,
+[data-theme="eyecare"] .text-purple-200,
+[data-theme="eyecare"] .text-purple-300,
+[data-theme="eyecare"] .text-purple-400 { color: #6d28d9 !important; }
+
+[data-theme="light"] .text-indigo-100,
+[data-theme="light"] .text-indigo-200,
+[data-theme="light"] .text-indigo-300,
+[data-theme="light"] .text-indigo-400,
+[data-theme="eyecare"] .text-indigo-100,
+[data-theme="eyecare"] .text-indigo-200,
+[data-theme="eyecare"] .text-indigo-300,
+[data-theme="eyecare"] .text-indigo-400 { color: #4338ca !important; }
+
+[data-theme="light"] .text-cyan-100,
+[data-theme="light"] .text-cyan-200,
+[data-theme="light"] .text-cyan-300,
+[data-theme="light"] .text-cyan-400,
+[data-theme="eyecare"] .text-cyan-100,
+[data-theme="eyecare"] .text-cyan-200,
+[data-theme="eyecare"] .text-cyan-300,
+[data-theme="eyecare"] .text-cyan-400 { color: #0e7490 !important; }
+
+[data-theme="light"] .text-teal-100,
+[data-theme="light"] .text-teal-200,
+[data-theme="light"] .text-teal-300,
+[data-theme="light"] .text-teal-400,
+[data-theme="eyecare"] .text-teal-100,
+[data-theme="eyecare"] .text-teal-200,
+[data-theme="eyecare"] .text-teal-300,
+[data-theme="eyecare"] .text-teal-400 { color: #0f766e !important; }
+
+[data-theme="light"] .text-rose-100,
+[data-theme="light"] .text-rose-200,
+[data-theme="light"] .text-rose-300,
+[data-theme="light"] .text-rose-400,
+[data-theme="eyecare"] .text-rose-100,
+[data-theme="eyecare"] .text-rose-200,
+[data-theme="eyecare"] .text-rose-300,
+[data-theme="eyecare"] .text-rose-400 { color: #be123c !important; }
+
+[data-theme="light"] .text-orange-100,
+[data-theme="light"] .text-orange-200,
+[data-theme="light"] .text-orange-300,
+[data-theme="light"] .text-orange-400,
+[data-theme="eyecare"] .text-orange-100,
+[data-theme="eyecare"] .text-orange-200,
+[data-theme="eyecare"] .text-orange-300,
+[data-theme="eyecare"] .text-orange-400 { color: #c2410c !important; }
+
+[data-theme="light"] .text-yellow-100,
+[data-theme="light"] .text-yellow-200,
+[data-theme="light"] .text-yellow-300,
+[data-theme="light"] .text-yellow-400,
+[data-theme="eyecare"] .text-yellow-100,
+[data-theme="eyecare"] .text-yellow-200,
+[data-theme="eyecare"] .text-yellow-300,
+[data-theme="eyecare"] .text-yellow-400 { color: #a16207 !important; }
+
+/* Dark neutral panels that otherwise become dark text on dark-ish surfaces. */
+[data-theme="light"] .bg-slate-700,
+[data-theme="light"] .bg-slate-700\/70,
+[data-theme="light"] .bg-slate-700\/80,
+[data-theme="light"] .bg-slate-800,
+[data-theme="light"] .bg-slate-800\/40,
+[data-theme="light"] .bg-slate-800\/50,
+[data-theme="light"] .bg-slate-800\/60,
+[data-theme="light"] .bg-slate-800\/80,
+[data-theme="light"] .bg-slate-800\/90,
+[data-theme="eyecare"] .bg-slate-700,
+[data-theme="eyecare"] .bg-slate-700\/70,
+[data-theme="eyecare"] .bg-slate-700\/80,
+[data-theme="eyecare"] .bg-slate-800,
+[data-theme="eyecare"] .bg-slate-800\/40,
+[data-theme="eyecare"] .bg-slate-800\/50,
+[data-theme="eyecare"] .bg-slate-800\/60,
+[data-theme="eyecare"] .bg-slate-800\/80,
+[data-theme="eyecare"] .bg-slate-800\/90 {
+  background-color: #eef2f6 !important;
+}
+
+[data-theme="eyecare"] .bg-slate-700,
+[data-theme="eyecare"] .bg-slate-700\/70,
+[data-theme="eyecare"] .bg-slate-700\/80,
+[data-theme="eyecare"] .bg-slate-800,
+[data-theme="eyecare"] .bg-slate-800\/40,
+[data-theme="eyecare"] .bg-slate-800\/50,
+[data-theme="eyecare"] .bg-slate-800\/60,
+[data-theme="eyecare"] .bg-slate-800\/80,
+[data-theme="eyecare"] .bg-slate-800\/90 {
+  background-color: #e5ece6 !important;
+}
+
+/* Restore white text on deliberate solid action buttons/badges. */
+[data-theme="light"] button.bg-blue-600,
+[data-theme="light"] button.bg-blue-500,
+[data-theme="light"] button.bg-indigo-600,
+[data-theme="light"] button.bg-indigo-500,
+[data-theme="light"] button.bg-cyan-600,
+[data-theme="light"] button.bg-cyan-500,
+[data-theme="light"] button.bg-emerald-600,
+[data-theme="light"] button.bg-emerald-500,
+[data-theme="light"] button.bg-red-600,
+[data-theme="light"] button.bg-red-500,
+[data-theme="light"] button.bg-amber-600,
+[data-theme="light"] button.bg-amber-500,
+[data-theme="eyecare"] button.bg-blue-600,
+[data-theme="eyecare"] button.bg-blue-500,
+[data-theme="eyecare"] button.bg-indigo-600,
+[data-theme="eyecare"] button.bg-indigo-500,
+[data-theme="eyecare"] button.bg-cyan-600,
+[data-theme="eyecare"] button.bg-cyan-500,
+[data-theme="eyecare"] button.bg-emerald-600,
+[data-theme="eyecare"] button.bg-emerald-500,
+[data-theme="eyecare"] button.bg-red-600,
+[data-theme="eyecare"] button.bg-red-500,
+[data-theme="eyecare"] button.bg-amber-600,
+[data-theme="eyecare"] button.bg-amber-500 {
+  color: #ffffff !important;
+}
+
+[data-theme="light"] button.bg-blue-600 *,
+[data-theme="light"] button.bg-blue-500 *,
+[data-theme="light"] button.bg-indigo-600 *,
+[data-theme="light"] button.bg-indigo-500 *,
+[data-theme="light"] button.bg-cyan-600 *,
+[data-theme="light"] button.bg-cyan-500 *,
+[data-theme="light"] button.bg-emerald-600 *,
+[data-theme="light"] button.bg-emerald-500 *,
+[data-theme="light"] button.bg-red-600 *,
+[data-theme="light"] button.bg-red-500 *,
+[data-theme="light"] button.bg-amber-600 *,
+[data-theme="light"] button.bg-amber-500 *,
+[data-theme="eyecare"] button.bg-blue-600 *,
+[data-theme="eyecare"] button.bg-blue-500 *,
+[data-theme="eyecare"] button.bg-indigo-600 *,
+[data-theme="eyecare"] button.bg-indigo-500 *,
+[data-theme="eyecare"] button.bg-cyan-600 *,
+[data-theme="eyecare"] button.bg-cyan-500 *,
+[data-theme="eyecare"] button.bg-emerald-600 *,
+[data-theme="eyecare"] button.bg-emerald-500 *,
+[data-theme="eyecare"] button.bg-red-600 *,
+[data-theme="eyecare"] button.bg-red-500 *,
+[data-theme="eyecare"] button.bg-amber-600 *,
+[data-theme="eyecare"] button.bg-amber-500 * {
+  color: #ffffff !important;
+}
+
+/* Inputs, dropdowns, checkboxes and native selects: consistent contrast. */
+[data-theme="light"] input,
+[data-theme="light"] textarea,
+[data-theme="light"] select,
+[data-theme="eyecare"] input,
+[data-theme="eyecare"] textarea,
+[data-theme="eyecare"] select {
+  color: var(--theme-text-primary) !important;
+}
+
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder,
+[data-theme="eyecare"] input::placeholder,
+[data-theme="eyecare"] textarea::placeholder {
+  color: var(--theme-text-muted) !important;
+  opacity: 1;
+}
+
+[data-theme="light"] select option,
+[data-theme="eyecare"] select option {
+  color: var(--theme-text-primary) !important;
+  background: var(--theme-control-bg) !important;
+}
+
+/* Menus/popovers frequently contain raw Tailwind text classes. */
+[data-theme="light"] [role="menu"],
+[data-theme="light"] [role="listbox"],
+[data-theme="light"] [role="dialog"],
+[data-theme="eyecare"] [role="menu"],
+[data-theme="eyecare"] [role="listbox"],
+[data-theme="eyecare"] [role="dialog"] {
+  color: var(--theme-text-primary);
+}
+
+[data-theme="light"] [role="menu"] .text-white,
+[data-theme="light"] [role="menu"] .text-slate-300,
+[data-theme="light"] [role="menu"] .text-slate-400,
+[data-theme="light"] [role="menu"] .text-slate-500,
+[data-theme="eyecare"] [role="menu"] .text-white,
+[data-theme="eyecare"] [role="menu"] .text-slate-300,
+[data-theme="eyecare"] [role="menu"] .text-slate-400,
+[data-theme="eyecare"] [role="menu"] .text-slate-500 {
+  color: var(--theme-text-secondary) !important;
+}
+
+/* Links remain visually identifiable but not pastel-on-white. */
+[data-theme="light"] a.text-blue-300,
+[data-theme="light"] a.text-blue-400,
+[data-theme="eyecare"] a.text-blue-300,
+[data-theme="eyecare"] a.text-blue-400 {
+  color: #1d4ed8 !important;
+}
+
+/* Disabled text should remain visible enough to understand state. */
+[data-theme="light"] :disabled,
+[data-theme="eyecare"] :disabled {
+  opacity: 0.72;
+}
+
+/* Solid colored badges/labels (not only buttons) intentionally keep white text. */
+[data-theme="light"] [class~="bg-blue-600"].text-white,
+[data-theme="light"] [class~="bg-blue-500"].text-white,
+[data-theme="light"] [class~="bg-indigo-600"].text-white,
+[data-theme="light"] [class~="bg-indigo-500"].text-white,
+[data-theme="light"] [class~="bg-cyan-600"].text-white,
+[data-theme="light"] [class~="bg-cyan-500"].text-white,
+[data-theme="light"] [class~="bg-emerald-600"].text-white,
+[data-theme="light"] [class~="bg-emerald-500"].text-white,
+[data-theme="light"] [class~="bg-red-600"].text-white,
+[data-theme="light"] [class~="bg-red-500"].text-white,
+[data-theme="light"] [class~="bg-amber-600"].text-white,
+[data-theme="light"] [class~="bg-amber-500"].text-white,
+[data-theme="eyecare"] [class~="bg-blue-600"].text-white,
+[data-theme="eyecare"] [class~="bg-blue-500"].text-white,
+[data-theme="eyecare"] [class~="bg-indigo-600"].text-white,
+[data-theme="eyecare"] [class~="bg-indigo-500"].text-white,
+[data-theme="eyecare"] [class~="bg-cyan-600"].text-white,
+[data-theme="eyecare"] [class~="bg-cyan-500"].text-white,
+[data-theme="eyecare"] [class~="bg-emerald-600"].text-white,
+[data-theme="eyecare"] [class~="bg-emerald-500"].text-white,
+[data-theme="eyecare"] [class~="bg-red-600"].text-white,
+[data-theme="eyecare"] [class~="bg-red-500"].text-white,
+[data-theme="eyecare"] [class~="bg-amber-600"].text-white,
+[data-theme="eyecare"] [class~="bg-amber-500"].text-white {
+  color: #ffffff !important;
+}
+
+[data-theme="light"] [class~="bg-blue-600"] [class~="text-white"],
+[data-theme="light"] [class~="bg-blue-500"] [class~="text-white"],
+[data-theme="light"] [class~="bg-indigo-600"] [class~="text-white"],
+[data-theme="light"] [class~="bg-indigo-500"] [class~="text-white"],
+[data-theme="light"] [class~="bg-cyan-600"] [class~="text-white"],
+[data-theme="light"] [class~="bg-cyan-500"] [class~="text-white"],
+[data-theme="light"] [class~="bg-emerald-600"] [class~="text-white"],
+[data-theme="light"] [class~="bg-emerald-500"] [class~="text-white"],
+[data-theme="light"] [class~="bg-red-600"] [class~="text-white"],
+[data-theme="light"] [class~="bg-red-500"] [class~="text-white"],
+[data-theme="light"] [class~="bg-amber-600"] [class~="text-white"],
+[data-theme="light"] [class~="bg-amber-500"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-blue-600"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-blue-500"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-indigo-600"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-indigo-500"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-cyan-600"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-cyan-500"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-emerald-600"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-emerald-500"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-red-600"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-red-500"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-amber-600"] [class~="text-white"],
+[data-theme="eyecare"] [class~="bg-amber-500"] [class~="text-white"] {
+  color: #ffffff !important;
+}
