@@ -2,6 +2,7 @@ import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } fr
 import { generateBldcMotorAnalysis } from './bldcMotorExpert';
 import { applyScenarioDynamicLayer } from '../utils/scenarioDynamic';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 import {
   getEmcPillars,
   getComponentPillars,
@@ -104,6 +105,9 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
       result.engineeringDocs.edrRecord = result.edrRecord;
     }
   }
+
+  // 补全升级2：双层工程时间轴 (T+24h 应急临时遏制 vs 下一阶段永久纠正)
+  result.dualTimeline = result.dualTimeline || buildDualTimelinePlan(result, context, issue);
 
   // 补充一票否决类型与工程改动影响度评估 (Change Impact)
   if (result.candidateActions) {

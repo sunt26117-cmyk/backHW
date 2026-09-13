@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   FolderPlus,
   Globe2,
+  Trash2,
 } from 'lucide-react';
 
 import { PRESET_SCENARIOS } from '../data/presetScenarios';
@@ -30,6 +31,7 @@ interface NavbarProps {
   onSelectScenario: (scenarioId: string) => void;
   customScenarios?: PresetScenario[];
   onOpenScenarioManage: () => void;
+  onDeleteCustomScenario?: (scenarioId: string) => void;
   isAnalyzing: boolean;
   onRunAnalysis: () => void;
   activeTab: string;
@@ -49,6 +51,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectScenario,
   customScenarios = [],
   onOpenScenarioManage,
+  onDeleteCustomScenario,
   isAnalyzing,
   onRunAnalysis,
   activeTab,
@@ -131,11 +134,17 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const badgeInfo = getModelBadge();
 
+  const currentScenario =
+    customScenarios.find((s) => s.id === currentScenarioId) ||
+    PRESET_SCENARIOS.find((s) => s.id === currentScenarioId) ||
+    PRESET_SCENARIOS[0];
+
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-slate-100 sticky top-0 z-40 transition-colors duration-200">
       <div className="w-full px-3 sm:px-5 lg:px-6 2xl:px-8 ecu-topbar-row">
-        <div className="grid grid-cols-[minmax(250px,auto)_minmax(0,1fr)] 2xl:grid-cols-[minmax(290px,1fr)_minmax(420px,1.45fr)_auto] items-center min-h-16 gap-3">
-          {/* Logo & Title */}
+        {/* Top Header Row: 3-Zone Layout (Left Brand, Center Scenario Hub, Right Tools & CTA) */}
+        <div className="flex items-center justify-between min-h-16 py-2 gap-3 lg:gap-5">
+          {/* 1. Left: Brand & Engineering System Title */}
           <div className="flex items-center space-x-3 shrink-0">
             <div className="h-10 w-10 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shadow-inner">
               <Cpu className="w-6 h-6" />
@@ -156,8 +165,72 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Controls: Model Settings + Theme Switcher + Scenario + Primary CTA */}
-          <div className="flex items-center justify-end gap-2 sm:gap-2.5 min-w-0 overflow-hidden">
+          {/* 2. Center: Dedicated Engineering Scenario Selector (prominent & comfortable width) */}
+          <div className="hidden lg:flex items-center justify-center flex-1 max-w-xl xl:max-w-2xl px-2">
+            <div className="flex items-center w-full bg-slate-800/90 hover:bg-slate-800 border border-slate-700/90 hover:border-slate-600 rounded-xl p-1 shadow-sm transition">
+              <div className="flex items-center pl-2.5 pr-2 py-1 text-slate-300 shrink-0 select-none">
+                <FolderOpen className="w-4 h-4 mr-1.5 text-blue-400" />
+                <span className="text-xs font-semibold text-slate-300">工程工况</span>
+              </div>
+              <div className="h-4 w-px bg-slate-700 mx-1 shrink-0" />
+              <select
+                id="top-scenario-selector"
+                value={currentScenarioId}
+                onChange={(e) => onSelectScenario(e.target.value)}
+                className="w-full bg-transparent text-slate-100 font-medium text-xs px-2 py-1 focus:outline-none cursor-pointer truncate"
+                title="选择当前工程分析工况"
+              >
+                {customScenarios.length > 0 && (
+                  <optgroup label="⭐️ 我的自定义工况">
+                    {customScenarios.map((sc) => (
+                      <option key={sc.id} value={sc.id} className="bg-slate-900 text-emerald-300">
+                        ⭐️ {sc.title}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="📋 车规典型工况库 (14大基准)">
+                  {PRESET_SCENARIOS.map((sc) => (
+                    <option key={sc.id} value={sc.id} className="bg-slate-900 text-slate-100">
+                      {sc.title}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+              {currentScenario?.context && (
+                <span className="hidden xl:inline-flex items-center px-2 py-0.5 ml-1 mr-1 text-[11px] font-mono rounded-md bg-blue-950/80 text-blue-300 border border-blue-800/60 shrink-0 whitespace-nowrap">
+                  {currentScenario.context.projectPhase || 'DV'} · {currentScenario.context.daysRemaining ?? 14}天
+                </span>
+              )}
+              <button
+                id="scenario-manage-btn"
+                onClick={onOpenScenarioManage}
+                title="新建空白工况、另存当前或管理自定义工况库"
+                className="flex items-center space-x-1 bg-slate-700/80 hover:bg-slate-600 text-blue-300 hover:text-blue-100 border border-blue-500/30 rounded-lg px-2.5 py-1 text-xs font-medium transition cursor-pointer shrink-0 ml-1"
+              >
+                <FolderPlus className="w-3.5 h-3.5 text-blue-400" />
+                <span className="whitespace-nowrap">管理/新建</span>
+              </button>
+              {currentScenario?.isCustom && onDeleteCustomScenario && (
+                <button
+                  id="navbar-quick-delete-scenario-btn"
+                  onClick={() => {
+                    if (window.confirm(`确认删除当前自定义工程【${currentScenario.title}】吗？`)) {
+                      onDeleteCustomScenario(currentScenarioId);
+                    }
+                  }}
+                  title={`删除当前自定义工程【${currentScenario.title}】`}
+                  className="flex items-center space-x-1 bg-red-950/60 hover:bg-red-900/80 text-red-300 hover:text-red-100 border border-red-500/40 rounded-lg px-2 py-1 text-xs font-medium transition cursor-pointer shrink-0 ml-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                  <span className="hidden xl:inline">删除</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 3. Right: Controls & Primary Action CTA */}
+          <div className="flex items-center justify-end gap-2 sm:gap-2.5 shrink-0">
             {/* Model Settings Trigger */}
             <button
               id="model-settings-btn"
@@ -166,7 +239,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${badgeInfo.color}`}
             >
               <span className="text-xs">{badgeInfo.icon}</span>
-              <span className="hidden md:inline truncate max-w-[120px] lg:max-w-[160px]">
+              <span className="hidden md:inline truncate max-w-[120px] lg:max-w-[150px]">
                 {badgeInfo.short}
               </span>
               <SlidersHorizontal className="w-3.5 h-3.5 opacity-70 ml-0.5" />
@@ -264,47 +337,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                 </>
               )}
-            </div>
-
-            {/* Scenario Dropdown and Manage Button */}
-            <div className="flex items-center space-x-1.5 hidden sm:flex">
-              <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200">
-                <FolderOpen className="w-3.5 h-3.5 mr-1.5 text-slate-400 shrink-0" />
-                <span className="text-slate-400 mr-2 hidden lg:inline">工程工况:</span>
-                <select
-                  value={currentScenarioId}
-                  onChange={(e) => onSelectScenario(e.target.value)}
-                  className="bg-transparent text-slate-200 font-medium focus:outline-none cursor-pointer pr-2 max-w-[130px] lg:max-w-[170px] truncate"
-                >
-                  {customScenarios.length > 0 && (
-                    <optgroup label="⭐️ 我的自定义工况">
-                      {customScenarios.map((sc) => (
-                        <option key={sc.id} value={sc.id} className="bg-slate-900 text-emerald-300">
-                          ⭐️ {sc.title}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  <optgroup label="📋 系统典型工况">
-                    {PRESET_SCENARIOS.map((sc) => (
-                      <option key={sc.id} value={sc.id} className="bg-slate-900 text-slate-200">
-                        {sc.title}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-              </div>
-
-              {/* New/Manage Scenario Button */}
-              <button
-                id="scenario-manage-btn"
-                onClick={onOpenScenarioManage}
-                title="新建空白工况、另存当前或管理自定义工况库"
-                className="flex items-center space-x-1 bg-slate-800 hover:bg-slate-700 text-blue-400 border border-blue-500/30 rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer"
-              >
-                <FolderPlus className="w-3.5 h-3.5 text-blue-400" />
-                <span className="hidden xl:inline">新建/管理</span>
-              </button>
             </div>
 
             {/* Hidden File Input for Importing Backup */}
@@ -487,6 +519,47 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="sm:hidden">执行决策</span>
                 </>
               )}
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile / Tablet Scenario Selector Bar (< lg) */}
+        <div className="lg:hidden pb-2.5 pt-0.5">
+          <div className="flex items-center w-full bg-slate-800/90 border border-slate-700/90 rounded-xl p-1 shadow-sm">
+            <div className="flex items-center pl-2 pr-1.5 py-1 text-slate-300 shrink-0">
+              <FolderOpen className="w-3.5 h-3.5 mr-1 text-blue-400" />
+              <span className="text-[11px] font-semibold text-slate-300">工况:</span>
+            </div>
+            <select
+              value={currentScenarioId}
+              onChange={(e) => onSelectScenario(e.target.value)}
+              className="w-full bg-transparent text-slate-100 font-medium text-xs px-1.5 py-1 focus:outline-none cursor-pointer truncate"
+              title="选择当前工程分析工况"
+            >
+              {customScenarios.length > 0 && (
+                <optgroup label="⭐️ 我的自定义工况">
+                  {customScenarios.map((sc) => (
+                    <option key={sc.id} value={sc.id} className="bg-slate-900 text-emerald-300">
+                      ⭐️ {sc.title}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label="📋 车规典型工况库 (14大基准)">
+                {PRESET_SCENARIOS.map((sc) => (
+                  <option key={sc.id} value={sc.id} className="bg-slate-900 text-slate-100">
+                    {sc.title}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            <button
+              onClick={onOpenScenarioManage}
+              title="管理自定义工况库"
+              className="flex items-center space-x-1 bg-slate-700/80 hover:bg-slate-600 text-blue-300 border border-blue-500/30 rounded-lg px-2 py-1 text-[11px] font-medium transition cursor-pointer shrink-0 ml-1"
+            >
+              <FolderPlus className="w-3 h-3 text-blue-400" />
+              <span>管理</span>
             </button>
           </div>
         </div>

@@ -36,6 +36,7 @@ export interface ProjectContext {
   sampleStatus: string;
   hwLeadStyle?: HwLeadStyle; // 直属领导处理风格与态度倾向
   customerSpecialAgreements?: CustomerSpecialAgreement[]; // 客户特殊技术协议红线
+  recurrenceCount?: number;
 }
 
 export type IssueCategory =
@@ -170,6 +171,9 @@ export interface HourlyActionItem {
   task: string;
   owner: string;
   deliverable: string;
+  taskTitle?: string;
+  toolingOrEquip?: string;
+  actionDetails?: string;
 }
 
 export interface PassFailCriteria {
@@ -182,6 +186,33 @@ export interface PassFailCriteria {
 export interface Next24HourPlan {
   timeline: HourlyActionItem[];
   passFailCriteria: PassFailCriteria[];
+}
+
+export interface DualTimelineStep {
+  step: string;
+  detail: string;
+  owner: string;
+  duration: string;
+  hardwareImpact: string;
+  deliverable: string;
+}
+
+export interface DualTimelinePhase {
+  phaseTag: 'T_PLUS_24H_CONTAINMENT' | 'NEXT_PHASE_PERMANENT';
+  timeWindow: string;
+  title: string;
+  objective: string;
+  hardwareImpact: string;
+  actions: DualTimelineStep[];
+  verificationCriteria: string;
+  exitCriteria: string;
+  responsibilityRole: string;
+}
+
+export interface DualTimelineActionPlan {
+  containmentPhase: DualTimelinePhase;
+  permanentPhase: DualTimelinePhase;
+  strategicTradeoff: string;
 }
 
 export interface EngineeringDecisionRecord {
@@ -199,6 +230,9 @@ export interface EngineeringDecisionRecord {
   defenseBasis: string;
   signOffSignatures: { role: string; name: string; status: 'Signed' | 'Pending'; signDate: string }[];
   localHashDigest: string;
+  decisionStatus?: 'APPROVED' | 'VETOED' | 'CONDITIONALLY_APPROVED' | string;
+  createdAt?: string;
+  problemStatement?: string;
 }
 
 export interface RedTeamAuditChallenge {
@@ -233,6 +267,10 @@ export interface CandidateAction {
     scheduleLeadTime: string;
     impedanceOrSignalImpact: string;
     emcThermalRipple: string;
+    toolingLeadTimeWeeks?: number | string;
+    bomCostDeltaUsd?: number | string;
+    dvRequalificationRequired?: boolean;
+    softwareCalibrationRequired?: boolean;
   };
   referenced_standards?: ReferencedStandard[]; // 可追溯的标准条款引用 (P1-3)
   customerVetoViolations?: string[];           // 击穿的客户特殊特性红线条目 (P1-1)
@@ -275,6 +313,13 @@ export interface FinalRecommendation {
   stopConditions: string[];
   reEvaluationTriggers: string[];
   planB: string;
+  strategicSignificance?: string;
+  containmentAction?: string;
+  rootCauseAction?: string;
+  verificationItems?: string[] | string;
+  targetPhase?: string;
+  costDeltaUsd?: number | string;
+  reasonSummary?: string;
 }
 
 export interface RaciItem {
@@ -592,6 +637,7 @@ export interface CopilotAnalysisResult {
     verificationTarget: string;
   };
   engineeringDocs: EngineeringDocs;
+  dualTimeline?: DualTimelineActionPlan; // 双层工程时间轴：T+24h 应急临时遏制 vs 下一版本永久纠正
   bldcExtendedAnalysis?: BldcExtendedAnalysis; // BLDC 换相、传感器与功能安全链路扩展 (P0-1)
   classifiedInfo?: ClassifiedInfoItem[]; // 严格区分信息类型 (P0-1)
   multiRiskBreakdown?: MultiDimensionalRiskBreakdown; // 去黑箱化多维风险细分 (P0-2)
@@ -599,6 +645,7 @@ export interface CopilotAnalysisResult {
   next24HourPlan?: Next24HourPlan; // 未来24小时行动计划与量化标准 (P0-4)
   edrRecord?: EngineeringDecisionRecord; // 工程决策单 EDR 标准记录 (P0-5)
   redTeamChallenge?: RedTeamAuditChallenge; // 逆向质疑与盲区挑战 (P1)
+  context?: ProjectContext;
   source?: 'deterministic-expert' | 'custom-llm' | string;
   provenance?: ResultProvenance; // 结果来源透明度标注：明确区分 AI 发散推理 vs 车规专家确定性模版/物理公式
   analysisBasis?: {

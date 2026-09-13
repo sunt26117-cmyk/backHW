@@ -41,6 +41,19 @@ import {
 } from '../types';
 import { deriveVerificationRisk } from '../utils/scenarioDerived';
 
+interface LocalDecisionRecord {
+  id: string;
+  timestamp: string;
+  problemSummary: string;
+  optionsConsidered: string[];
+  chosenOption: string;
+  justification: string;
+  rejectedOptionsReason: Record<string, string>;
+  verificationPlan: string;
+  owner: string;
+  status: 'OPEN' | 'CLOSED' | 'ESCALATED';
+}
+
 interface VerificationLoopViewProps {
   daysRemaining: number;
   context: ProjectContext;
@@ -71,13 +84,15 @@ export const VerificationLoopView: React.FC<VerificationLoopViewProps> = ({
   // 实测数据回填表单
   const [testForm, setTestForm] = useState<TestResultEntry>({
     testId: `TEST-${new Date().getFullYear()}-${context.projectPhase}`,
+    issueId: context.projectName || 'ISSUE-001',
     condition: issue.testCondition || issue.failurePhenomenon || '当前典型工况验证条件待补充',
     instrument: '示波器/数据采集系统 + 关键节点差分探头（按当前问题选择）',
     measurement: issue.actualMeasurement || issue.requirement || '关键参数实测值',
     result: '待实测回填（当前页面不再沿用其他典型工况的固定实测值）',
     passFail: 'PASS',
-    evidence: '示波器截图 CH1/CH2 Raw Data 存档至 /data/dvt_run_04.csv',
+    evidence: 'MEASURED',
     engineer: '张工 (主任硬件工程师)',
+    timestamp: new Date().toISOString(),
   });
 
   // 闭环结果通知
@@ -87,14 +102,14 @@ export const VerificationLoopView: React.FC<VerificationLoopViewProps> = ({
   } | null>(null);
 
   // 决策履历记录
-  const [decisionHistory, setDecisionHistory] = useState<DecisionRecord[]>([
+  const [decisionHistory, setDecisionHistory] = useState<LocalDecisionRecord[]>([
     {
       id: 'REC-001',
       timestamp: '2026-09-01 10:15',
       problemSummary: `${issue.failurePhenomenon || issue.engineeringConcern || '当前工况问题'}｜${context.projectName}`,
       optionsConsidered: ['方案 A: TVS 硬件钳位', '方案 B: 软件全下桥短接能耗制动', '方案 C: 改板换 60V MOS'],
       chosenOption: result?.finalRecommendation.recommendedOptionName || '待分析结果生成后确定',
-      justification: result?.finalRecommendation.reasonSummary || issue.engineeringConcern || '等待当前工况的分析理由',
+      justification: result?.finalRecommendation?.reasonSummary || result?.coreConclusion?.reasonSummary || issue.engineeringConcern || '等待当前工况的分析理由',
       rejectedOptionsReason: {
         '方案 A': `当前${issue.issueCategories?.[0] || '场景'}下需先验证吸收/钳位网络的热与裕量，不能直接假设有效。`,
         '方案 C': `当前里程碑为 ${context.nextMilestone}，剩余 ${context.daysRemaining} 天；改版周期必须与该窗口重新核算。`,

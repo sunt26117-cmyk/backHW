@@ -35,12 +35,18 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
+  Copy,
+  Check,
+  CalendarClock,
+  Milestone,
+  ExternalLink,
 } from 'lucide-react';
+import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 
 interface RecommendationRaciViewProps {
   result: CopilotAnalysisResult | null;
-  context: ProjectContext;
-  issue: IssueInput;
+  context?: ProjectContext;
+  issue?: IssueInput;
   onGoToDocs: () => void;
 }
 
@@ -53,6 +59,8 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
   // 动态多方推演博弈工作台状态
   const [wargameOption, setWargameOption] = useState<'RECOMMENDED' | 'RE_SPIN' | 'CONCESSION'>('RECOMMENDED');
   const [wargameLeadStyle, setWargameLeadStyle] = useState<'CONSERVATIVE' | 'AGILE_DELIVERY' | 'PROCESS_DEFENSIVE'>('AGILE_DELIVERY');
+  const [timelineFilter, setTimelineFilter] = useState<'ALL' | 'CONTAINMENT' | 'PERMANENT'>('ALL');
+  const [hasCopiedTimeline, setHasCopiedTimeline] = useState<boolean>(false);
   const domain = resolveEngineeringDomain(issue);
   const problem = issue.failurePhenomenon || issue.engineeringConcern || '当前工程问题';
   const measurement = issue.actualMeasurement || '暂无实测数据';
@@ -1210,56 +1218,417 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
         </div>
       </div>
 
-      {/* 3. Containment & CAPA */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Containment */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-amber-400 mb-3 flex items-center">
-            <ShieldAlert className="w-4 h-4 mr-2" />
-            短期围堵措施 (Containment Plan)
-          </h3>
-          <div className="space-y-3 text-xs">
-            <div className="bg-slate-850/80 p-3 rounded-lg border border-slate-700/60">
-              <span className="text-slate-400 block text-[11px] font-medium">应急围堵方案：</span>
-              <p className="text-slate-200 mt-1 leading-relaxed">{containment.shortTermMeasure}</p>
-            </div>
-            <div className="flex justify-between border-t border-slate-800 pt-2 text-[11px] text-slate-400">
-              <span>适用受控范围:</span>
-              <span className="text-slate-200 font-medium">{containment.validityScope}</span>
-            </div>
-            <div className="flex justify-between border-t border-slate-800 pt-2 text-[11px] text-slate-400">
-              <span>执行责任方:</span>
-              <span className="text-slate-200 font-medium">{containment.responsibleParty}</span>
-            </div>
-            <div className="flex justify-between border-t border-slate-800 pt-2 text-[11px] text-slate-400">
-              <span>生效时限:</span>
-              <span className="text-amber-300 font-mono font-medium">{containment.timeline}</span>
-            </div>
-          </div>
-        </div>
+      {/* 3. 双层工程时间轴机制：T+24h 应急临时遏制 vs 下一阶段永久纠正 (Upgrade 2) */}
+      {(() => {
+        const effectiveContext: ProjectContext = context || (result?.context as ProjectContext) || {
+          projectName: '车载ECU项目',
+          productType: '车载域控制器',
+          ecuType: 'ECU',
+          projectPhase: 'DV',
+          asilLevel: 'ASIL B',
+          customer: '主机厂',
+          sopDate: '2026-12-31',
+          nextMilestone: 'DV 准入',
+          daysRemaining: 14,
+          costConstraint: '中等敏感',
+          sampleStatus: 'B样件',
+        };
 
-        {/* CAPA */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-emerald-400 mb-3 flex items-center">
-            <FileCheck className="w-4 h-4 mr-2" />
-            长效纠正与预防 (CAPA & Lessons Learned)
-          </h3>
-          <div className="space-y-3 text-xs">
-            <div className="bg-slate-850/80 p-3 rounded-lg border border-slate-700/60">
-              <span className="text-slate-400 block text-[11px] font-medium">根因长效纠正措施：</span>
-              <p className="text-slate-200 mt-1 leading-relaxed">{capa.rootCauseAction}</p>
+        const effectiveIssue: IssueInput = issue || {
+          issueCategories: ['EMC'],
+          requirement: '',
+          actualMeasurement: '',
+          testCondition: '',
+          environment: '',
+          failurePhenomenon: '',
+          engineeringConcern: '',
+          notes: '',
+          attachments: [],
+        };
+
+        const dualTimeline = result.dualTimeline || buildDualTimelinePlan(result, effectiveContext, effectiveIssue);
+
+        const handleCopyTimeline = () => {
+          if (!dualTimeline) return;
+          const text = `【车规硬件双层工程时间轴行动方案】
+=========================================
+项目：${effectiveContext.projectName} (阶段：${effectiveContext.projectPhase}，交付倒计时：${effectiveContext.daysRemaining}天)
+
+【第一轨：T+24h 应急临时遏制 (Containment Phase)】
+- 时间窗口：${dualTimeline.containmentPhase.timeWindow}
+- 措施定位：${dualTimeline.containmentPhase.title}
+- 核心目标：${dualTimeline.containmentPhase.objective}
+- 硬件影响：${dualTimeline.containmentPhase.hardwareImpact}
+- 责任主体：${dualTimeline.containmentPhase.responsibilityRole}
+- 行动清单：
+${dualTimeline.containmentPhase.actions.map((a, i) => `  ${i + 1}. [${a.duration}] ${a.step} (负责人: ${a.owner} | ${a.hardwareImpact}) -> 交付物: ${a.deliverable}\n     详情: ${a.detail}`).join('\n')}
+- 现场验证指标：${dualTimeline.containmentPhase.verificationCriteria}
+- 临时放行门禁：${dualTimeline.containmentPhase.exitCriteria}
+
+-----------------------------------------
+【第二轨：下一阶段永久纠正措施 (Permanent Action / CAPA)】
+- 时间窗口：${dualTimeline.permanentPhase.timeWindow}
+- 措施定位：${dualTimeline.permanentPhase.title}
+- 核心目标：${dualTimeline.permanentPhase.objective}
+- 硬件影响：${dualTimeline.permanentPhase.hardwareImpact}
+- 责任主体：${dualTimeline.permanentPhase.responsibilityRole}
+- 行动清单：
+${dualTimeline.permanentPhase.actions.map((a, i) => `  ${i + 1}. [${a.duration}] ${a.step} (负责人: ${a.owner} | ${a.hardwareImpact}) -> 交付物: ${a.deliverable}\n     详情: ${a.detail}`).join('\n')}
+- 终极验收标准：${dualTimeline.permanentPhase.verificationCriteria}
+- 正式结案门禁：${dualTimeline.permanentPhase.exitCriteria}
+
+=========================================
+【战略协同权衡】：
+${dualTimeline.strategicTradeoff}`;
+
+          navigator.clipboard.writeText(text);
+          setHasCopiedTimeline(true);
+          setTimeout(() => setHasCopiedTimeline(false), 2500);
+        };
+
+        return (
+          <div className="space-y-6">
+            {/* 顶栏控制台与说明 */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-md">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+                      DUAL-TIMELINE ARCHITECTURE
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      车规交付双轨闭环规范 (Containment vs CAPA)
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <CalendarClock className="w-5 h-5 text-amber-400" />
+                    <span>双层工程时间轴：T+24h 应急临时遏制 vs 下一阶段永久纠正</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
+                    硬件工程决策绝非单选。当前倒计时仅剩 <span className="text-amber-400 font-bold font-mono">{effectiveContext.daysRemaining} 天</span>，必须实行<strong>「T+24h 0天板卡工期快速围堵保交付装车」</strong>与<strong>「下一阶段投板消除物理根因保量产防错」</strong>双轨协同推进。
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                  {/* 视图切换 */}
+                  <div className="inline-flex rounded-lg bg-slate-800/80 p-1 border border-slate-700/60 text-xs">
+                    <button
+                      onClick={() => setTimelineFilter('ALL')}
+                      className={`px-3 py-1 rounded-md transition font-medium cursor-pointer ${
+                        timelineFilter === 'ALL'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      双轨并行视图
+                    </button>
+                    <button
+                      onClick={() => setTimelineFilter('CONTAINMENT')}
+                      className={`px-3 py-1 rounded-md transition font-medium cursor-pointer flex items-center gap-1 ${
+                        timelineFilter === 'CONTAINMENT'
+                          ? 'bg-amber-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-amber-300'
+                      }`}
+                    >
+                      <span>⚡ T+24h 应急</span>
+                    </button>
+                    <button
+                      onClick={() => setTimelineFilter('PERMANENT')}
+                      className={`px-3 py-1 rounded-md transition font-medium cursor-pointer flex items-center gap-1 ${
+                        timelineFilter === 'PERMANENT'
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-emerald-300'
+                      }`}
+                    >
+                      <span>🛡️ 下版永久根治</span>
+                    </button>
+                  </div>
+
+                  {/* 复制行动清单按钮 */}
+                  <button
+                    onClick={handleCopyTimeline}
+                    className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-850 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 flex items-center gap-1.5 transition cursor-pointer"
+                    title="复制双层时间轴完整执行清单，便于发送至邮件、Jira 或汇报纪要"
+                  >
+                    {hasCopiedTimeline ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-300">已复制执行清单</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-slate-400" />
+                        <span>复制行动清单</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* 战略权衡 Callout: 为什么不能只选其一？ */}
+              <div className="mt-4 bg-gradient-to-r from-amber-950/30 via-slate-900 to-emerald-950/30 border border-slate-700/70 rounded-lg p-4 text-xs">
+                <div className="flex items-start gap-2.5">
+                  <Scale className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1.5 text-slate-300">
+                    <div className="font-semibold text-slate-200 flex items-center gap-2">
+                      <span>双层时间轴协同逻辑与工程权衡 (Strategic Trade-off)</span>
+                      <span className="text-[10px] px-2 py-0.2 rounded bg-blue-500/20 text-blue-300 font-mono">
+                        车规质量与进度博弈平衡
+                      </span>
+                    </div>
+                    <p className="leading-relaxed text-slate-300 whitespace-pre-line text-[11px]">
+                      {dualTimeline.strategicTradeoff}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="bg-slate-850/80 p-3 rounded-lg border border-slate-700/60">
-              <span className="text-slate-400 block text-[11px] font-medium">规范更新与预防防错：</span>
-              <p className="text-slate-200 mt-1 leading-relaxed">{capa.preventiveMeasure}</p>
-            </div>
-            <div className="bg-slate-850/80 p-3 rounded-lg border border-slate-700/60">
-              <span className="text-slate-400 block text-[11px] font-medium">经验教训总结 (Lessons Learned)：</span>
-              <p className="text-slate-200 mt-1 leading-relaxed">{capa.lessonsLearned}</p>
+
+            {/* 双轨时间轴对比卡片 */}
+            <div className={`grid gap-6 ${timelineFilter === 'ALL' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+              {/* Track 1: T+24h 应急临时遏制 (Containment Phase) */}
+              {(timelineFilter === 'ALL' || timelineFilter === 'CONTAINMENT') && (
+                <div className="bg-slate-900 border-2 border-amber-500/40 rounded-xl p-5 shadow-lg flex flex-col justify-between">
+                  <div className="space-y-4">
+                    {/* Header */}
+                    <div className="border-b border-slate-800 pb-3">
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono text-xs font-bold flex items-center gap-1.5">
+                          <Zap className="w-3.5 h-3.5" />
+                          <span>{dualTimeline.containmentPhase.timeWindow}</span>
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-amber-950/60 text-amber-200 border border-amber-600/30 text-[10px] font-semibold">
+                          0天改版工期 · 快速闭环
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-bold text-white leading-snug">
+                        {dualTimeline.containmentPhase.title}
+                      </h4>
+                      <p className="text-xs text-amber-200/80 mt-1.5 leading-relaxed bg-amber-950/20 p-2.5 rounded border border-amber-500/20">
+                        <strong>核心目标：</strong>{dualTimeline.containmentPhase.objective}
+                      </p>
+                    </div>
+
+                    {/* Meta info */}
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="bg-slate-850 p-2.5 rounded border border-slate-700/60">
+                        <span className="text-slate-400 block text-[10px]">硬件改动工期影响:</span>
+                        <span className="text-amber-300 font-semibold mt-0.5 block">
+                          {dualTimeline.containmentPhase.hardwareImpact}
+                        </span>
+                      </div>
+                      <div className="bg-slate-850 p-2.5 rounded border border-slate-700/60">
+                        <span className="text-slate-400 block text-[10px]">牵头责任主体:</span>
+                        <span className="text-slate-200 font-semibold mt-0.5 block">
+                          {dualTimeline.containmentPhase.responsibilityRole}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Step-by-step checklist */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                          <span>T+24h 应急实操步骤清单 (Step-by-Step Actions)</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {dualTimeline.containmentPhase.actions.length} 项工步
+                        </span>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {dualTimeline.containmentPhase.actions.map((act, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-slate-850/90 border border-slate-700/80 rounded-lg p-3 text-xs space-y-1.5 hover:border-amber-500/40 transition"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-semibold text-amber-300 leading-snug">
+                                {act.step}
+                              </span>
+                              <span className="px-2 py-0.5 rounded bg-slate-900 text-amber-400 font-mono text-[10px] border border-slate-700 shrink-0">
+                                {act.duration}
+                              </span>
+                            </div>
+                            <p className="text-slate-300 text-[11px] leading-relaxed">
+                              {act.detail}
+                            </p>
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800 text-[10px]">
+                              <span className="text-slate-400">
+                                负责人: <strong className="text-slate-200">{act.owner}</strong>
+                              </span>
+                              <span className="text-amber-200/90 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-500/20 font-mono">
+                                交付: {act.deliverable}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Verification criteria */}
+                    <div className="bg-slate-850/80 p-3 rounded-lg border border-amber-500/30 text-xs">
+                      <span className="text-amber-400 font-semibold block mb-1 text-[11px] flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>现场快速验证判据 (Verification Criteria):</span>
+                      </span>
+                      <p className="text-slate-200 leading-relaxed text-[11px]">
+                        {dualTimeline.containmentPhase.verificationCriteria}
+                      </p>
+                    </div>
+
+                    {/* Original containment reference if present */}
+                    {containment?.validityScope && (
+                      <div className="bg-slate-950/60 p-2.5 rounded border border-slate-800 text-[11px] space-y-1">
+                        <div className="flex justify-between text-slate-400">
+                          <span>受控范围:</span>
+                          <span className="text-slate-300 font-medium">{containment.validityScope}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                          <span>原方案时限:</span>
+                          <span className="text-amber-300 font-mono">{containment.timeline}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Exit gate */}
+                  <div className="mt-4 pt-3 border-t border-slate-800">
+                    <div className="flex items-center gap-2 text-xs">
+                      <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                      <div>
+                        <span className="text-slate-400 text-[10px] block">临时放行门禁 (Temporary Exit Gate):</span>
+                        <span className="text-amber-300 font-semibold text-[11px]">
+                          {dualTimeline.containmentPhase.exitCriteria}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Track 2: 下一阶段永久纠正 (Permanent Action / CAPA) */}
+              {(timelineFilter === 'ALL' || timelineFilter === 'PERMANENT') && (
+                <div className="bg-slate-900 border-2 border-emerald-500/40 rounded-xl p-5 shadow-lg flex flex-col justify-between">
+                  <div className="space-y-4">
+                    {/* Header */}
+                    <div className="border-b border-slate-800 pb-3">
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono text-xs font-bold flex items-center gap-1.5">
+                          <Milestone className="w-3.5 h-3.5" />
+                          <span>{dualTimeline.permanentPhase.timeWindow}</span>
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-200 border border-emerald-600/30 text-[10px] font-semibold">
+                          18~25天投板 · 物理根治
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-bold text-white leading-snug">
+                        {dualTimeline.permanentPhase.title}
+                      </h4>
+                      <p className="text-xs text-emerald-200/80 mt-1.5 leading-relaxed bg-emerald-950/20 p-2.5 rounded border border-emerald-500/20">
+                        <strong>核心目标：</strong>{dualTimeline.permanentPhase.objective}
+                      </p>
+                    </div>
+
+                    {/* Meta info */}
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="bg-slate-850 p-2.5 rounded border border-slate-700/60">
+                        <span className="text-slate-400 block text-[10px]">硬件改动周期影响:</span>
+                        <span className="text-emerald-300 font-semibold mt-0.5 block">
+                          {dualTimeline.permanentPhase.hardwareImpact}
+                        </span>
+                      </div>
+                      <div className="bg-slate-850 p-2.5 rounded border border-slate-700/60">
+                        <span className="text-slate-400 block text-[10px]">牵头责任主体:</span>
+                        <span className="text-slate-200 font-semibold mt-0.5 block">
+                          {dualTimeline.permanentPhase.responsibilityRole}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Step-by-step checklist */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>下阶段永久纠正工步清单 (SOP Action Items)</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {dualTimeline.permanentPhase.actions.length} 项工步
+                        </span>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {dualTimeline.permanentPhase.actions.map((act, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-slate-850/90 border border-slate-700/80 rounded-lg p-3 text-xs space-y-1.5 hover:border-emerald-500/40 transition"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-semibold text-emerald-300 leading-snug">
+                                {act.step}
+                              </span>
+                              <span className="px-2 py-0.5 rounded bg-slate-900 text-emerald-400 font-mono text-[10px] border border-slate-700 shrink-0">
+                                {act.duration}
+                              </span>
+                            </div>
+                            <p className="text-slate-300 text-[11px] leading-relaxed">
+                              {act.detail}
+                            </p>
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800 text-[10px]">
+                              <span className="text-slate-400">
+                                负责人: <strong className="text-slate-200">{act.owner}</strong>
+                              </span>
+                              <span className="text-emerald-200/90 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono">
+                                交付: {act.deliverable}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Verification criteria */}
+                    <div className="bg-slate-850/80 p-3 rounded-lg border border-emerald-500/30 text-xs">
+                      <span className="text-emerald-400 font-semibold block mb-1 text-[11px] flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>终极合规验证标准 (Permanent Verification):</span>
+                      </span>
+                      <p className="text-slate-200 leading-relaxed text-[11px]">
+                        {dualTimeline.permanentPhase.verificationCriteria}
+                      </p>
+                    </div>
+
+                    {/* Original CAPA reference if present */}
+                    {capa?.lessonsLearned && (
+                      <div className="bg-slate-950/60 p-2.5 rounded border border-slate-800 text-[11px] space-y-1">
+                        <span className="text-slate-400 block text-[10px]">经验教训 (Lessons Learned):</span>
+                        <p className="text-slate-300 text-[11px] leading-relaxed">
+                          {capa.lessonsLearned}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Exit gate */}
+                  <div className="mt-4 pt-3 border-t border-slate-800">
+                    <div className="flex items-center gap-2 text-xs">
+                      <FileCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <div>
+                        <span className="text-slate-400 text-[10px] block">终极放行门禁 (SOP Sign-Off Gate):</span>
+                        <span className="text-emerald-300 font-semibold text-[11px]">
+                          {dualTimeline.permanentPhase.exitCriteria}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      </div>
+        );
+      })()}
     </div>
   );
 };

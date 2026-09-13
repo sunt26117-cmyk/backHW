@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { Component, useState, useEffect } from 'react';
 import { ProjectContext, IssueInput, CopilotAnalysisResult, AppTheme, ModelApiConfig, PresetScenario } from './types';
 import { PRESET_SCENARIOS } from './data/presetScenarios';
 import { runExpertAnalysis } from './data/expertEngine';
@@ -22,13 +22,22 @@ import { ScenarioManageModal } from './components/ScenarioManageModal';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { EngineeringWorkflowView } from './components/EngineeringWorkflowView';
 
-class PageErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean; message: string }
-> {
-  state = { hasError: false, message: '' };
+interface PageErrorBoundaryProps {
+  children: React.ReactNode;
+}
 
-  static getDerivedStateFromError(error: unknown) {
+interface PageErrorBoundaryState {
+  hasError: boolean;
+  message: string;
+}
+
+class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBoundaryState> {
+  constructor(props: PageErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+
+  static getDerivedStateFromError(error: unknown): PageErrorBoundaryState {
     return { hasError: true, message: error instanceof Error ? error.message : String(error) };
   }
 
@@ -64,11 +73,51 @@ const DEFAULT_MODEL_CONFIG: ModelApiConfig = {
   enabled: false,
 };
 
+const CURRENT_SCENARIO_STORAGE_KEY = 'ecu_copilot_current_scenario_id';
+
 export default function App() {
   const [customScenarios, setCustomScenarios] = useState<PresetScenario[]>(() => loadCustomScenarios());
-  const [currentScenarioId, setCurrentScenarioId] = useState<string>(PRESET_SCENARIOS[0].id);
-  const [context, setContext] = useState<ProjectContext>(PRESET_SCENARIOS[0].context);
-  const [issue, setIssue] = useState<IssueInput>(PRESET_SCENARIOS[0].issue);
+  
+  // Restore current scenario ID from localStorage on mount
+  const [currentScenarioId, setCurrentScenarioId] = useState<string>(() => {
+    try {
+      const savedId = localStorage.getItem(CURRENT_SCENARIO_STORAGE_KEY);
+      if (savedId) {
+        const customs = loadCustomScenarios();
+        const all = [...customs, ...PRESET_SCENARIOS];
+        if (all.some((s) => s.id === savedId)) return savedId;
+      }
+    } catch {}
+    return PRESET_SCENARIOS[0].id;
+  });
+
+  // Restore context matching the selected scenario
+  const [context, setContext] = useState<ProjectContext>(() => {
+    try {
+      const savedId = localStorage.getItem(CURRENT_SCENARIO_STORAGE_KEY);
+      if (savedId) {
+        const customs = loadCustomScenarios();
+        const found = customs.find((s) => s.id === savedId) || PRESET_SCENARIOS.find((s) => s.id === savedId);
+        if (found) return found.context;
+      }
+    } catch {}
+    return PRESET_SCENARIOS[0].context;
+  });
+
+  // Restore issue matching the selected scenario
+  const [issue, setIssue] = useState<IssueInput>(() => {
+    try {
+      const savedId = localStorage.getItem(CURRENT_SCENARIO_STORAGE_KEY);
+      if (savedId) {
+        const customs = loadCustomScenarios();
+        const found = customs.find((s) => s.id === savedId) || PRESET_SCENARIOS.find((s) => s.id === savedId);
+        if (found) return found.issue;
+      }
+    } catch {}
+    return PRESET_SCENARIOS[0].issue;
+  });
+
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [result, setResult] = useState<CopilotAnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const analysisRunId = React.useRef(0);
@@ -78,6 +127,37 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [isPwaInstalled, setIsPwaInstalled] = useState<boolean>(false);
+
+  // Auto-sync custom scenario edits to localStorage so content is never lost on refresh or switch
+  useEffect(() => {
+    const isCustom = customScenarios.some((s) => s.id === currentScenarioId);
+    if (!isCustom) return;
+
+    const timer = setTimeout(() => {
+      const target = customScenarios.find((s) => s.id === currentScenarioId);
+      if (target) {
+        const updatedItem: PresetScenario = {
+          ...target,
+          title: context.projectName || target.title,
+          subtitle: `${context.projectPhase} 阶段 | ${context.asilLevel} | ${context.productType}`,
+          context,
+          issue,
+        };
+        const updatedList = saveCustomScenario(updatedItem);
+        setCustomScenarios(updatedList);
+        setLastSavedAt(new Date().toLocaleTimeString());
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [context, issue, currentScenarioId]);
+
+  // Persist current scenario ID whenever changed
+  useEffect(() => {
+    try {
+      localStorage.setItem(CURRENT_SCENARIO_STORAGE_KEY, currentScenarioId);
+    } catch {}
+  }, [currentScenarioId]);
 
   useEffect(() => {
     // Detect if already launched in standalone mode
@@ -167,14 +247,36 @@ export default function App() {
 
   // Load initial analysis on mount
   useEffect(() => {
-    runAnalysis(PRESET_SCENARIOS[0].context, PRESET_SCENARIOS[0].issue);
+    runAnalysis(context, issue);
   }, []);
 
   const handleSelectScenario = (scenarioId: string, customScenario?: PresetScenario) => {
+    // Before switching, if currently editing a custom scenario, sync its latest state immediately
+    const isCurrentCustom = customScenarios.some((s) => s.id === currentScenarioId);
+    if (isCurrentCustom) {
+      const existing = customScenarios.find((s) => s.id === currentScenarioId);
+      if (existing) {
+        saveCustomScenario({
+          ...existing,
+          title: context.projectName || existing.title,
+          subtitle: `${context.projectPhase} 阶段 | ${context.asilLevel} | ${context.productType}`,
+          context,
+          issue,
+        });
+      }
+    }
+
     setCurrentScenarioId(scenarioId);
+    try {
+      localStorage.setItem(CURRENT_SCENARIO_STORAGE_KEY, scenarioId);
+    } catch {}
+
+    const freshCustoms = loadCustomScenarios();
+    setCustomScenarios(freshCustoms);
+
     const found =
       customScenario ||
-      customScenarios.find((sc) => sc.id === scenarioId) ||
+      freshCustoms.find((sc) => sc.id === scenarioId) ||
       PRESET_SCENARIOS.find((sc) => sc.id === scenarioId);
     if (found) {
       setResult(null);
@@ -183,6 +285,34 @@ export default function App() {
       setIssue(scenarioIssue);
       runAnalysis(found.context, scenarioIssue);
       showToast(`已成功载入工程案例：${found.title}`, 'info');
+    }
+  };
+
+  const handleManualSaveCustomScenario = () => {
+    const isCustom = customScenarios.some((s) => s.id === currentScenarioId);
+    if (isCustom) {
+      const target = customScenarios.find((s) => s.id === currentScenarioId);
+      if (target) {
+        const updatedItem: PresetScenario = {
+          ...target,
+          title: context.projectName || target.title,
+          subtitle: `${context.projectPhase} 阶段 | ${context.asilLevel} | ${context.productType}`,
+          context,
+          issue,
+        };
+        const updatedList = saveCustomScenario(updatedItem);
+        setCustomScenarios(updatedList);
+        const timeStr = new Date().toLocaleTimeString();
+        setLastSavedAt(timeStr);
+        showToast(`已成功保存当前工程【${updatedItem.title}】修改 (${timeStr})`, 'success');
+      }
+    } else {
+      // If currently on a preset, prompt to save as custom
+      handleSaveAsCustomScenario(
+        context.projectName ? `${context.projectName} (自建工程)` : '我的自建工程',
+        context,
+        issue
+      );
     }
   };
 
@@ -212,23 +342,32 @@ export default function App() {
     const updated = saveCustomScenario(newScenario);
     setCustomScenarios(updated);
     setCurrentScenarioId(id);
+    try {
+      localStorage.setItem(CURRENT_SCENARIO_STORAGE_KEY, id);
+    } catch {}
     setContext(ctx);
     setIssue(iss);
+    setLastSavedAt(new Date().toLocaleTimeString());
     runAnalysis(ctx, iss);
     showToast(`已成功保存并切换为自定义工况【${title}】`, 'success');
   };
 
   const handleDeleteCustomScenario = (scenarioId: string) => {
+    const target = customScenarios.find((s) => s.id === scenarioId);
+    const targetTitle = target?.title || '自定义工程';
     const updated = deleteCustomScenario(scenarioId);
     setCustomScenarios(updated);
     if (currentScenarioId === scenarioId) {
       const fallback = PRESET_SCENARIOS[0];
       setCurrentScenarioId(fallback.id);
+      try {
+        localStorage.setItem(CURRENT_SCENARIO_STORAGE_KEY, fallback.id);
+      } catch {}
       setContext(fallback.context);
       setIssue(fallback.issue);
       runAnalysis(fallback.context, fallback.issue);
     }
-    showToast('已删除该自定义工况', 'info');
+    showToast(`已删除工程【${targetTitle}】`, 'info');
   };
 
   const handleExportBackup = () => {
@@ -384,6 +523,7 @@ export default function App() {
         onOpenScenarioManage={() => setIsScenarioManageOpen(true)}
         isAnalyzing={isAnalyzing}
         onRunAnalysis={() => runAnalysis(context, issue)}
+        onDeleteCustomScenario={(id) => handleDeleteCustomScenario(id)}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         theme={theme}
@@ -458,6 +598,9 @@ export default function App() {
             currentScenarioTitle={currentScenario?.title}
             isCustomScenario={currentScenario?.isCustom}
             onOpenScenarioManage={() => setIsScenarioManageOpen(true)}
+            onSaveCustomScenario={handleManualSaveCustomScenario}
+            onDeleteCustomScenario={() => handleDeleteCustomScenario(currentScenarioId)}
+            lastSavedAt={lastSavedAt}
           />
         )}
 

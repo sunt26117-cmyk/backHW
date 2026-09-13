@@ -21,6 +21,8 @@ import {
   Eye,
   X,
   CheckCircle2,
+  Save,
+  Trash2,
 } from 'lucide-react';
 
 interface ProjectContextViewProps {
@@ -33,6 +35,9 @@ interface ProjectContextViewProps {
   currentScenarioTitle?: string;
   isCustomScenario?: boolean;
   onOpenScenarioManage?: () => void;
+  onSaveCustomScenario?: () => void;
+  onDeleteCustomScenario?: () => void;
+  lastSavedAt?: string | null;
 }
 
 const ALL_CATEGORIES: IssueCategory[] = [
@@ -78,7 +83,12 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
   currentScenarioTitle,
   isCustomScenario,
   onOpenScenarioManage,
+  onSaveCustomScenario,
+  onDeleteCustomScenario,
+  lastSavedAt,
 }) => {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
   const toggleCategory = (cat: IssueCategory) => {
     if (issue.issueCategories.includes(cat)) {
       if (issue.issueCategories.length > 1) {
@@ -300,7 +310,7 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
   return (
     <div className="space-y-8">
       {/* Overview Banner */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm">
+      <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -316,7 +326,7 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
                 }`}>
                   <span>工况:</span>
                   <span className="font-semibold">{currentScenarioTitle}</span>
-                  {isCustomScenario && <span className="text-[10px] bg-emerald-500/20 px-1 rounded">自定义</span>}
+                  {isCustomScenario && <span className="text-[10px] bg-emerald-500/20 px-1 rounded">自定义工程</span>}
                 </span>
               )}
             </div>
@@ -347,7 +357,116 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Persistence & Lifecycle Bar */}
+        <div className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs bg-slate-950/50 -mx-5 -mb-5 px-5 py-3 rounded-b-xl">
+          {isCustomScenario ? (
+            <>
+              <div className="flex items-center gap-2 text-slate-300 flex-wrap">
+                <span className="flex items-center text-emerald-400 font-medium bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                  <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-400" />
+                  实时本地持久化已激活
+                </span>
+                <span className="text-slate-500">|</span>
+                <span className="text-slate-400">
+                  {lastSavedAt ? `上次已保存于 ${lastSavedAt}` : '所填内容已实时自动同步至本地缓存，重新打开或切换不丢失'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {onSaveCustomScenario && (
+                  <button
+                    type="button"
+                    id="save-current-custom-scenario-btn"
+                    onClick={onSaveCustomScenario}
+                    className="px-3 py-1.5 bg-emerald-800/50 hover:bg-emerald-700/70 text-emerald-100 border border-emerald-500/40 rounded-lg text-xs font-medium transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="立即手动保存所有最新修改"
+                  >
+                    <Save className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>保存当前修改</span>
+                  </button>
+                )}
+                {onDeleteCustomScenario && (
+                  <button
+                    type="button"
+                    id="delete-current-custom-scenario-btn"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="px-3 py-1.5 bg-red-950/50 hover:bg-red-900/70 text-red-300 border border-red-500/30 rounded-lg text-xs font-medium transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="彻底删除此自定义工程"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                    <span>删除此工程</span>
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 text-slate-400 flex-wrap">
+                <span className="flex items-center text-blue-400 font-medium bg-blue-950/60 px-2 py-0.5 rounded border border-blue-500/30">
+                  <span className="w-2 h-2 rounded-full bg-blue-400 mr-1.5 inline-block"></span>
+                  系统预置标准工况
+                </span>
+                <span className="text-slate-500">|</span>
+                <span className="text-slate-400">
+                  当前为系统只读基准工况。如需永久保存自己的真实项目数据，可随时点击右侧另存为专属工程。
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {onOpenScenarioManage && (
+                  <button
+                    type="button"
+                    onClick={onOpenScenarioManage}
+                    className="px-3 py-1.5 bg-blue-900/40 hover:bg-blue-800/60 text-blue-200 border border-blue-500/40 rounded-lg text-xs font-medium transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <FolderPlus className="w-3.5 h-3.5 text-blue-400" />
+                    <span>另存为我的专属工程</span>
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-red-500/50 rounded-xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 bg-red-950/60 border border-red-500/40 rounded-xl">
+                <Trash2 className="w-6 h-6 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">确认彻底删除此工程？</h3>
+                <p className="text-xs text-slate-400 mt-0.5">删除后无法恢复，将从本地存储中彻底清除该工程数据。</p>
+              </div>
+            </div>
+            <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800 text-xs text-slate-300">
+              <div className="font-semibold text-white text-sm">{context.projectName || currentScenarioTitle || '当前自建工程'}</div>
+              <div className="text-slate-400 text-[11px] mt-1">包含所有填写的参数指标、测试波形记录及实测问题描述。</div>
+            </div>
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  onDeleteCustomScenario?.();
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-medium transition cursor-pointer shadow-sm"
+              >
+                确认彻底删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Part 1: Project Background */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">

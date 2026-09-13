@@ -72,9 +72,14 @@ export const ResultProvenanceBanner: React.FC<ResultProvenanceBannerProps> = ({
                 <strong className="text-slate-200 font-mono">{generatedAt}</strong>
               </div>
             </div>
+            {provenance?.transparencyNote && (
+              <div className="text-[11px] text-purple-200 bg-purple-950/50 p-2 rounded border border-purple-800/50 font-medium">
+                🎯 <strong>工况限定约束：</strong> {provenance.transparencyNote}
+              </div>
+            )}
             <p className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/60 p-2.5 rounded-lg border border-purple-900/30">
               <ShieldAlert className="w-3.5 h-3.5 text-amber-400 inline mr-1" />
-              <strong>工程评审提示：</strong> 当前输出包含了深度大模型的探索性逻辑发散，有助于发现非显性机理交叉耦合。但针对芯片 SOA、耐压击穿与降额裕量等关键边界指标，评审时应优先以台架实测波形（MEASURED）为准，严禁把 AI 推测视作确定性规范。
+              <strong>工程评审提示：</strong> 当前输出基于车规级物理基线与输入实测数据进行了大模型针对性推演。针对芯片 SOA、耐压击穿与降额裕量等关键边界指标，评审时应以台架实测波形为最终依据。
             </p>
           </div>
         )}

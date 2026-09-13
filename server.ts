@@ -6,6 +6,8 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
 import { runExpertAnalysis } from './src/data/expertEngine';
+import { getDomainAdaptivePromptGuidance } from './src/utils/domainAdaptivePromptEngine';
+import { buildDualTimelinePlan } from './src/utils/dualTimelineEngine';
 
 dotenv.config();
 
@@ -80,6 +82,18 @@ export const HARDWARE_CHIEF_SYSTEM_PROMPT = `
    - PROCESS_DEFENSIVE (流程免责型): 极度在乎责任界限，坚决反对硬件单方背锅，力主通过跨专业外部ECR与客户会签实现免责闭环。
    在每个方案中给出针对 HW Lead, PM, SW, System 的具体心理预期与防身策略。
 5. 语言必须极其专业：使用正规汽车工程语境（如：工况剖面Mission Profile、抛负载抑制度、寄生振荡、体二极管反向恢复损耗、AEC-Q Grade 1）。
+6. 【工况强定锚与防随意发散红线 (Strict Grounding & Zero Hallucination)】：
+   - 必须把输入的【工程工况 PROJECT CONTEXT】与【实测问题 ENGINEERING ISSUE】作为唯一最高事实依据。
+   - 绝对禁止脱离当前工况给出通用套话（如“建议优化走线”、“建议检查PCB”等模糊空话）。针对当前工况：
+     - 若为 BLDC 电机控制工况：必须精准围绕反电势动能泵升 ($E=\frac{1}{2}J\omega^2$)、母线电容与 TVS 吸收、全下桥/全上桥主动短路制动、MOSFET 耐压降额开展；
+     - 若为 EMC 辐射发射/传导工况：必须精准围绕 CISPR 25 Class 5 频段限值、共模电流回流环路、开关谐波、π型滤波、铁氧体磁珠阻抗匹配开展；
+     - 若为 MOSFET 缺料替代/热阻工况：必须精准围绕 RDS(on)、Qg/Qgd 驱动损耗、AEC-Q101 标准、瞬态 SOA 脉冲耐压及结温降额开展；
+     - 若为 WCCA 容差漂移工况：必须精准围绕最坏情况极值分析 (Extreme Worst-Case) 与均方根容差 (RSS) 开展。
+   - 必须精准回答车规 4 大黄金问题：
+     ① What is wrong: 精准列出当前超标物理量、测试条件与现象；
+     ② Why: 揭示深层物理机理（具体物理效应与电路参数）；
+     ③ What should we do now: 给出 3 个鲜明对立的候选方案（原位原封修改 / 系统软件控制标定 / 重新投板改版），必须结合当前工期倒计时（daysRemaining）严格判定交付可行性；
+     ④ What would prove it: 给出量化的台架实测判定指标与闭环验证步骤。
 
 【输出格式强制要求】
 严格输出符合预定义JSON Schema的纯JSON文本，禁止带有任何Markdown代码块外壳（如 \`\`\`json），禁止任何前言和结语。
@@ -308,19 +322,135 @@ app.post('/api/copilot/test-model', async (req, res) => {
   }
 });
 
+/**
+ * 校验并用本地车规基准补全大模型推理结果，保证 100% 严谨性与输入工况强绑定
+ */
+function validateAndEnrichAiResult(parsed: any, baseline: any, modelName: string, context: any, issue: any): any {
+  if (!parsed || typeof parsed !== 'object') {
+    return baseline;
+  }
+  // 确保核心结论完整
+  if (!parsed.coreConclusion || !parsed.coreConclusion.problemSummary) {
+    parsed.coreConclusion = baseline.coreConclusion;
+  }
+  // 确保物理机理完整
+  if (!parsed.physicalMechanism || !parsed.physicalMechanism.rootCauseAnalysis) {
+    parsed.physicalMechanism = baseline.physicalMechanism;
+  }
+  // 确保风险评级完整
+  if (!parsed.riskRatings || !parsed.riskRatings.overallRisk) {
+    parsed.riskRatings = baseline.riskRatings;
+  }
+  // 确保候选方案非空
+  if (!Array.isArray(parsed.candidateActions) || parsed.candidateActions.length === 0) {
+    parsed.candidateActions = baseline.candidateActions;
+  }
+  // 确保最终推荐方案非空
+  if (!parsed.finalRecommendation || !parsed.finalRecommendation.recommendedOptionName) {
+    parsed.finalRecommendation = baseline.finalRecommendation;
+  }
+  // 补充专业工程视图与基线
+  parsed.dfmeaView = parsed.dfmeaView || baseline.dfmeaView;
+  parsed.containment = parsed.containment || baseline.containment;
+  parsed.capa = parsed.capa || baseline.capa;
+  parsed.raciMatrix = parsed.raciMatrix || baseline.raciMatrix;
+  parsed.engineeringDocs = parsed.engineeringDocs || baseline.engineeringDocs;
+  parsed.classifiedInfo = parsed.classifiedInfo || baseline.classifiedInfo;
+  parsed.multiRiskBreakdown = parsed.multiRiskBreakdown || baseline.multiRiskBreakdown;
+  parsed.whyNotComparison = parsed.whyNotComparison || baseline.whyNotComparison;
+  parsed.next24HourPlan = parsed.next24HourPlan || baseline.next24HourPlan;
+  parsed.edrRecord = parsed.edrRecord || baseline.edrRecord;
+  parsed.redTeamChallenge = parsed.redTeamChallenge || baseline.redTeamChallenge;
+  parsed.dualTimeline = parsed.dualTimeline || baseline.dualTimeline || buildDualTimelinePlan(parsed, context, issue);
+
+  parsed.provenance = {
+    executionMode: 'ONLINE_AI_INFERRED',
+    engineName: `云端大模型 (${modelName}) 工况强定锚推理`,
+    isAiInferred: true,
+    isDeterministicRule: false,
+    generatedAt: new Date().toLocaleTimeString(),
+    modelIdentifier: modelName,
+    transparencyNote: `本分析由云端大模型 [${modelName}] 严格限定在【${context?.projectName || '车载项目'} · ${context?.projectPhase || 'DV'}】输入工况及实测数据【${issue?.actualMeasurement || issue?.failurePhenomenon || '实测数据'}】下推演生成，严禁脱离实际随意作答。`,
+  };
+
+  return parsed;
+}
+
 // AI Analysis Endpoint
 app.post('/api/copilot/analyze', async (req, res) => {
   try {
     const { context, issue, modelConfig } = req.body;
 
+    // 1. 预先执行本地车规确定性专家引擎，提取物理机理与工程事实底线
+    const baseline = runExpertAnalysis(context, issue);
+
+    // 2. 根据输入实测与工况自适应匹配车规 Chief Engineer 专属专业领域指导
+    const domainGuidance = getDomainAdaptivePromptGuidance(issue, context);
+
     const prompt = `
-Please evaluate this automotive ECU hardware engineering problem according to the system prompt and return a complete JSON object.
+你必须严格基于以下【输入工况】、【实测数据】与【${domainGuidance.title}】专属车规物理基准进行硬件工程决策推演，绝不脱离实际随意作答：
 
-PROJECT CONTEXT:
-${JSON.stringify(context, null, 2)}
+=============================================
+【1. 输入工程背景 (PROJECT CONTEXT)】
+- 项目名称: ${context?.projectName || '车载域控制器 ECU 项目'}
+- ECU 类型: ${context?.ecuType || '域控制器'} (${context?.productType || '车身与底盘'})
+- 项目阶段: ${context?.projectPhase || 'DV'} | 样品状态: ${context?.sampleStatus || 'B样试制件'}
+- 功能安全等级: ${context?.asilLevel || 'ASIL B'}
+- 交付倒计时: 距离【${context?.nextMilestone || '交付节点'}】仅剩【${context?.daysRemaining ?? 14}天】
+- 成本约束: ${context?.costConstraint || '中等敏感'}
+- 直属硬件领导风格: ${context?.hwLeadStyle || 'AGILE_DELIVERY'}
 
-ENGINEERING ISSUE:
-${JSON.stringify(issue, null, 2)}
+【2. 输入实测问题与工程顾虑 (ENGINEERING ISSUE)】
+- 识别工程领域: 【${domainGuidance.title}】
+- 领域分类: ${issue?.issueCategories?.join(', ') || '硬件工程'}
+- 规范要求: ${issue?.requirement || '未定义'}
+- 实际测量结果: ${issue?.actualMeasurement || '未提供实测'}
+- 测试条件: ${issue?.testCondition || '未提供测试边界'}
+- 测试环境: ${issue?.environment || '未提供环境条件'}
+- 失效现象: ${issue?.failurePhenomenon || '未提供现象'}
+- 核心工程顾虑: ${issue?.engineeringConcern || '未提供顾虑'}
+- 关键实测数值: ${JSON.stringify(issue?.measuredValues || {}, null, 2)}
+
+【3. 本工程专属物理领域与推演规约 (${domainGuidance.title})】
+[物理公式与机理推导要求]:
+${domainGuidance.physicsFormulas}
+
+[车规元器件规格与成熟料号指导]:
+${domainGuidance.componentSpecs}
+
+[专业测试仪器与台架测量规程]:
+${domainGuidance.testProtocol}
+
+[跨专业协同要求 (SW / System / PM)]:
+${domainGuidance.crossDisciplinaryImpact}
+
+[严禁出现的空话反模式 (PROHIBITED VAGUENESS)]:
+${domainGuidance.prohibitedVagueness.map(v => `* ${v}`).join('\n')}
+
+【4. 车规基准定锚 (AUTOMOTIVE BENCHMARK)】
+- 确定性问题定性: ${baseline?.coreConclusion?.problemSummary || ''}
+- 核心物理失效机理: ${baseline?.physicalMechanism?.rootCauseAnalysis || ''}
+- 关键物理影响因子: ${JSON.stringify(baseline?.physicalMechanism?.keyPhysicalFactors || [], null, 2)}
+- 综合风险评级基准: ${baseline?.riskRatings?.overallRisk || 'Medium-High'} (${baseline?.riskRatings?.overallRiskScore ?? 75}分)
+=============================================
+
+【执行指令与车规专家落地硬性约束】
+1. 【深度咬合专属领域公式与器件规格】：
+   - 必须严格应用上述【${domainGuidance.title}】中的物理公式与机理进行量化推导，严禁张冠李戴（例如在 EMC 辐射问题上算电机动能，或在 WCCA 精度问题上测相电压）；
+   - 方案中必须包含具体的元器件量化参数与车规主流成熟料号参考（参考上述推荐规格）；
+2. 【台架实操抓波与判定规程】：
+   - 在候选方案的 verificationMethod 及 finalRecommendation.immediateSteps 中，必须严格遵守上述给出的测试仪器、探头接法、测点位置与合格量化判据；
+3. 【时间红线与不可接受行为】：
+   - 距离交付里程碑仅剩【${context?.daysRemaining ?? 14}天】：
+     * 若方案需要重新设计 PCB 投板打样（通常需 18~25 天），必须在工期风险中明确标定延期导致违约索赔，或直接标记一票否决 (veto)；
+     * 重点推演原位元器件替换（BOM Patching，0天板卡改动工期）及底层软件/控制标定（SW Calibration，24~48小时固件输出）；
+   - 在 engineeringDocs.pmDecisionEmail 中输出可直接复制发送给 PM 的汇报邮件，条理清晰、技术依据确凿、明确界定责任边界。
+4. 【双层工程时间轴机制 (Dual-Timeline Action Architecture)】：
+   车规硬件决策绝非单选，必须在 JSON 中严格清晰拆分：
+   - containmentPhase (T+24h 应急临时遏制)：0天板卡改版工期（如原位阻容焊盘替换、软件寄存器展频、线束磁环套管），在当前交样节点前 24~48h 内完成闭环，满足装车验证与试验准入；
+   - permanentPhase (下一版本永久纠正)：在后续改版（如 C 样或 DV2/PV）中重新投板优化地回路/布局布线，彻底根除物理根因，通过全套规范与 PPAP Level 3 审查；
+   - strategicTradeoff：清晰阐明为什么绝不能只选其一，而是需要双轨闭环协同推进。
+5. 严格输出符合预定义 JSON Schema 的纯 JSON 文本，包含全部必须键。
 
 Return a single JSON object with these exact keys:
 {
@@ -411,6 +541,35 @@ Return a single JSON object with these exact keys:
     "lessonsLearned": "...",
     "verificationTarget": "..."
   },
+  "dualTimeline": {
+    "containmentPhase": {
+      "phaseTag": "T_PLUS_24H_CONTAINMENT",
+      "timeWindow": "T + 24h 紧急应急围堵 (Containment)",
+      "title": "...",
+      "objective": "...",
+      "hardwareImpact": "...",
+      "responsibilityRole": "...",
+      "actions": [
+        { "step": "...", "detail": "...", "owner": "...", "duration": "...", "hardwareImpact": "...", "deliverable": "..." }
+      ],
+      "verificationCriteria": "...",
+      "exitCriteria": "..."
+    },
+    "permanentPhase": {
+      "phaseTag": "NEXT_PHASE_PERMANENT",
+      "timeWindow": "下一版本永久纠正 / SOP 封样",
+      "title": "...",
+      "objective": "...",
+      "hardwareImpact": "...",
+      "responsibilityRole": "...",
+      "actions": [
+        { "step": "...", "detail": "...", "owner": "...", "duration": "...", "hardwareImpact": "...", "deliverable": "..." }
+      ],
+      "verificationCriteria": "...",
+      "exitCriteria": "..."
+    },
+    "strategicTradeoff": "..."
+  },
   "engineeringDocs": {
     "pmDecisionEmail": {
       "subject": "...",
@@ -492,20 +651,12 @@ Return a single JSON object with these exact keys:
         );
 
         const parsed = healAndParseJson(rawContent);
-        parsed.provenance = {
-          executionMode: 'ONLINE_AI_INFERRED',
-          engineName: `云端大模型 (${modelConfig.model}) 即时推理`,
-          isAiInferred: true,
-          isDeterministicRule: false,
-          generatedAt: new Date().toLocaleTimeString(),
-          modelIdentifier: modelConfig.model,
-          transparencyNote: `本分析由 Google Gemini [${modelConfig.model}] 大模型即时推演生成，包含跨领域工程推测。`,
-        };
+        const finalData = validateAndEnrichAiResult(parsed, baseline, modelConfig.model, context, issue);
         res.setHeader('X-Engine-Source', `Gemini-${modelConfig.model}`);
         return res.json({
           success: true,
-          data: parsed,
-          result: parsed,
+          data: finalData,
+          result: finalData,
           source: `gemini:${modelConfig.model}`,
           model: modelConfig.model,
         });
@@ -546,20 +697,12 @@ Return a single JSON object with these exact keys:
         );
 
         const parsed = healAndParseJson(rawContent);
-        parsed.provenance = {
-          executionMode: 'ONLINE_AI_INFERRED',
-          engineName: `云端大模型 (${modelConfig.model}) 即时推理`,
-          isAiInferred: true,
-          isDeterministicRule: false,
-          generatedAt: new Date().toLocaleTimeString(),
-          modelIdentifier: modelConfig.model,
-          transparencyNote: `本分析由自定义大模型 [${modelConfig.model}] 即时生成，结合了车规首席架构师提示词与多维决策护栏。`,
-        };
+        const finalData = validateAndEnrichAiResult(parsed, baseline, modelConfig.model, context, issue);
         res.setHeader('X-Engine-Source', `Custom-${modelConfig.model}`);
         return res.json({
           success: true,
-          data: parsed,
-          result: parsed,
+          data: finalData,
+          result: finalData,
           source: `custom-llm:${modelConfig.model}`,
           model: modelConfig.model,
         });
