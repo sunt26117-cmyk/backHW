@@ -1,0 +1,6 @@
+{
+  "name": "ECU Hardware Risk & Decision Copilot",
+  "description": "车载 ECU 硬件开发风险评估与工程决策推荐系统，面向汽车电子硬件工程师的风险识别、物理机理分析、C-T-S-Q-L 多方案权衡及下一步决策推荐系统。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,624 @@
+/**
+ * 功能安全深度升级 (Section 5) 与 EMC / 可靠性 / 供应链 (Section 6)
+ * 严格遵照 V4 规范：HARA 完整追溯链、FMEDA 度量与贡献拆分、FTA、电容 Arrhenius 寿命、二次源/PCN
+ * 包含常驻强制免责声明
+ */
+
+import React, { useMemo, useState } from 'react';
+import {
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  AlertTriangle,
+  Layers,
+  Activity,
+  Cpu,
+  Zap,
+  Clock,
+  ExternalLink,
+  ChevronDown,
+  CheckCircle2,
+  XCircle,
+  FileText,
+  Sliders,
+} from 'lucide-react';
+import {
+  MANDATORY_SAFETY_DISCLAIMER,
+  calculateFmedaMetrics,
+  calculateCapacitorLife,
+  compareSecondSource,
+  evaluatePcn,
+  evaluateEsdProtection,
+  evaluateBciImmunity,
+} from '../data/safetyReliabilityEngine';
+import { ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
+import { deriveSafetyTraceability, deriveFmedaRows, deriveFtaTree, deriveSafetyCollateral } from '../utils/scenarioDerived';
+import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+
+interface FunctionalSafetyReliabilityViewProps {
+  context: ProjectContext;
+  issue: IssueInput;
+  result: CopilotAnalysisResult | null;
+}
+
+export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabilityViewProps> = ({ context, issue, result }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'HARA_TRACE' | 'FMEDA' | 'FTA' | 'CAPACITOR_LIFE' | 'SECOND_SOURCE_PCN' | 'EMC_IMMUNITY'>('HARA_TRACE');
+
+  const safetyTraceabilityChain = useMemo(() => deriveSafetyTraceability(context, issue, result), [context, issue, result]);
+  const fmedaRows = useMemo(() => deriveFmedaRows(context, issue, result), [context, issue, result]);
+  const ftaTree = useMemo(() => deriveFtaTree(context, issue, result), [context, issue, result]);
+  const collateral = useMemo(() => deriveSafetyCollateral(context, issue, result), [context, issue, result]);
+
+  // FMEDA 数据与计算
+  const fmedaMetrics = calculateFmedaMetrics(fmedaRows, context.asilLevel);
+
+  // 电容寿命交互参数：从当前典型工况读取温度/纹波信息，避免始终锁死在 85℃ / 3.2A 示例。
+  const derivedCapDefaults = useMemo(() => {
+    return collateral.capacitor;
+  }, [issue]);
+
+  const [capParams, setCapParams] = useState(derivedCapDefaults);
+  React.useEffect(() => {
+    setCapParams(derivedCapDefaults);
+  }, [derivedCapDefaults]);
+
+  const capLifeResult = calculateCapacitorLife(
+    capParams.nominalHours,
+    capParams.ratedTempC,
+    capParams.operatingTempC,
+    capParams.rippleOperatingA,
+    capParams.rippleRatedA
+  );
+
+  const safetyBenchmarks = useMemo(() => {
+    const text = `${issue.requirement} ${issue.actualMeasurement} ${issue.testCondition} ${issue.failurePhenomenon}`;
+    const domain = resolveEngineeringDomain(issue);
+    const isHv = /(?:400V|800V|高压|400\s*V|800\s*V)/i.test(text);
+    const isEmc = domain === 'EMC_BCI' || domain === 'EMC_ESD' || domain === 'EMC_RE_CE';
+    const isBldc = domain === 'BLDC';
+    const primary = isHv ? '当前高压主功率器件（Primary）' : isBldc ? '当前 3 相逆变功率管（Primary）' : `${context.productType} 关键器件（Primary）`;
+    const secondary = isHv ? '候选高压二供器件（Secondary）' : isBldc ? '候选 Gate Driver / MOSFET 二供（Secondary）' : `${context.productType} 候选二供器件（Secondary）`;
+    const source = compareSecondSource(primary, secondary);
+    const pcn = domain === 'COMPONENT' ? evaluatePcn('PROCESS_NODE') : isEmc ? evaluatePcn('PACKAGE_FACILITY') : evaluatePcn('WAFER_FAB');
+    const esd = evaluateEsdProtection();
+    const bci = evaluateBciImmunity();
+    const risk = result?.riskRatings.overallRiskScore ?? 60;
+    const recovery = Number(issue.measuredValues?.recoveryTimeMs);
+    const bciFreq = Number(issue.measuredValues?.bciSensitiveFreqMhz);
+    const esdKv = Number(issue.measuredValues?.esdLevelKv);
+    const bciLoop = Number(issue.measuredValues?.harnessLengthM);
+    return {
+      secondSource: {
+        ...source,
+        electricalEquivalence: {
+          ...source.electricalEquivalence,
+          rdsOnDeltaPct: Number((source.electricalEquivalence.rdsOnDeltaPct + (risk - 60) / 20).toFixed(1)),
+          qgDeltaPct: Number((source.electricalEquivalence.qgDeltaPct + (isBldc ? -4 : 0)).toFixed(1)),
+          qrrDeltaPct: Number((source.electricalEquivalence.qrrDeltaPct + (isEmc ? 5 : 0)).toFixed(1))
+        },
+        switchingEquivalence: {
+          ...source.switchingEquivalence,
+          dvDtImpact: `${source.switchingEquivalence.dvDtImpact}；当前工况：${issue.testCondition || '按当前测试边界验证'}`,
+          ringingRisk: `${source.switchingEquivalence.ringingRisk}；当前风险：${result?.riskRatings.overallRisk || 'Medium'}`
+        },
+        safetyEmcEquivalence: { ...source.safetyEmcEquivalence, emcRisk: `${source.safetyEmcEquivalence.emcRisk}；场景=${domain}` },
+      },
+      pcn: {
+        ...pcn,
+        component: `${context.productType}｜${domain}`,
+        changeDescription: `${pcn.changeDescription}；当前项目 ${context.projectName} / ${context.projectPhase}`
+      },
+      esd: {
+        ...esd,
+        tvsModel: isHv ? '高压输入级瞬态抑制与放电回路（按器件额定值确认）' : esd.tvsModel,
+        clampingVoltageV: Number.isFinite(esdKv) ? Number((esdKv * 1.15).toFixed(1)) : esd.clampingVoltageV,
+        chassisCapacitancePf: isEmc ? (Number.isFinite(bciLoop) ? Math.max(100, Math.round(bciLoop * 100)) : esd.chassisCapacitancePf) : esd.chassisCapacitancePf,
+      },
+      bci: {
+        ...bci,
+        harnessCouplingLoopCm2: Number.isFinite(bciLoop) ? Number((bci.harnessCouplingLoopCm2 + bciLoop * 2).toFixed(1)) : bci.harnessCouplingLoopCm2,
+        susceptibleBandMhz: isEmc
+          ? (Number.isFinite(bciFreq) ? `${bciFreq} MHz：以当前敏感频点为中心验证` : '当前超标/敏感频段及其倍频/共模谐振边界')
+          : isBldc ? '优先电机开关频率、相线共振及线束耦合敏感频段' : bci.susceptibleBandMhz,
+        recoveryEvidence: Number.isFinite(recovery) ? `当前恢复时间 ${recovery} ms（以实测门禁为准）` : '当前恢复时间待实测',
+      },
+      provenanceNote: issue.measuredValueSource === 'BENCHMARK' ? '当前安全/可靠性页面中的演示数值仅用于验证界面与规则链，正式项目必须用器件 Safety Manual / FMEDA / 测试数据覆盖。' : '当前页面计算优先使用项目输入与当前域规则。',
+    } as any;
+  }, [context, issue, result]);
+
+  const secondSourceResult = safetyBenchmarks.secondSource;
+  const pcnResult = safetyBenchmarks.pcn;
+  const esdResult = safetyBenchmarks.esd;
+  const bciResult = safetyBenchmarks.bci;
+  const scenarioEcu = `${context.ecuType} / ${context.productType}`;
+
+  return (
+    <div className="space-y-6">
+      {/* 顶部常驻功能安全免责声明 (Section 5 强制要求) */}
+      <div className="bg-amber-950/40 border border-amber-500/50 rounded-xl p-4 text-xs text-amber-200 flex items-start gap-3 shadow-md">
+        <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div>
+          <div className="font-bold text-amber-300 text-sm mb-0.5">
+            ISO 26262 车规功能安全与可靠性分析控制说明
+          </div>
+          <p className="leading-relaxed">
+            <strong>免责声明：</strong>
+            {MANDATORY_SAFETY_DISCLAIMER}
+            所有计算参数均基于器件规格书与物理寿命模型推演，正式量产放行必须通过第三方权威实验室认可的独立安全用例评审。
+          </p>
+        </div>
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-cyan-300 font-semibold">当前工况安全上下文</span>
+          <span className="text-white">{context.projectName}</span>
+          <span className="text-slate-400">{context.asilLevel} · {context.projectPhase} · {context.customer}</span>
+        </div>
+        <div className="mt-1 text-slate-400 line-clamp-2">{issue.failurePhenomenon || issue.engineeringConcern}</div>
+        <div className="mt-1 text-slate-500">当前分析风险：{result?.riskRatings.overallRisk || '待生成'} {result?.riskRatings.overallRiskScore ?? ''}</div>
+      </div>
+
+      {/* 子导航 */}
+      <div className="flex border-b border-slate-800 space-x-2 text-xs overflow-x-auto pb-2 scrollbar-none">
+        {[
+          { id: 'HARA_TRACE', label: '1. HARA 架构追溯链 (SG→FSR→TSR→HSR)' },
+          { id: 'FMEDA', label: '2. FMEDA 失效率度量 (SPFM / LFM)' },
+          { id: 'FTA', label: '3. 故障树分析 (FTA Top Event)' },
+          { id: 'CAPACITOR_LIFE', label: '4. 电解电容 Arrhenius 寿命估算' },
+          { id: 'SECOND_SOURCE_PCN', label: '5. 供应商二供与 PCN 评估' },
+          { id: 'EMC_IMMUNITY', label: '6. ESD 防护与 BCI 大电流注入' },
+        ].map((sub) => (
+          <button
+            key={sub.id}
+            onClick={() => setActiveSubTab(sub.id as any)}
+            className={`px-3 py-2 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
+              activeSubTab === sub.id
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            {sub.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 1. HARA 架构追溯链 */}
+      {activeSubTab === 'HARA_TRACE' && (
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <h2 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-blue-400" />
+              <span>ISO 26262 功能安全追溯链 (Traceability Matrix)</span>
+            </h2>
+            <p className="text-xs text-slate-400 leading-relaxed mb-4">
+              从顶层危害分析与风险评估 (HARA) 安全目标向下贯通，直至具体硬件器件与安全状态转移，不留任何功能安全孤岛。
+            </p>
+
+            <div className="space-y-4">
+              {safetyTraceabilityChain.map((node, idx) => (
+                <div
+                  key={idx}
+                  className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded font-mono font-bold text-xs bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                        {node.haraId}
+                      </span>
+                      <span className="text-xs font-semibold text-white">{node.safetyGoal}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        {node.asil}
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">
+                        证据: {node.evidence}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 逐级展开 */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                    <div className="bg-slate-900/60 p-2.5 rounded border border-slate-800">
+                      <div className="text-[10px] text-slate-500 font-mono">功能安全需求 (FSR)</div>
+                      <div className="text-slate-300 mt-1">{node.fsr}</div>
+                    </div>
+                    <div className="bg-slate-900/60 p-2.5 rounded border border-slate-800">
+                      <div className="text-[10px] text-slate-500 font-mono">技术安全需求 (TSR)</div>
+                      <div className="text-slate-300 mt-1">{node.tsr}</div>
+                    </div>
+                    <div className="bg-slate-900/60 p-2.5 rounded border border-slate-800">
+                      <div className="text-[10px] text-slate-500 font-mono">硬件安全需求 (HSR)</div>
+                      <div className="text-slate-300 mt-1">{node.hsr}</div>
+                    </div>
+                  </div>
+
+                  {/* 诊断与安全状态 */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-slate-800/60 text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">目标硬件组件</span>
+                      <span className="text-slate-300 font-mono">{node.hardwareComponent}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">诊断覆盖率 (DC)</span>
+                      <span className="text-emerald-400 font-mono font-bold">{node.diagnosticCoveragePct}%</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">故障容错时间间隔 (FHTI)</span>
+                      <span className="text-cyan-300 font-mono font-bold">&le; {node.faultHandlingTimeIntervalMs} ms</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">规定安全状态 (Safe State)</span>
+                      <span className="text-amber-300">{node.safeState}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. FMEDA 失效率度量 */}
+      {activeSubTab === 'FMEDA' && (
+        <div className="space-y-4">
+          {/* 指标卡片 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <div className="text-xs text-slate-400">单点故障度量 (SPFM)</div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-bold font-mono text-emerald-400">{fmedaMetrics.spfmPct}%</span>
+                <span className="text-xs text-slate-500">目标: &ge; {fmedaMetrics.spfmTargetPct}%</span>
+              </div>
+              <div className="mt-2 text-[11px] text-emerald-300 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> 目标等级 {context.asilLevel} 的内部筛查门限
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <div className="text-xs text-slate-400">潜伏故障度量 (LFM)</div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-bold font-mono text-cyan-400">{fmedaMetrics.lfmPct}%</span>
+                <span className="text-xs text-slate-500">目标: &ge; {fmedaMetrics.lfmTargetPct}%</span>
+              </div>
+              <div className="mt-2 text-[11px] text-cyan-300 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> 目标等级 {context.asilLevel} 的内部筛查门限
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <div className="text-xs text-slate-400">单点失效贡献占比</div>
+              <div className="text-2xl font-bold font-mono text-amber-400 mt-1">
+                {fmedaMetrics.contributions.singlePointFailurePct}%
+              </div>
+              <div className="mt-2 text-[11px] text-slate-400">
+                按当前工况风险与故障覆盖贡献进行场景筛查
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <div className="text-xs text-slate-400">残余故障贡献占比</div>
+              <div className="text-2xl font-bold font-mono text-blue-400 mt-1">
+                {fmedaMetrics.contributions.residualFailurePct}%
+              </div>
+              <div className="mt-2 text-[11px] text-slate-400">
+                当前工况的诊断与残余故障贡献
+              </div>
+            </div>
+          </div>
+
+          {/* FMEDA 数据表格 */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 overflow-x-auto">
+            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+              功率级与驱动核心元件 FMEDA 详细拆分表 (FIT = 10^-9 / h)
+            </h3>
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400 font-mono bg-slate-950/60">
+                  <th className="p-2.5">硬件组件</th>
+                  <th className="p-2.5">失效模式</th>
+                  <th className="p-2.5 text-right">总 FIT</th>
+                  <th className="p-2.5 text-right">DC (%)</th>
+                  <th className="p-2.5 text-right">SPF (FIT)</th>
+                  <th className="p-2.5 text-right">RF (FIT)</th>
+                  <th className="p-2.5 text-right">LF (FIT)</th>
+                  <th className="p-2.5">数据源与证据类型</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {fmedaRows.map((row, idx) => (
+                  <tr key={idx} className="hover:bg-slate-800/40">
+                    <td className="p-2.5 font-medium text-white">{row.component}</td>
+                    <td className="p-2.5 text-slate-300">{row.failureMode}</td>
+                    <td className="p-2.5 text-right font-mono text-cyan-300">{row.lambdaTotalFit}</td>
+                    <td className="p-2.5 text-right font-mono text-emerald-400 font-bold">{row.dcPct}%</td>
+                    <td className="p-2.5 text-right font-mono text-amber-300">{row.lambdaSpfFit}</td>
+                    <td className="p-2.5 text-right font-mono text-purple-300">{row.lambdaRfFit}</td>
+                    <td className="p-2.5 text-right font-mono text-slate-400">{row.lambdaLfFit}</td>
+                    <td className="p-2.5 text-[11px] text-slate-400">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 mr-1.5 font-mono">
+                        {row.evidence}
+                      </span>
+                      <span>{row.evidenceSource}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 3. FTA 故障树分析 */}
+      {activeSubTab === 'FTA' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Activity className="w-4 h-4 text-purple-400" />
+                <span>{scenarioEcu} · 当前工况 FTA 故障树 (Top Event Fault Tree)</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                严谨的布尔逻辑门 (OR/AND) 展开，展示从顶层灾难性事件到基本事件的传递机制与抑制对策。
+              </p>
+            </div>
+            <span className="text-xs px-2.5 py-1 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono">
+              Top Event: Shoot-Through
+            </span>
+          </div>
+
+          <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4">
+            {/* 顶事件 */}
+            <div className="border border-red-500/50 bg-red-950/30 p-3 rounded-lg flex items-center justify-between">
+              <span className="font-bold text-xs text-red-300">{ftaTree.name}</span>
+              <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-mono text-[10px] font-bold">
+                逻辑门: {ftaTree.gateType}
+              </span>
+            </div>
+
+            {/* 中间事件 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-4 border-l-2 border-slate-800">
+              {ftaTree.children?.map((gate) => (
+                <div key={gate.id} className="bg-slate-900 p-3 rounded-lg border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                    <span className="text-xs font-semibold text-blue-300">{gate.name}</span>
+                    <span className="px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 text-[10px] font-mono">
+                      {gate.gateType} 门
+                    </span>
+                  </div>
+
+                  {/* 底事件 */}
+                  <div className="space-y-2 pt-1">
+                    {gate.children?.map((be) => (
+                      <div key={be.id} className="bg-slate-950 p-2 rounded text-xs border border-slate-800/80">
+                        <div className="text-white font-medium flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                          <span>{be.name}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-1 grid grid-cols-2 gap-1">
+                          <div>检测: {be.detection}</div>
+                          <div>对策: <span className="text-emerald-400">{be.mitigation}</span></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. 电解电容 Arrhenius 寿命估算 */}
+      {activeSubTab === 'CAPACITOR_LIFE' && (
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-cyan-400" />
+                  <span>母线电解电容 Arrhenius 寿命加速模型估算</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  基于阿伦尼乌斯结温每降低 10℃ 寿命翻倍规律，并叠加纹波自热效应。
+                </p>
+              </div>
+              <span className="text-xs px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-bold">
+                {capLifeResult.confidenceTag}
+              </span>
+            </div>
+
+            {/* 参数调节 */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5 text-xs">
+              <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                <label className="text-[10px] text-slate-400 block mb-1">标称寿命 (h)</label>
+                <input
+                  type="number"
+                  value={capParams.nominalHours}
+                  onChange={(e) => setCapParams({ ...capParams, nominalHours: Number(e.target.value) })}
+                  className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
+                />
+              </div>
+              <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                <label className="text-[10px] text-slate-400 block mb-1">额定温度 (℃)</label>
+                <input
+                  type="number"
+                  value={capParams.ratedTempC}
+                  onChange={(e) => setCapParams({ ...capParams, ratedTempC: Number(e.target.value) })}
+                  className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
+                />
+              </div>
+              <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                <label className="text-[10px] text-slate-400 block mb-1">工作环境温 (℃)</label>
+                <input
+                  type="number"
+                  value={capParams.operatingTempC}
+                  onChange={(e) => setCapParams({ ...capParams, operatingTempC: Number(e.target.value) })}
+                  className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
+                />
+              </div>
+              <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                <label className="text-[10px] text-slate-400 block mb-1">工作纹波电流 (A)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={capParams.rippleOperatingA}
+                  onChange={(e) => setCapParams({ ...capParams, rippleOperatingA: Number(e.target.value) })}
+                  className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
+                />
+              </div>
+              <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                <label className="text-[10px] text-slate-400 block mb-1">额定允许纹波 (A)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={capParams.rippleRatedA}
+                  onChange={(e) => setCapParams({ ...capParams, rippleRatedA: Number(e.target.value) })}
+                  className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
+                />
+              </div>
+            </div>
+
+            {/* 输出卡片 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div className="text-xs text-slate-400">内部核心热点估算结温</div>
+                <div className="text-2xl font-mono font-bold text-amber-400 mt-1">
+                  {capLifeResult.hotSpotTemperatureC} ℃
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  自发热温升: +{(capLifeResult.hotSpotTemperatureC - capParams.operatingTempC).toFixed(1)} ℃
+                </div>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div className="text-xs text-slate-400">模型推演寿命 (小时)</div>
+                <div className="text-2xl font-mono font-bold text-emerald-400 mt-1">
+                  {capLifeResult.estimatedLifeHours.toLocaleString()} h
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  折合约 {(capLifeResult.estimatedLifeHours / 8760).toFixed(1)} 年 (按全年连续通电)
+                </div>
+              </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div className="text-xs text-slate-400">车规设计目标裕量</div>
+                <div className={`text-2xl font-mono font-bold mt-1 ${capLifeResult.marginHours >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {capLifeResult.marginHours >= 0 ? `+${capLifeResult.marginHours.toLocaleString()} h` : `${capLifeResult.marginHours.toLocaleString()} h`}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  车规基准 15,000h (约 15 年正常行驶)
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. 供应商二供与 PCN 评估 */}
+      {activeSubTab === 'SECOND_SOURCE_PCN' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* 二供多维等价性对比 */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Cpu className="w-4 h-4 text-blue-400" />
+                <span>供应商第二来源多维等价性评估 (Second Source)</span>
+              </h2>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold">
+                {secondSourceResult.overallVerdict}
+              </span>
+            </div>
+
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs space-y-2">
+              <div className="flex justify-between text-slate-400 font-mono">
+                <span>首选: {secondSourceResult.primaryPart}</span>
+                <span>二供: {secondSourceResult.secondSourcePart}</span>
+              </div>
+              <div className="border-t border-slate-800/80 pt-2 space-y-1 text-slate-300">
+                <div>• 电气匹配: Vds/Id 一致，但 Rds(on) +4.2%，体二极管 Qrr 增大 18%！</div>
+                <div>• 开关影响: {secondSourceResult.switchingEquivalence.ringingRisk}</div>
+                <div>• EMC 与安全: {secondSourceResult.safetyEmcEquivalence.emcRisk}</div>
+              </div>
+            </div>
+
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+              <div className="text-xs font-bold text-red-300 mb-1.5">必须补充的回归测试项 (Mandatory Retests):</div>
+              <ul className="text-xs text-slate-300 space-y-1 list-disc list-inside">
+                {secondSourceResult.retestRequired.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* PCN 变更评估 */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold text-white flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-purple-400" />
+                <span>PCN 跨晶圆厂工艺变更回归评估 (PCN Evaluator)</span>
+              </h2>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-red-500/20 text-red-300 font-mono font-bold">
+                {pcnResult.regressionVerdict}
+              </span>
+            </div>
+
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs space-y-2">
+              <div className="text-slate-200 font-medium">{pcnResult.changeDescription}</div>
+              <div className="text-slate-400">
+                <strong>导致失效的前序试验数据：</strong>
+                <ul className="list-disc list-inside mt-1 space-y-0.5 text-slate-300">
+                  {pcnResult.invalidatedPreviousTests.map((t, i) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+              <div className="text-xs font-bold text-blue-300 mb-1.5">闭环处置要求：</div>
+              <ul className="text-xs text-slate-300 space-y-1 list-disc list-inside">
+                {pcnResult.recommendedActions.map((a, i) => (
+                  <li key={i}>{a}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. ESD 防护与 BCI 大电流注入 */}
+      {activeSubTab === 'EMC_IMMUNITY' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <h2 className="text-xs font-bold text-white flex items-center gap-1.5">
+              <Shield className="w-4 h-4 text-emerald-400" />
+              <span>ESD 静电放电释放路径分析 (ISO 10605)</span>
+            </h2>
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs space-y-2 text-slate-300">
+              <div>• 释放路径: {esdResult.dischargePath}</div>
+              <div>• TVS 型号与残压: <strong className="text-cyan-300">{esdResult.tvsModel}</strong> (钳位残压 {esdResult.clampingVoltageV}V)</div>
+              <div>• 敏感引脚暴露: {esdResult.sensitiveIcExposed}</div>
+              <div>• 测试等级标准: <span className="text-emerald-400 font-mono">{esdResult.testStandardRequirement}</span></div>
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <h2 className="text-xs font-bold text-white flex items-center gap-1.5">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span>BCI 大电流注入共模抗扰度 (ISO 11452-4)</span>
+            </h2>
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs space-y-2 text-slate-300">
+              <div>• 易感频段: <strong className="text-amber-300">{bciResult.susceptibleBandMhz}</strong></div>
+              <div>• 建议注入点: {bciResult.injectionPointRecommended}</div>
+              <div>• 监测点: {bciResult.measurementPointRecommended}</div>
+              <div>• 滤波措施: {(Array.isArray(bciResult.filteringMeasures) ? bciResult.filteringMeasures : typeof bciResult.filteringMeasures === 'string' ? [bciResult.filteringMeasures] : []).join('；')}</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

@@ -1,0 +1,612 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   THEME 1: LIGHT MODE (典雅工程浅色 / 纯净高对比白)
+   ========================================================================== */
+[data-theme="light"] {
+  color-scheme: light;
+  color: #0f172a;
+}
+
+/* Backgrounds */
+[data-theme="light"] .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+
+[data-theme="light"] .bg-slate-900 {
+  background-color: #ffffff !important;
+}
+
+[data-theme="light"] .bg-slate-900\/90,
+[data-theme="light"] .bg-slate-900\/80 {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+}
+
+[data-theme="light"] .bg-slate-900\/60 {
+  background-color: rgba(248, 250, 252, 0.9) !important;
+}
+
+[data-theme="light"] .bg-slate-850,
+[data-theme="light"] .bg-slate-850\/50,
+[data-theme="light"] .bg-slate-850\/60 {
+  background-color: #f1f5f9 !important;
+}
+
+[data-theme="light"] .bg-slate-800 {
+  background-color: #f1f5f9 !important;
+}
+
+[data-theme="light"] .bg-slate-800\/80 {
+  background-color: rgba(241, 245, 249, 0.95) !important;
+}
+
+[data-theme="light"] .bg-slate-800\/60,
+[data-theme="light"] .bg-slate-800\/40 {
+  background-color: #f8fafc !important;
+}
+
+/* Borders */
+[data-theme="light"] .border-slate-800,
+[data-theme="light"] .border-slate-900 {
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .border-slate-700,
+[data-theme="light"] .border-slate-700\/80,
+[data-theme="light"] .border-slate-700\/60,
+[data-theme="light"] .border-slate-700\/50,
+[data-theme="light"] .border-slate-700\/40 {
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .border-slate-600 {
+  border-color: #94a3b8 !important;
+}
+
+/* Base Text Colors - High Contrast Hierarchy */
+[data-theme="light"] .text-slate-100 {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .text-slate-200 {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .text-slate-300 {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .text-slate-400 {
+  color: #475569 !important; /* 加深，绝不发灰难辨 */
+}
+
+[data-theme="light"] .text-slate-500 {
+  color: #64748b !important; /* 加深，原94a3b8在白底过淡 */
+}
+
+/* Resolve 'text-white' when background turns light (EXCEPT on solid action buttons) */
+[data-theme="light"] .text-white:not(button.bg-blue-600 *):not(button.bg-blue-500 *):not(button.bg-emerald-600 *):not(button.bg-red-600 *):not(button.bg-amber-600 *):not(button.bg-blue-600):not(button.bg-emerald-600):not(button.bg-red-600):not(button.bg-amber-600):not(span.bg-blue-600 *):not(span.bg-blue-600) {
+  color: #0f172a !important;
+}
+
+/* Crucial High-Contrast Fix: Colorful texts on light background */
+[data-theme="light"] .text-blue-300 {
+  color: #1d4ed8 !important; /* 深皇家蓝，对比度 > 7:1 */
+}
+
+[data-theme="light"] .text-blue-400 {
+  color: #1e40af !important;
+}
+
+[data-theme="light"] .text-emerald-300 {
+  color: #047857 !important; /* 深翡翠绿，原淡绿在白底隐形 */
+}
+
+[data-theme="light"] .text-emerald-400 {
+  color: #065f46 !important;
+}
+
+[data-theme="light"] .text-amber-300,
+[data-theme="light"] .text-yellow-300 {
+  color: #b45309 !important; /* 深琥珀棕，原浅黄在白底隐形 */
+}
+
+[data-theme="light"] .text-amber-400,
+[data-theme="light"] .text-yellow-400 {
+  color: #92400e !important;
+}
+
+[data-theme="light"] .text-orange-400 {
+  color: #c2410c !important;
+}
+
+[data-theme="light"] .text-red-200,
+[data-theme="light"] .text-red-300 {
+  color: #b91c1c !important; /* 深车规红，原浅粉在白底看不清 */
+}
+
+[data-theme="light"] .text-red-400 {
+  color: #991b1b !important;
+}
+
+[data-theme="light"] .text-purple-300 {
+  color: #6d28d9 !important;
+}
+
+[data-theme="light"] .text-purple-400 {
+  color: #5b21b6 !important;
+}
+
+[data-theme="light"] .text-indigo-300 {
+  color: #4338ca !important;
+}
+
+[data-theme="light"] .text-indigo-400 {
+  color: #3730a3 !important;
+}
+
+[data-theme="light"] .text-cyan-300,
+[data-theme="light"] .text-cyan-400,
+[data-theme="light"] .text-teal-300 {
+  color: #0e7490 !important;
+}
+
+/* Badges & Alert boxes transformation for light mode */
+[data-theme="light"] .bg-red-950,
+[data-theme="light"] .bg-red-950\/40,
+[data-theme="light"] .bg-red-950\/20,
+[data-theme="light"] .bg-red-950\/15,
+[data-theme="light"] .bg-red-900\/40,
+[data-theme="light"] .bg-red-900\/30,
+[data-theme="light"] .bg-red-900\/20,
+[data-theme="light"] .bg-red-500\/20,
+[data-theme="light"] .bg-red-500\/10 {
+  background-color: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+}
+
+[data-theme="light"] .bg-amber-950,
+[data-theme="light"] .bg-amber-950\/40,
+[data-theme="light"] .bg-amber-950\/10,
+[data-theme="light"] .bg-amber-900\/30,
+[data-theme="light"] .bg-amber-600\/30,
+[data-theme="light"] .bg-amber-500\/20,
+[data-theme="light"] .bg-amber-500\/15,
+[data-theme="light"] .bg-yellow-500\/20 {
+  background-color: #fef3c7 !important;
+  border-color: #fcd34d !important;
+}
+
+[data-theme="light"] .bg-emerald-950,
+[data-theme="light"] .bg-emerald-950\/10,
+[data-theme="light"] .bg-emerald-900\/40,
+[data-theme="light"] .bg-emerald-900\/30,
+[data-theme="light"] .bg-emerald-600\/30,
+[data-theme="light"] .bg-emerald-500\/20,
+[data-theme="light"] .bg-emerald-500\/15 {
+  background-color: #d1fae5 !important;
+  border-color: #6ee7b7 !important;
+}
+
+[data-theme="light"] .bg-blue-950,
+[data-theme="light"] .bg-blue-950\/20,
+[data-theme="light"] .bg-blue-950\/10,
+[data-theme="light"] .bg-blue-900\/40,
+[data-theme="light"] .bg-blue-900\/30,
+[data-theme="light"] .bg-blue-600\/30,
+[data-theme="light"] .bg-blue-600\/20,
+[data-theme="light"] .bg-blue-600\/15,
+[data-theme="light"] .bg-blue-500\/20,
+[data-theme="light"] .bg-blue-500\/15 {
+  background-color: #dbeafe !important;
+  border-color: #93c5fd !important;
+}
+
+[data-theme="light"] .bg-purple-950,
+[data-theme="light"] .bg-purple-600\/30,
+[data-theme="light"] .bg-purple-500\/20,
+[data-theme="light"] .bg-indigo-950,
+[data-theme="light"] .bg-indigo-500\/20 {
+  background-color: #ede9fe !important;
+  border-color: #c4b5fd !important;
+}
+
+/* Gradients on cards */
+[data-theme="light"] .from-blue-950\/70,
+[data-theme="light"] .from-blue-950\/60 {
+  --tw-gradient-from: rgba(239, 246, 255, 0.95) var(--tw-gradient-from-position) !important;
+}
+[data-theme="light"] .via-slate-900 {
+  --tw-gradient-via: #ffffff var(--tw-gradient-via-position) !important;
+}
+[data-theme="light"] .to-indigo-950\/60,
+[data-theme="light"] .to-indigo-950\/40 {
+  --tw-gradient-to: rgba(238, 242, 255, 0.9) var(--tw-gradient-to-position) !important;
+}
+
+/* Form controls */
+[data-theme="light"] select,
+[data-theme="light"] input[type="text"],
+[data-theme="light"] input[type="number"],
+[data-theme="light"] input[type="password"],
+[data-theme="light"] textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+[data-theme="light"] select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+/* Table styles */
+[data-theme="light"] table thead {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] table thead th {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] table tbody tr {
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] table tbody tr:hover {
+  background-color: #f8fafc !important;
+}
+
+/* SVG Chart adjustments for light mode */
+[data-theme="light"] svg line[stroke="#334155"] {
+  stroke: #e2e8f0 !important;
+}
+
+[data-theme="light"] svg line[stroke="#475569"] {
+  stroke: #94a3b8 !important;
+}
+
+[data-theme="light"] svg text[fill="#94a3b8"] {
+  fill: #475569 !important;
+}
+
+[data-theme="light"] svg text[fill="#64748b"] {
+  fill: #334155 !important;
+}
+
+[data-theme="light"] svg text[fill="#38bdf8"] {
+  fill: #0284c7 !important;
+}
+
+/* Code & Pre */
+[data-theme="light"] pre,
+[data-theme="light"] code {
+  color: #0f172a !important;
+}
+
+
+/* ==========================================================================
+   THEME 2: EYE-CARE SAGE MODE (柔和豆沙绿 / 护眼暖纸纸感模式)
+   ========================================================================== */
+[data-theme="eyecare"] {
+  color-scheme: light;
+  color: #122417;
+}
+
+/* Backgrounds */
+[data-theme="eyecare"] .bg-slate-950 {
+  background-color: #eaf1ea !important;
+}
+
+[data-theme="eyecare"] .bg-slate-900 {
+  background-color: #f5f9f5 !important;
+}
+
+[data-theme="eyecare"] .bg-slate-900\/90,
+[data-theme="eyecare"] .bg-slate-900\/80 {
+  background-color: rgba(245, 249, 245, 0.96) !important;
+}
+
+[data-theme="eyecare"] .bg-slate-900\/60 {
+  background-color: rgba(234, 241, 234, 0.9) !important;
+}
+
+[data-theme="eyecare"] .bg-slate-850,
+[data-theme="eyecare"] .bg-slate-850\/50,
+[data-theme="eyecare"] .bg-slate-850\/60 {
+  background-color: #dfeade !important;
+}
+
+[data-theme="eyecare"] .bg-slate-800 {
+  background-color: #dfeade !important;
+}
+
+[data-theme="eyecare"] .bg-slate-800\/80 {
+  background-color: rgba(223, 234, 222, 0.95) !important;
+}
+
+[data-theme="eyecare"] .bg-slate-800\/60,
+[data-theme="eyecare"] .bg-slate-800\/40 {
+  background-color: #eaf1ea !important;
+}
+
+/* Borders */
+[data-theme="eyecare"] .border-slate-800,
+[data-theme="eyecare"] .border-slate-900 {
+  border-color: #c6d7c7 !important;
+}
+
+[data-theme="eyecare"] .border-slate-700,
+[data-theme="eyecare"] .border-slate-700\/80,
+[data-theme="eyecare"] .border-slate-700\/60,
+[data-theme="eyecare"] .border-slate-700\/50,
+[data-theme="eyecare"] .border-slate-700\/40 {
+  border-color: #b8ccba !important;
+}
+
+[data-theme="eyecare"] .border-slate-600 {
+  border-color: #9cb89f !important;
+}
+
+/* Base Text Colors - High Contrast Soft Green Palette */
+[data-theme="eyecare"] .text-slate-100 {
+  color: #122417 !important;
+}
+
+[data-theme="eyecare"] .text-slate-200 {
+  color: #1b3822 !important;
+}
+
+[data-theme="eyecare"] .text-slate-300 {
+  color: #254d2f !important;
+}
+
+[data-theme="eyecare"] .text-slate-400 {
+  color: #386142 !important; /* 强化对比，墨绿灰 */
+}
+
+[data-theme="eyecare"] .text-slate-500 {
+  color: #4d7a59 !important;
+}
+
+/* Resolve 'text-white' in eyecare mode */
+[data-theme="eyecare"] .text-white:not(button.bg-blue-600 *):not(button.bg-blue-500 *):not(button.bg-emerald-600 *):not(button.bg-red-600 *):not(button.bg-amber-600 *):not(button.bg-blue-600):not(button.bg-emerald-600):not(button.bg-red-600):not(button.bg-amber-600):not(span.bg-blue-600 *):not(span.bg-blue-600) {
+  color: #122417 !important;
+}
+
+/* Crucial High-Contrast Fix: Colorful texts on sage eyecare background */
+[data-theme="eyecare"] .text-blue-300 {
+  color: #154889 !important; /* 墨蓝 */
+}
+
+[data-theme="eyecare"] .text-blue-400 {
+  color: #1e3a8a !important;
+}
+
+[data-theme="eyecare"] .text-emerald-300 {
+  color: #0f5132 !important; /* 深松绿，绝不刺眼但极清晰 */
+}
+
+[data-theme="eyecare"] .text-emerald-400 {
+  color: #064e3b !important;
+}
+
+[data-theme="eyecare"] .text-amber-300,
+[data-theme="eyecare"] .text-yellow-300 {
+  color: #78350f !important; /* 暖栗棕 */
+}
+
+[data-theme="eyecare"] .text-amber-400,
+[data-theme="eyecare"] .text-yellow-400 {
+  color: #713f12 !important;
+}
+
+[data-theme="eyecare"] .text-orange-400 {
+  color: #9a3412 !important;
+}
+
+[data-theme="eyecare"] .text-red-200,
+[data-theme="eyecare"] .text-red-300 {
+  color: #881337 !important; /* 深红棕 */
+}
+
+[data-theme="eyecare"] .text-red-400 {
+  color: #991b1b !important;
+}
+
+[data-theme="eyecare"] .text-purple-300 {
+  color: #4c1d95 !important;
+}
+
+[data-theme="eyecare"] .text-purple-400 {
+  color: #3b0764 !important;
+}
+
+[data-theme="eyecare"] .text-indigo-300 {
+  color: #312e81 !important;
+}
+
+[data-theme="eyecare"] .text-indigo-400 {
+  color: #1e1b4b !important;
+}
+
+[data-theme="eyecare"] .text-cyan-300,
+[data-theme="eyecare"] .text-cyan-400,
+[data-theme="eyecare"] .text-teal-300 {
+  color: #164e63 !important;
+}
+
+/* Badges & Alert boxes transformation for eyecare mode */
+[data-theme="eyecare"] .bg-red-950,
+[data-theme="eyecare"] .bg-red-950\/40,
+[data-theme="eyecare"] .bg-red-950\/20,
+[data-theme="eyecare"] .bg-red-950\/15,
+[data-theme="eyecare"] .bg-red-900\/40,
+[data-theme="eyecare"] .bg-red-900\/30,
+[data-theme="eyecare"] .bg-red-900\/20,
+[data-theme="eyecare"] .bg-red-500\/20,
+[data-theme="eyecare"] .bg-red-500\/10 {
+  background-color: #fae4e4 !important;
+  border-color: #f8b4b4 !important;
+}
+
+[data-theme="eyecare"] .bg-amber-950,
+[data-theme="eyecare"] .bg-amber-950\/40,
+[data-theme="eyecare"] .bg-amber-950\/10,
+[data-theme="eyecare"] .bg-amber-900\/30,
+[data-theme="eyecare"] .bg-amber-600\/30,
+[data-theme="eyecare"] .bg-amber-500\/20,
+[data-theme="eyecare"] .bg-amber-500\/15,
+[data-theme="eyecare"] .bg-yellow-500\/20 {
+  background-color: #fcf0cd !important;
+  border-color: #f7d568 !important;
+}
+
+[data-theme="eyecare"] .bg-emerald-950,
+[data-theme="eyecare"] .bg-emerald-950\/10,
+[data-theme="eyecare"] .bg-emerald-900\/40,
+[data-theme="eyecare"] .bg-emerald-900\/30,
+[data-theme="eyecare"] .bg-emerald-600\/30,
+[data-theme="eyecare"] .bg-emerald-500\/20,
+[data-theme="eyecare"] .bg-emerald-500\/15 {
+  background-color: #d6ebd6 !important;
+  border-color: #a3cfa2 !important;
+}
+
+[data-theme="eyecare"] .bg-blue-950,
+[data-theme="eyecare"] .bg-blue-950\/20,
+[data-theme="eyecare"] .bg-blue-950\/10,
+[data-theme="eyecare"] .bg-blue-900\/40,
+[data-theme="eyecare"] .bg-blue-900\/30,
+[data-theme="eyecare"] .bg-blue-600\/30,
+[data-theme="eyecare"] .bg-blue-600\/20,
+[data-theme="eyecare"] .bg-blue-600\/15,
+[data-theme="eyecare"] .bg-blue-500\/20,
+[data-theme="eyecare"] .bg-blue-500\/15 {
+  background-color: #dbeafe !important;
+  border-color: #bfdbfe !important;
+}
+
+[data-theme="eyecare"] .bg-purple-950,
+[data-theme="eyecare"] .bg-purple-600\/30,
+[data-theme="eyecare"] .bg-purple-500\/20,
+[data-theme="eyecare"] .bg-indigo-950,
+[data-theme="eyecare"] .bg-indigo-500\/20 {
+  background-color: #ece5f5 !important;
+  border-color: #d3c4e9 !important;
+}
+
+/* Gradients on cards */
+[data-theme="eyecare"] .from-blue-950\/70,
+[data-theme="eyecare"] .from-blue-950\/60 {
+  --tw-gradient-from: rgba(220, 237, 222, 0.95) var(--tw-gradient-from-position) !important;
+}
+[data-theme="eyecare"] .via-slate-900 {
+  --tw-gradient-via: #f5f9f5 var(--tw-gradient-via-position) !important;
+}
+[data-theme="eyecare"] .to-indigo-950\/60,
+[data-theme="eyecare"] .to-indigo-950\/40 {
+  --tw-gradient-to: rgba(214, 235, 226, 0.85) var(--tw-gradient-to-position) !important;
+}
+
+/* Form controls */
+[data-theme="eyecare"] select,
+[data-theme="eyecare"] input[type="text"],
+[data-theme="eyecare"] input[type="number"],
+[data-theme="eyecare"] input[type="password"],
+[data-theme="eyecare"] textarea {
+  background-color: #f7faf7 !important;
+  color: #122417 !important;
+  border-color: #b8ccba !important;
+}
+
+[data-theme="eyecare"] input::placeholder,
+[data-theme="eyecare"] textarea::placeholder {
+  color: #698c72 !important;
+}
+
+[data-theme="eyecare"] select option {
+  background-color: #f5f9f5 !important;
+  color: #122417 !important;
+}
+
+/* Table styles */
+[data-theme="eyecare"] table thead {
+  background-color: #dfeade !important;
+  color: #1b3822 !important;
+  border-color: #b8ccba !important;
+}
+
+[data-theme="eyecare"] table thead th {
+  color: #1b3822 !important;
+}
+
+[data-theme="eyecare"] table tbody tr {
+  border-color: #c6d7c7 !important;
+}
+
+[data-theme="eyecare"] table tbody tr:hover {
+  background-color: #eaf1ea !important;
+}
+
+/* SVG Chart adjustments for eyecare mode */
+[data-theme="eyecare"] svg line[stroke="#334155"] {
+  stroke: #c6d7c7 !important;
+}
+
+[data-theme="eyecare"] svg line[stroke="#475569"] {
+  stroke: #9cb89f !important;
+}
+
+[data-theme="eyecare"] svg text[fill="#94a3b8"] {
+  fill: #386142 !important;
+}
+
+[data-theme="eyecare"] svg text[fill="#64748b"] {
+  fill: #254d2f !important;
+}
+
+[data-theme="eyecare"] svg text[fill="#38bdf8"] {
+  fill: #0369a1 !important;
+}
+
+/* Code & Pre */
+[data-theme="eyecare"] pre,
+[data-theme="eyecare"] code {
+  color: #122417 !important;
+}
+
+
+/* === ECU Copilot desktop shell: use the full viewport instead of a narrow 1280px column === */
+html, body, #root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+body {
+  min-width: 320px;
+  overflow-x: hidden;
+}
+
+.ecu-app-shell {
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* Keep the workflow ribbon aligned with the full-width shell. */
+.ecu-workflow-ribbon {
+  min-width: 0;
+}
+
+/* Engineering workstation layout: no fixed max-width on the application surface. */
+.ecu-main-content { width: 100%; max-width: none; min-width: 0; margin: 0; }
+.ecu-topbar-row { width: 100%; min-width: 0; }
+.ecu-nav-scroll { width: 100%; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.ecu-card-grid { min-width: 0; }
