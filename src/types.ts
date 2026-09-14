@@ -277,6 +277,7 @@ export interface CandidateAction {
   customerVetoViolations?: string[];           // 击穿的客户特殊特性红线条目 (P1-1)
   riskBefore: string;
   riskAfter: string;
+  riskDelta?: string; // 风险差值 (riskBefore -> riskAfter)
   residualRisk: RiskLevel;
   residualRiskDetail: string;
   sideEffects: string;
@@ -290,6 +291,7 @@ export interface CandidateAction {
   fastestValidation?: string;
   latestDecisionPoint?: string;
   rejectionReason?: string;
+  crossDomainCouplingChecks?: Array<{ rule: string; addressed: boolean; note: string }>; // 跨域耦合物理规则核对回填 (待办1)
 }
 
 export type RecommendationGrade =
@@ -694,6 +696,64 @@ export interface CopilotAnalysisResult {
     unknownsBlockingDecision: string[];
     reversalCriteria: string[];
   };
+  inputIntegrity?: InputIntegrityAssessment;
+  aiAudit?: AiAuditResult;
+  debugSnapshot?: DebugSnapshot;
+}
+
+export interface DebugSnapshot {
+  promptLength?: number;
+  promptSnippet?: string;
+  fullPrompt?: string;
+  modelIdentifier?: string;
+  latencyMs?: number;
+  timestamp?: string;
+  precomputedFactsCount?: number;
+  autoFixesCount?: number;
+  auditedRuleHits?: number;
+  retryCount?: number;
+}
+
+export type InputIntegrityGrade = 'GRADE_A_RIGOROUS' | 'GRADE_B_ACCEPTABLE' | 'GRADE_C_INSUFFICIENT' | 'GRADE_D_BLOCKING';
+
+export interface InputIntegrityAssessment {
+  grade: InputIntegrityGrade;
+  gradeLabel: string;
+  completenessScore: number; // 0 - 100
+  domain: string;
+  domainLabel: string;
+  missingRequiredFields: string[];
+  missingContextFields: string[];
+  missingIssueFields: string[];
+  filledFieldsCount: number;
+  totalExpectedFieldsCount: number;
+  riskWarnings: string[];
+  blockingReasons: string[];
+  recommendedNextActions: string[];
+  allowAiInference: boolean;
+  requiredAssumptions: string[];
+  evaluatedAt?: string;
+}
+
+export type AiAuditFlagLevel = 'FATAL' | 'WARNING' | 'NOTICE';
+
+export interface AiAuditFlag {
+  level: AiAuditFlagLevel;
+  ruleId: string;
+  title: string;
+  message: string;
+  fieldPath?: string;
+  autoFixApplied?: boolean;
+}
+
+export interface AiAuditResult {
+  passed: boolean;
+  auditScore: number; // 0 - 100
+  overallStatus: 'APPROVED' | 'PASSED_WITH_WARNINGS' | 'FLAGGED_NEEDS_REVIEW' | 'REJECTED_AUDIT_FAILED';
+  flags: AiAuditFlag[];
+  autoFixSummary: string[];
+  auditedAt: string;
+  modelIdentifier?: string;
 }
 
 export interface ResultProvenance {
@@ -705,6 +765,9 @@ export interface ResultProvenance {
   latencyMs?: number;
   modelIdentifier?: string;
   transparencyNote: string;
+  inputIntegrity?: InputIntegrityAssessment;
+  aiAudit?: AiAuditResult;
+  debugSnapshot?: DebugSnapshot;
 }
 
 export interface PresetScenario {

@@ -320,7 +320,7 @@ export function resolveEngineeringDomain(issue: IssueInput): EngineeringDomain {
   if (has('BLDC Motor Drive')) return 'BLDC';
   if (has('WCCA')) return /EOL|标定|量产|Cpk|Ppk|残余|校准/i.test(text) ? 'WCCA_EOL' : 'WCCA';
   if (has('Thermal')) return 'THERMAL';
-  if (has('Power')) return /ISO\s*7637|load dump|脉冲1|脉冲2a|脉冲2b|脉冲3a|脉冲3b|反接|电源瞬态/i.test(text) ? 'POWER_TRANSIENT' : 'POWER';
+  if (has('Power')) return /ISO\s*7637|load dump|transient|脉冲1|脉冲2a|脉冲2b|脉冲3a|脉冲3b|反接|电源瞬态/i.test(text) ? 'POWER_TRANSIENT' : 'POWER';
   if (has('Signal Integrity')) return 'SIGNAL';
   if (has('EMC')) return 'EMC_RE_CE';
   if (has('Functional Safety')) return 'SAFETY';
@@ -341,7 +341,7 @@ export function resolveEngineeringDomain(issue: IssueInput): EngineeringDomain {
   if (/MOSFET|替代料|换料|停产|缺料|PPAP|PCN/i.test(text)) return 'COMPONENT';
   if (/WCCA|最坏情况|公差链|误差预算|温漂|Cpk|Ppk/i.test(text)) return 'WCCA';
   if (/热设计|温升|结温|散热|功耗/i.test(text)) return 'THERMAL';
-  if (/ISO\s*7637|load dump|脉冲1|脉冲2a|脉冲2b|脉冲3a|脉冲3b|反接|电源瞬态/i.test(text)) return 'POWER_TRANSIENT';
+  if (/ISO\s*7637|load dump|transient|脉冲1|脉冲2a|脉冲2b|脉冲3a|脉冲3b|反接|电源瞬态/i.test(text)) return 'POWER_TRANSIENT';
   if (/电源完整性|负载突变|过冲|跌落|纹波|di\/dt/i.test(text)) return 'POWER';
   if (/CAN-FD|信号完整性|串扰|反射|眼图|阻抗/i.test(text)) return 'SIGNAL';
   if (/EMC|CISPR|辐射|传导/i.test(text)) return 'EMC_RE_CE';

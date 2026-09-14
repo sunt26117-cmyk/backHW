@@ -1,6 +1,6 @@
 import React from 'react';
 import { CopilotAnalysisResult, CandidateAction } from '../types';
-import { ShieldCheck, AlertOctagon, CheckCircle2, ArrowRight, Clock, DollarSign, AlertTriangle, ShieldAlert, Sparkles, HelpCircle } from 'lucide-react';
+import { ShieldCheck, AlertOctagon, CheckCircle2, ArrowRight, Clock, DollarSign, AlertTriangle, ShieldAlert, Sparkles, HelpCircle, Layers, Activity } from 'lucide-react';
 
 interface OptionsComparisonViewProps {
   result: CopilotAnalysisResult | null;
@@ -29,7 +29,10 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
 
   return (
     <div className="space-y-6">
-      <div className="bg-blue-950/30 border border-blue-500/30 rounded-xl p-3 text-xs"><span className="text-blue-300 font-semibold">当前典型工况：</span> <span className="text-white">{(result as any).__scenarioLabel || '当前工程工况'}</span></div>
+      <div className="bg-blue-950/30 border border-blue-500/30 rounded-xl p-3 text-xs">
+        <span className="text-blue-300 font-semibold">当前典型工况：</span>{' '}
+        <span className="text-white">{(result as any).__scenarioLabel || '当前工程工况'}</span>
+      </div>
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
@@ -38,7 +41,7 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
               候选工程措施深剖与残余风险评估 (固定结构 3: 措施对比)
             </h2>
             <p className="text-xs text-slate-400 mt-1">
-              涵盖保守方案、平衡方案、节点优先方案；每个措施均量化时间/成本、前置条件、次生风险、验证手段及失败退路 Plan B。
+              涵盖保守方案、平衡方案、节点优先方案；每个措施均量化时间/成本、跨域物理耦合核对、前置条件、次生风险、验证手段及失败退路 Plan B。
             </p>
           </div>
           <button
@@ -53,7 +56,7 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
         {/* Action Cards Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {candidateActions.map((opt) => {
-            const isVetoed = opt.veto.rejection_veto;
+            const isVetoed = opt.veto?.rejection_veto;
             const isRecommended = opt.id === safeRecommendedId;
 
             return (
@@ -138,10 +141,51 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
                     {opt.description}
                   </p>
 
+                  {/* 预期收益 */}
                   <div className="bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/60 mb-3 text-xs">
                     <span className="text-slate-400 block text-[11px] font-medium">预期收益 (Expected Benefit):</span>
                     <span className="text-slate-200 font-medium">{opt.expectedBenefit}</span>
                   </div>
+
+                  {/* 风险净变化 (Risk Delta - 待办 3) */}
+                  {(opt.riskDelta || (opt.riskBefore && opt.riskAfter)) && (
+                    <div className="bg-slate-800/50 p-2 rounded-lg border border-slate-700/50 mb-3 text-xs flex items-center justify-between">
+                      <span className="text-slate-400 text-[11px] flex items-center">
+                        <Activity className="w-3 h-3 mr-1 text-cyan-400" />
+                        风险跃迁 (Delta):
+                      </span>
+                      <span className="text-cyan-300 font-mono text-[11px] font-medium">
+                        {opt.riskDelta || `${opt.riskBefore} ➔ ${opt.riskAfter}`}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 跨域物理耦合复核闭环 (待办 1.3) */}
+                  {opt.crossDomainCouplingChecks && opt.crossDomainCouplingChecks.length > 0 && (
+                    <div className="bg-indigo-950/30 p-2.5 rounded-lg border border-indigo-800/40 mb-3 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-indigo-300 text-[10px] font-bold flex items-center">
+                          <Layers className="w-3 h-3 mr-1 text-indigo-400" />
+                          跨域物理耦合复核 ({opt.crossDomainCouplingChecks.filter((c) => c.addressed).length}/{opt.crossDomainCouplingChecks.length} 项闭环)
+                        </span>
+                      </div>
+                      <div className="space-y-1 max-h-24 overflow-y-auto pr-0.5">
+                        {opt.crossDomainCouplingChecks.map((chk, cIdx) => (
+                          <div key={cIdx} className="flex items-start space-x-1.5 text-[10px] bg-slate-900/60 p-1 rounded border border-indigo-900/30">
+                            {chk.addressed ? (
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
+                            ) : (
+                              <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <span className="text-slate-200 font-mono">{chk.rule}</span>
+                              {chk.note && <span className="text-slate-400 block truncate">{chk.note}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Time & Cost metrics */}
                   <div className="grid grid-cols-2 gap-2 text-xs mb-3 font-mono">
@@ -161,13 +205,33 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
                     </div>
                   </div>
 
-                  {/* Decision fit: force the AI result to stay tied to the current decision window */}
+                  {/* Decision fit */}
                   {(opt.decisionFit || opt.fastestValidation || opt.latestDecisionPoint || opt.rejectionReason) && (
                     <div className="bg-cyan-500/5 p-2.5 rounded-lg border border-cyan-500/20 mb-3 text-xs space-y-1.5">
-                      {opt.decisionFit && <div><span className="text-cyan-400 font-semibold">当前工况适配：</span><span className="text-slate-300">{opt.decisionFit}</span></div>}
-                      {opt.fastestValidation && <div><span className="text-emerald-400 font-semibold">最快验证：</span><span className="text-slate-300">{opt.fastestValidation}</span></div>}
-                      {opt.latestDecisionPoint && <div><span className="text-amber-400 font-semibold">最晚切换点：</span><span className="text-slate-300">{opt.latestDecisionPoint}</span></div>}
-                      {opt.rejectionReason && <div><span className="text-red-400 font-semibold">主要否决理由：</span><span className="text-slate-300">{opt.rejectionReason}</span></div>}
+                      {opt.decisionFit && (
+                        <div>
+                          <span className="text-cyan-400 font-semibold">当前工况适配：</span>
+                          <span className="text-slate-300">{opt.decisionFit}</span>
+                        </div>
+                      )}
+                      {opt.fastestValidation && (
+                        <div>
+                          <span className="text-emerald-400 font-semibold">最快验证：</span>
+                          <span className="text-slate-300">{opt.fastestValidation}</span>
+                        </div>
+                      )}
+                      {opt.latestDecisionPoint && (
+                        <div>
+                          <span className="text-amber-400 font-semibold">最晚切换点：</span>
+                          <span className="text-slate-300">{opt.latestDecisionPoint}</span>
+                        </div>
+                      )}
+                      {opt.rejectionReason && (
+                        <div>
+                          <span className="text-red-400 font-semibold">主要否决理由：</span>
+                          <span className="text-slate-300">{opt.rejectionReason}</span>
+                        </div>
+                      )}
                     </div>
                   )}
 

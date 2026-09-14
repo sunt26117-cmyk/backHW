@@ -1,8 +1,10 @@
 import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } from '../types';
 import { generateBldcMotorAnalysis } from './bldcMotorExpert';
+import { generateRobotJointAnalysis, getRobotJointPillars } from './robotJointExpert';
 import { applyScenarioDynamicLayer } from '../utils/scenarioDynamic';
 import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, getEngineeringDomainLabel, resolveEngineeringDomain, resolveEngineeringDomains } from '../utils/scenarioDomainEngine';
 import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
+import { getCrossDomainCouplings } from '../utils/crossDomainCouplingMatrix';
 import {
   getEmcPillars,
   getComponentPillars,
@@ -56,6 +58,7 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
 
   const domain = resolveEngineeringDomain(issue);
   const isBldc = domain === 'BLDC';
+  const isRobotJoint = domain === 'ROBOT_JOINT';
   const isEmc = domain === 'EMC_BCI' || domain === 'EMC_ESD' || domain === 'EMC_RE_CE';
   const isComponent = domain === 'COMPONENT';
   const isWcca = domain === 'WCCA' || domain === 'WCCA_EOL';
@@ -65,6 +68,8 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   let result: CopilotAnalysisResult;
   if (isBldc) {
     result = generateBldcMotorAnalysis(context, issue);
+  } else if (isRobotJoint) {
+    result = generateRobotJointAnalysis(context, issue);
   } else if (isEmc) {
     result = generateEmcAnalysis(context, issue);
   } else if (isComponent) {
@@ -84,6 +89,8 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     let pillars;
     if (isBldc) {
       pillars = getBldcPillars(context, issue);
+    } else if (isRobotJoint) {
+      pillars = getRobotJointPillars(context, issue);
     } else if (isEmc) {
       pillars = getEmcPillars(context, issue);
     } else if (isComponent) {
@@ -190,8 +197,57 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
         ? { costChange: '中低：按当前工况候选方案核算', scheduleLeadTime: `优先选择不阻塞当前 ${context.nextMilestone} 的措施`, impedanceOrSignalImpact: `重点验证${domainLabel}边界，不采用跨域假设`, emcThermalRipple: `以当前实测与验证计划回填，禁止沿用其他工况固定值` }
         : { costChange: '低成本表面方案，但须核查残余风险', scheduleLeadTime: `必须与当前 ${context.daysRemaining} 天窗口比较`, impedanceOrSignalImpact: `当前工况 ${categoryText} 下的实际副作用待验证`, emcThermalRipple: `围绕“${problemText.slice(0, 70)}”重新判断是否满足门禁` };
 
+      // 补充风险净跃迁标注 (riskDelta)
+      let riskDelta = action.riskDelta;
+      if (!riskDelta) {
+        if (action.riskBefore && action.riskAfter) {
+          const beforeShort = action.riskBefore.split('，')[0].split('。')[0].slice(0, 24);
+          const afterShort = action.riskAfter.split('，')[0].split('。')[0].slice(0, 24);
+          riskDelta = `${beforeShort} ➔ ${afterShort}`;
+        } else {
+          riskDelta = action.residualRisk === 'Low'
+            ? '高风险隐患 ➔ 受控低残余风险 (满足门禁放行)'
+            : action.residualRisk === 'Medium'
+            ? '高不确定性 ➔ 中等受控风险 (需快速实验收敛)'
+            : '潜在击穿/超差 ➔ 高残余风险 (触发一票否决或限期整改)';
+        }
+      }
+
+      // 补充跨域物理耦合复核闭环 (crossDomainCouplingChecks)
+      let crossDomainCouplingChecks = action.crossDomainCouplingChecks;
+      if (!crossDomainCouplingChecks || crossDomainCouplingChecks.length === 0) {
+        const pDom = resolveEngineeringDomain(issue);
+        const rDoms = resolveEngineeringDomains(issue).filter((d) => d !== pDom);
+        const couplings = getCrossDomainCouplings(pDom, rDoms);
+        if (couplings.length > 0) {
+          crossDomainCouplingChecks = couplings.map((c) => {
+            if (action.veto?.rejection_veto) {
+              return {
+                rule: `【${c.fromDomain} ➔ ${c.toDomain}】${c.action}`,
+                addressed: false,
+                note: `方案被一票否决：未满足${c.affectedDomain}门禁（${action.veto.veto_reason?.slice(0, 40) || '存在违约或法规硬性冲突'}）`,
+              };
+            }
+            if (action.category === 'conservative' || action.id.includes('Option A')) {
+              return {
+                rule: `【${c.fromDomain} ➔ ${c.toDomain}】${c.action}`,
+                addressed: true,
+                note: `已纳入本方案协同参数配置，${c.requiredRevalidation[0] || '参数处于车规安全工作区以内'}`,
+              };
+            }
+            return {
+              rule: `【${c.fromDomain} ➔ ${c.toDomain}】${c.action}`,
+              addressed: true,
+              note: `已建立前置验证边界：${c.physicalTradeoff.slice(0, 45)}`,
+            };
+          });
+        }
+      }
+
       return {
         ...action,
+        riskDelta,
+        crossDomainCouplingChecks,
         veto: {
           ...action.veto,
           veto_type,
@@ -202,6 +258,74 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   }
 
   result = applyScenarioDynamicLayer(result, context, issue);
+
+  // 确保 candidateActions 中的 riskDelta、crossDomainCouplingChecks、veto 100% 完整具备
+  if (result.candidateActions) {
+    const pDom = resolveEngineeringDomain(issue);
+    const rDoms = resolveEngineeringDomains(issue).filter((d) => d !== pDom);
+    const couplings = getCrossDomainCouplings(pDom, rDoms);
+
+    result.candidateActions = result.candidateActions.map((action) => {
+      let riskDelta = action.riskDelta;
+      if (!riskDelta) {
+        if (action.riskBefore && action.riskAfter) {
+          const beforeShort = action.riskBefore.split('，')[0].split('。')[0].slice(0, 24);
+          const afterShort = action.riskAfter.split('，')[0].split('。')[0].slice(0, 24);
+          riskDelta = `${beforeShort} ➔ ${afterShort}`;
+        } else {
+          riskDelta = action.residualRisk === 'Low'
+            ? '高风险隐患 ➔ 受控低残余风险 (满足门禁放行)'
+            : action.residualRisk === 'Medium'
+            ? '高不确定性 ➔ 中等受控风险 (需快速实验收敛)'
+            : '潜在击穿/超差 ➔ 高残余风险 (触发一票否决或限期整改)';
+        }
+      }
+
+      let crossDomainCouplingChecks = action.crossDomainCouplingChecks;
+      if (!crossDomainCouplingChecks || crossDomainCouplingChecks.length === 0) {
+        if (couplings.length > 0) {
+          crossDomainCouplingChecks = couplings.map((c) => {
+            if (action.veto?.rejection_veto) {
+              return {
+                rule: `【${c.fromDomain} ➔ ${c.toDomain}】${c.action}`,
+                addressed: false,
+                note: `方案被一票否决：未满足${c.affectedDomain}门禁（${action.veto.veto_reason?.slice(0, 40) || '存在违约或法规硬性冲突'}）`,
+              };
+            }
+            if (action.category === 'conservative' || action.id.includes('Option A')) {
+              return {
+                rule: `【${c.fromDomain} ➔ ${c.toDomain}】${c.action}`,
+                addressed: true,
+                note: `已纳入本方案协同参数配置，${c.requiredRevalidation[0] || '参数处于车规安全工作区以内'}`,
+              };
+            }
+            return {
+              rule: `【${c.fromDomain} ➔ ${c.toDomain}】${c.action}`,
+              addressed: true,
+              note: `已建立前置验证边界：${c.physicalTradeoff.slice(0, 45)}`,
+            };
+          });
+        }
+      }
+
+      let veto = action.veto || { rejection_veto: false };
+      // 若是 Option C 纯临时措施且残余风险为 High，且涉及安全/法规/节点违约时，触发受控红牌警示
+      if (action.id === 'Option C' && action.residualRisk === 'High' && (action.veto?.veto_reason || action.failureConsequence?.includes('失控') || action.name?.includes('滑行') || action.name?.includes('临时'))) {
+        veto = {
+          rejection_veto: true,
+          veto_type: veto.veto_type || 'SAFETY_GOAL_BREACH',
+          veto_reason: veto.veto_reason || '纯临时缓解措施未消除物理安全隐患，禁止作为永久方案直接放行！',
+        };
+      }
+
+      return {
+        ...action,
+        riskDelta,
+        crossDomainCouplingChecks: crossDomainCouplingChecks || [],
+        veto,
+      };
+    });
+  }
   result.source = 'deterministic-expert';
   result.provenance = result.provenance || {
     executionMode: 'PURE_OFFLINE_LOCAL',

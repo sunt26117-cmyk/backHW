@@ -1,5 +1,6 @@
 import { CopilotAnalysisResult, IssueInput, ProjectContext } from '../types';
-import { buildScenarioPassFailCriteria, getDomainPhysics, resolveEngineeringDomain } from './scenarioDomainEngine';
+import { buildScenarioPassFailCriteria, getDomainPhysics, resolveEngineeringDomain, resolveEngineeringDomains } from './scenarioDomainEngine';
+import { getCrossDomainCouplings } from './crossDomainCouplingMatrix';
 
 const firstNum = (text: string, regs: RegExp[], fallback = NaN) => {
   for (const re of regs) {
@@ -104,15 +105,36 @@ function buildDynamicCandidateActions(context: ProjectContext, issue: IssueInput
     const L = Math.max(15, Math.min(98, longTerm));
     return { T, S, C, Q, L, total: scoreTotal(T, S, C, Q, L) };
   };
-  const mk = (id: string, category: any, categoryLabel: string, name: string, description: string, expectedBenefit: string, scores: any, residualRisk: any, residualRiskDetail: string, sideEffects: string, timeCost: string, verificationMethod: string, planB: string): any => ({
-    id, category, categoryLabel, name, description, expectedBenefit, scores,
-    veto: { rejection_veto: false },
-    riskBefore: text.slice(0, 120), riskAfter: expectedBenefit, residualRisk, residualRiskDetail,
-    sideEffects, verificationCost: '按当前项目实验室/样件资源实际核算', timeCost,
-    failureConsequence: `若验证失败，将影响 ${context.nextMilestone}，必须切换 Plan B`,
-    preconditions: `输入边界必须与当前 ${context.projectName} / ${context.projectPhase} 一致`,
-    verificationMethod, planB,
-  });
+  const pDom = resolveEngineeringDomain(issue);
+  const rDoms = resolveEngineeringDomains(issue).filter((d) => d !== pDom);
+  const couplings = getCrossDomainCouplings(pDom, rDoms);
+
+  const mk = (id: string, category: any, categoryLabel: string, name: string, description: string, expectedBenefit: string, scores: any, residualRisk: any, residualRiskDetail: string, sideEffects: string, timeCost: string, verificationMethod: string, planB: string): any => {
+    const riskDelta = residualRisk === 'Low'
+      ? '高风险隐患 ➔ 受控低残余风险 (满足门禁放行)'
+      : residualRisk === 'Medium'
+      ? '高不确定性 ➔ 中等受控风险 (需快速实验收敛)'
+      : '潜在击穿/超差 ➔ 高残余风险 (触发一票否决或限期整改)';
+
+    const crossDomainCouplingChecks = couplings.map((c) => ({
+      rule: `【${c.fromDomain} ➔ ${c.toDomain}】${c.action}`,
+      addressed: residualRisk !== 'High',
+      note: residualRisk === 'High'
+        ? `未消除${c.affectedDomain}跨域隐患，需在后续永久阶段补齐闭环`
+        : `已纳入本方案边界控制，${c.requiredRevalidation[0] || '参数受控'}`,
+    }));
+
+    return {
+      id, category, categoryLabel, name, description, expectedBenefit, scores,
+      veto: { rejection_veto: residualRisk === 'High' && id.includes('Option C') && category === 'schedule_priority' && false },
+      riskBefore: text.slice(0, 120), riskAfter: expectedBenefit, riskDelta, residualRisk, residualRiskDetail,
+      sideEffects, verificationCost: '按当前项目实验室/样件资源实际核算', timeCost,
+      failureConsequence: `若验证失败，将影响 ${context.nextMilestone}，必须切换 Plan B`,
+      preconditions: `输入边界必须与当前 ${context.projectName} / ${context.projectPhase} 一致`,
+      verificationMethod, planB,
+      crossDomainCouplingChecks,
+    };
+  };
 
   if (domain === 'EMC_BCI') {
     const inj = metric(issue, 'bciInjectionMa');
@@ -152,6 +174,14 @@ function buildDynamicCandidateActions(context: ProjectContext, issue: IssueInput
       mk('Option A','conservative','设计升级','升级低漂移基准/采样链并重新做 WCCA',`针对当前 ±误差目标重新选低漂移器件，重新计算初始公差、温漂、老化与制造离散。`,`技术裕量最大，但要把 BOM、交期和全温验证纳入总成本，而不能只看理论误差。`,baseScores(30,55,42,94,94),'Low','最稳妥但成本/改板周期较高。','BOM 与样件周期增加','7~14 天','全温四点 + 代表性老化 + WCCA/RSS/Monte Carlo 与实测交叉验证','继续使用现板 + EOL Calibration 作为第二轨。'),
       mk('Option B','balanced','工程平衡推荐','EOL Offset/Gain Calibration + 温漂/老化残余预算闭环',`将可校准的初始误差与不可校准的温漂/老化项拆开，基于 ${Number.isFinite(n)?n:'当前'} 台样件分布验证残余误差。`,`只有当残余误差在全温/寿命范围内仍满足客户门限时，EOL 标定才能作为正式闭环。`,baseScores(25,88,86,91,88),'Medium','对量产窗口与校准工艺依赖较大，需要 Cpk/重复性证据。','增加 EOL 时间与治具维护成本','3~7 天','多温点 Calibration 前后误差 + 重复性 + Cpk/Ppk + 老化残余趋势','若高温残余仍超限，切换器件/增益架构方案。'),
       mk('Option C','schedule_priority','仅靠统计合理化','用 RSS/Monte Carlo 替代 Extreme Worst Case 直接放行',`利用统计方法降低理论误差，但不补充相关性与实测分布证据。`,`只能作为分析视角，不能单独作为客户规格放行依据。`,baseScores(0,97,95,35,30),'High','若客户要求硬性绝对边界，统计方法不能直接替代最坏情况证据。','报告生成快，但关闭风险大','1 天','必须至少有实测分布、相关性假设及客户接受准则','保留为内部 sensitivity analysis，不作为放行结论。')
+    ];
+  }
+
+  if (domain === 'ROBOT_JOINT') {
+    return [
+      mk('Option A', 'conservative', '物理硬件重构', 'PCB Layout 双通道 STO 物理隔离 + 关节第二编码器全闭环 + 泄放电阻外置散热', '从硬件单板走线、机械测角全闭环与传热路径从源头根治背隙、单点失效与过热。', '彻底达到量产级硬指标，通过正式 TÜV Cat 3 PLd 认证并具备长期运行可靠性。', baseScores(18, 55, 45, 95, 95), 'Low', '需重新投板制作 PCB 并微调机械结构，工期 22~25 天。', 'PCB 投板打样 + 机械小改模', '22~25 天', '激光干涉仪双向定位精度复测 + STO 单通道短路/开路故障注入 + 连续满载温升', '并行推进软件补偿作为过渡，待新硬件归档后完成切换。'),
+      mk('Option B', 'balanced', '双轨推进 (推荐)', '软件反向间隙查表动态补偿 + 外挂独立双通道安全继电器箱过渡 + 加减速 S 曲线回馈削峰', '利用固件反向补偿消除背隙，外设独立安全盒确保 STO 双通道电气隔离，微调加减速保护电阻。', '在不改动板卡 (0天PCB工期) 前提下，将末端精度压入 2.5 arcmin 以内，通过现场符合性预审。', baseScores(25, 92, 90, 88, 88), 'Medium', '软件补偿在磨损老化后可能漂移，外置安全盒不能替代量产单板设计。', '激光干涉仪全行程标定 + 外置安全继电器模块', '3~4 天', '激光干涉仪 10 次往复测量重复定位误差 + STO 故障注入切断时延抓波 + 100% 负荷热电偶温升', '若精度离散度超出 2.5 arcmin，立即降速运行并启动 Option A 硬件投板。'),
+      mk('Option C', 'schedule_priority', '高风险放行 (一票否决)', '仅在上位机单边调大目标误差容限，不对硬件与安全机制做任何整改', '直接放宽重复定位精度指标至 4.5 arcmin，并出具免责说明申请现场免检。', '眼前不改动任何软硬件，但直接违反 ISO 13849-1 及合同技术规格。', baseScores(0, 98, 98, 20, 10), 'High', '面临客户拒收退货索赔，且 STO 单点共地共因失效触碰产品责任法规红线。', '无法通过验收', '0 天', '无法通过', '无')
     ];
   }
 
@@ -394,7 +424,36 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
           title: `【${scenarioDomainKey}】${context.projectName}｜闭环评审`,
           discussionSummary: `${cfg.root}；下一步：${timelineBase.slice(0,3).join('；')}。首选方案：${best.name}。`,
         },
+        deviationPermit: {
+          ecrId: `DEV-${context.projectPhase}-${Math.floor(Math.random()*9000 + 1000)}`,
+          partNumber: `${context.ecuType}-REV-${(context.sampleStatus || 'B').charAt(0)}`,
+          standardRequirement: issue.requirement || '客户与行业设计基准规范',
+          currentDeviation: issue.actualMeasurement || '当前实测数据与规格存在偏差',
+          concessionReason: `当前项目倒计时剩余 ${context.daysRemaining} 天，已采纳【${best.name}】受控围堵，满足临时试验准入底线。`,
+          validityPeriod: `仅限当前 ${context.projectPhase} 阶段 ${context.nextMilestone} 临时样件验证，严禁带入正式量产。`,
+          riskAssessment: `短期风险受控于应急措施；量产前必须完成永久纠正与全温/全寿命验证。`,
+          compensatingMeasures: best.verificationMethod || '执行台架连续复测与关键指标逐项闭环。',
+          approvers: [
+            { role: '硬件负责人', name: 'HW Lead', signature: 'Signed', date: 'T+24h' },
+            { role: '质量经理', name: 'QA Manager', signature: 'Conditional Pass', date: 'T+24h' },
+            { role: '系统架构师', name: 'System Architect', signature: 'Signed', date: 'T+24h' },
+          ],
+        },
       } as any;
+
+      dynamic.dfmeaView = {
+        failureMode: `${scenarioDomainKey} 异常：${(issue.failurePhenomenon || '指标超差').slice(0, 50)}`,
+        failureCause: cfg.root.slice(0, 100),
+        localEffect: `受测接口或单元性能未达到 [${(issue.requirement || '设计指标').slice(0, 40)}] 要求`,
+        systemEffect: `ECU 控制系统存在潜在功能降级或异常报警`,
+        vehicleEffect: `整车/系统集成测试出现质量门禁阻断风险`,
+        severity: nativeRiskScore >= 80 ? 8 : nativeRiskScore >= 65 ? 6 : 4,
+        occurrence: nativeRiskScore >= 75 ? 6 : 4,
+        detection: 4,
+        safetyImpact: context.asilLevel !== 'QM',
+        regulatoryImpact: domain.startsWith('EMC'),
+        massProductionImpact: true,
+      };
     }
   }
   const measuredInputs = Object.entries(issue.measuredValues || {}).filter(([,v]) => v !== '' && v !== null && v !== undefined).map(([k,v]) => `${k}=${v}`);

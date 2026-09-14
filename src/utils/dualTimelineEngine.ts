@@ -363,8 +363,87 @@ T+24h 内利用“5.0W/mK 绝缘垫 + 软件动态限流降额”可以在不花
 但在后续 SOP 阶段，必须通过散热筋与 PCB 散热过孔消除总热阻，彻底解除软件功率限额，才能向客户交付具备完整额定功率性能的合格产品。`,
       };
 
+    case 'ROBOT_JOINT':
+      return {
+        containmentPhase: {
+          phaseTag: 'T_PLUS_24H_CONTAINMENT',
+          timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+          title: '软件反向间隙查表动态补偿 + 外挂独立双通道安全继电器箱过渡 + 加减速 S 曲线回馈削峰',
+          objective: '0 天 PCB 改版工期，在驱动底层注入滞环补偿算法将末端重复精度压入 2.5 arcmin 以内；外设安全盒消除 STO 共地单点失效，确保第三方现场预审通过。',
+          hardwareImpact: '无需重新制作驱动板卡，仅需测试柜加装外置安全过渡盒并刷写运动控制补丁固件。',
+          responsibilityRole: '运动控制算法负责人 (Motion Lead) & 功能安全工程师 (Safety Lead)',
+          actions: [
+            {
+              step: '1. 激光干涉仪标定与反向间隙补偿固件刷写',
+              detail: '使用激光干涉仪测量各关节正反向定位滞环，将回程死区数据烧录入固件 EEPROM，开启过零反向补偿与前馈平滑。',
+              owner: '控制算法工程师',
+              duration: '6 小时',
+              hardwareImpact: '纯固件算法更新',
+              deliverable: '反向补偿固件补丁 (V1.2-Backlash-Patch) 与干涉仪测试记录',
+            },
+            {
+              step: '2. 外接 TÜV 认证双通道干簧安全继电器过渡箱',
+              detail: '在测试柜控制侧临时串接双通道独立干簧安全继电器模块，将 STO 1/2 彻底物理电气隔离切断驱动板 PWM 供电。',
+              owner: '硬件安全工程师',
+              duration: '4 小时',
+              hardwareImpact: '外置电气过渡盒，无单板修改',
+              deliverable: '安全接线过渡箱 3 套及接线图纸',
+            },
+            {
+              step: '3. 优化加减速 S 曲线并测试泄放电阻热平衡',
+              detail: '将加减速 Jerk 限制微调增加 15%，延长制动回馈时间 80ms，台架连续循环运转 2 小时监测泄放电阻温升。',
+              owner: '系统测试工程师',
+              duration: '8 小时',
+              hardwareImpact: '台架验证',
+              deliverable: '《连续满载运行泄放电阻温升曲线记录》',
+            },
+          ],
+          verificationCriteria: '末端重复定位精度稳定在 ≤ 2.4 arcmin，STO 双通道故障注入切断时延 ≤ 25ms，泄放电阻稳态温度 ≤ 85℃。',
+          exitCriteria: '第三方机构出具现场符合性预审合格备忘录，DVT 样机具备装车试运行放行资格。',
+        },
+        permanentPhase: {
+          phaseTag: 'NEXT_PHASE_PERMANENT',
+          timeWindow: '下一批次 PCB 改版 / 量产定型阶段',
+          title: '驱动板 Layout 双通道绝对物理隔离 (STO PLd) + 双编码器全闭环 + 功率泄放电阻外壳导热优化',
+          objective: '从单板硬件物理架构与机械传动链彻底消除背隙、共因失效及热过载隐患，顺利通过正式 TÜV 认证并支撑大规模量产。',
+          hardwareImpact: 'PCB 重新 Layout 投板，升级光耦器件并重划隔离地岛；关节输出端加装第二编码器。',
+          responsibilityRole: '硬件架构师 & 机械系统总工',
+          actions: [
+            {
+              step: '1. PCB 驱动控制板双通道绝对物理隔离 Layout',
+              detail: 'STO 1 与 STO 2 走线爬电间距严格保持 ≥ 6.3mm，采用 2 颗独立车规光耦及隔离 DC/DC 电源，通过第三方实验室全项故障注入测试。',
+              owner: 'PCB Layout 工程师',
+              duration: '8 天',
+              hardwareImpact: 'PCB 投板打样 (Rev B)',
+              deliverable: '新版 Gerber 文件与安规绝缘仿真分析报告',
+            },
+            {
+              step: '2. 关节输出侧集成 19-bit 绝对值双编码器全闭环',
+              detail: '在谐波减速器输出法兰加装高精度第二码盘，驱动器形成电机高速端与负载低速端双闭环控制，物理消除机械背隙与扭转柔性。',
+              owner: '机械与传感器工程师',
+              duration: '14 天',
+              hardwareImpact: '机械结构微调与新传感器导入',
+              deliverable: '双码盘集成图纸与首件全闭环精度测试报告',
+            },
+            {
+              step: '3. 制动泄放电阻外移贴附铝合金外壳强化散热',
+              detail: '将泄放电阻由板载改为金属外壳封装，通过 3.0W/mK 绝缘导热垫直接贴合至关节铝合金压铸外壳，稳态散热能力提升 3 倍。',
+              owner: '结构与热设计工程师',
+              duration: '10 天',
+              hardwareImpact: '结构热设计固化',
+              deliverable: '热流仿真报告与 1000 次急停耐久热冲击测试报告',
+            },
+          ],
+          verificationCriteria: '无需算法补偿下自然定位精度 ≤ 1.5 arcmin，板载 STO 通过 TÜV 正式 Cat 3 PLd 证书，100% 连续高速满载温升 ≤ 55℃。',
+          exitCriteria: '取得正式 PLd 功能安全证书，通过客户 SOP PPAP 签收。',
+        },
+        strategicTradeoff: `为什么必须双层时间轴协同？
+距离当前 DVT 评审里程碑仅剩【${days}天】。如果现在强行重新设计驱动板 PCB、等待制板贴片打样并重装机械，至少需要耗时 22~25 天以上，DVT 节点将直接违约瘫痪；
+因此在 T+24h 内必须果断采取“软件反向间隙动态补偿 + 外置独立安全继电器过渡箱 + 加减速 S 曲线回馈削峰”，在 4 天内将末端精度压入 2.3 arcmin 并消除 STO 现场违约风险；
+在随后的 SOP 准备期，再通过 PCB 物理双通道隔离、双码盘全闭环及外壳导热优化从物理硬件源头彻底固化，形成量产无死角的高可靠性产品。`,
+      };
+
     case 'BLDC':
-    default:
       return {
         containmentPhase: {
           phaseTag: 'T_PLUS_24H_CONTAINMENT',
@@ -443,5 +522,89 @@ T+24h 内利用“5.0W/mK 绝缘垫 + 软件动态限流降额”可以在不花
 因此 T+24h 内利用“原位并联高能 TVS + 软件全下桥 ASC 刹车”是 24 小时内保住交付节点的唯一解；
 但在后续量产改版中，必须重构 DC-Link 降低寄生电感并固化米勒钳位电路，才能形成不受软件 Bug 影响的硬件本质安全防线。`,
       };
+
+    default:
+      // 完全动态的领域时间轴生成器：根据实际 issue 动态提取，杜绝跨域名词污染
+      const issueName = (issue.failurePhenomenon || issue.engineeringConcern || '当前现场工程异常').slice(0, 40);
+      const specReq = (issue.requirement || '规格指标要求').slice(0, 40);
+      return {
+        containmentPhase: {
+          phaseTag: 'T_PLUS_24H_CONTAINMENT',
+          timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+          title: `针对 [${issueName}] 的零打板应急旁路与软件参数临时约束`,
+          objective: `在不重新制作硬件板卡 (0 天工期) 的前提下，通过原位参数调整与外部工装辅助，使样件在当前测试中达到 [${specReq}] 临时受控标准。`,
+          hardwareImpact: '0 天 PCB 打样工期，仅限原位阻容微调、外接辅助滤波治具或软件参数标定。',
+          responsibilityRole: '现场硬件调试负责人 & 系统测试主管',
+          actions: [
+            {
+              step: '1. 快速复现并锁定主导物理测点',
+              detail: `在台架复现【${issueName}】，使用高采样示波器/分析仪抓取输入端与受扰节点波形，分离因果关系。`,
+              owner: '硬件调试工程师',
+              duration: '4 小时',
+              hardwareImpact: '现场台架排查',
+              deliverable: '《现场快速归因与边界波形记录》',
+            },
+            {
+              step: '2. 实施原位低成本应急改制/参数约束',
+              detail: `根据当前实测边界执行临时旁路、阻抗匹配或固件保护阈值调整，就地压制异常超标。`,
+              owner: '应用与固件工程师',
+              duration: '6 小时',
+              hardwareImpact: '样件手工改制/固件刷写',
+              deliverable: '应急改制受控样件 3 套',
+            },
+            {
+              step: '3. 临界工况对比复测与让步放行归档',
+              detail: `在极限工况下复测核心指标，验证是否满足临时装机或测试准入底线，并签署受控让步单。`,
+              owner: 'QA 质量工程师',
+              duration: '6 小时',
+              hardwareImpact: '台架验证',
+              deliverable: '《应急改制件摸底复测报告及让步放行单》',
+            },
+          ],
+          verificationCriteria: `核心测试参数回落至容许受控窗口内，且未引入新的次生电气/功能失效。`,
+          exitCriteria: '通过样件临时准入审核，在严格受控条件下进入当前里程碑验证。',
+        },
+        permanentPhase: {
+          phaseTag: 'NEXT_PHASE_PERMANENT',
+          timeWindow: '下一轮硬件改版 / 量产定型阶段',
+          title: `设计源头根本性纠正与量产可靠性加固`,
+          objective: `从原理图、PCB 物理布局或器件选型上彻底根治【${issueName}】，无需依赖任何临时补偿措施即可长期稳定达标。`,
+          hardwareImpact: '硬件改版出图制作，固化最终器件选型与制造工艺。',
+          responsibilityRole: '硬件架构师 & 质量总监',
+          actions: [
+            {
+              step: '1. 原理图与 PCB 物理源头重新设计',
+              detail: `针对根因重构电路拓扑、强化滤波/退耦或优化关键走线回路，从物理第一性原理消除隐患。`,
+              owner: 'PCB Layout 工程师',
+              duration: '7 天',
+              hardwareImpact: 'PCB 重新投板制板',
+              deliverable: '新版 Gerber 文件与电路仿真报告',
+            },
+            {
+              step: '2. 全温区与极端工况稳健性验证',
+              detail: `在新版样机上执行 -40℃~+125℃ 全温区极限载荷循环测试，验证设计裕量是否充足。`,
+              owner: 'DVT 验证工程师',
+              duration: '10 天',
+              hardwareImpact: '环境舱测试',
+              deliverable: '《全温极限工况验证报告》',
+            },
+            {
+              step: '3. 设计变更关闭 (ECR/ECN) 与量产放行',
+              detail: `完成设计失效模式分析 (DFMEA) 降级闭环，归档正式工程变更单，导入量产作业指导书。`,
+              owner: '项目质量经理',
+              duration: '5 天',
+              hardwareImpact: '量产定型',
+              deliverable: '正式工程变更封样审批表',
+            },
+          ],
+          verificationCriteria: `在全温度、全供电公差及寿命老化最坏情况下，核心指标满足设计规范且保持 ≥ 20% 工程裕量。`,
+          exitCriteria: '通过项目质量评审与客户 PPAP 签字认可，正式关闭当前技术风险。',
+        },
+        strategicTradeoff: `为什么必须双层时间轴协同？
+当前距离关键里程碑仅剩【${days}天】。如果强行等待下一轮硬件改版打样，周期漫长必然导致交付严重逾期；
+因此必须在 T+24h 内采取针对性的应急围堵方案，先保证样机能安全受控地进入当前测试；
+随后在量产准备周期内，严格执行物理源头改版与全温验证，彻底根治问题，避免把工程隐患带入量产。`,
+      };
+
   }
 }

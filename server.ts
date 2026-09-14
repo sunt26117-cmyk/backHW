@@ -6,9 +6,20 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
 import { runExpertAnalysis } from './src/data/expertEngine';
-import { getDomainAdaptivePromptGuidance, getMultiDomainAdaptivePromptGuidance } from './src/utils/domainAdaptivePromptEngine';
-import { resolveEngineeringDomain, resolveEngineeringDomains, getEngineeringDomainLabel, getDomainMeasurementFields, getDomainMeasurementGroups } from './src/utils/scenarioDomainEngine';
+import { getMultiDomainAdaptivePromptGuidance } from './src/utils/domainAdaptivePromptEngine';
+import {
+  resolveEngineeringDomain,
+  resolveEngineeringDomains,
+  getEngineeringDomainLabel,
+  getDomainMeasurementFields,
+  getDomainMeasurementGroups,
+} from './src/utils/scenarioDomainEngine';
 import { buildDualTimelinePlan } from './src/utils/dualTimelineEngine';
+import { assessInputIntegrity, generatePromptIntegrityDirectives } from './src/utils/inputIntegrityEngine';
+import { auditAiResult } from './src/utils/aiResultAuditor';
+import { getCrossDomainCouplings } from './src/utils/crossDomainCouplingMatrix';
+import { runDeterministicPrecomputations, PrecomputedFact } from './src/utils/deterministicPrecomputation';
+import { CopilotAnalysisResult, DebugSnapshot } from './src/types';
 
 dotenv.config();
 
@@ -32,12 +43,11 @@ app.use((req, res, next) => {
   next();
 });
 
-
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    mode: '100% Offline Deterministic Expert Engine',
+    mode: '100% Offline Deterministic Expert Engine + Resilient LLM Inference',
     time: new Date().toISOString(),
   });
 });
@@ -50,7 +60,6 @@ app.get('/api/download/offline-html', (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename="ECU_Hardware_Copilot_Offline.html"');
     res.sendFile(offlineFilePath);
   } else {
-    // If not built yet, fallback to dist/index.html or return message
     const indexPath = path.join(process.cwd(), 'dist', 'index.html');
     if (fs.existsSync(indexPath)) {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -85,26 +94,21 @@ export const HARDWARE_CHIEF_SYSTEM_PROMPT = `
 5. 语言必须极其专业：使用正规汽车工程语境（如：工况剖面Mission Profile、抛负载抑制度、寄生振荡、体二极管反向恢复损耗、AEC-Q Grade 1）。
 6. 【工况强定锚与防随意发散红线 (Strict Grounding & Zero Hallucination)】：
    - 必须把输入的【工程工况 PROJECT CONTEXT】与【实测问题 ENGINEERING ISSUE】作为唯一最高事实依据。
-   - 绝对禁止脱离当前工况给出通用套话（如“建议优化走线”、“建议检查PCB”等模糊空话）。针对当前工况：
-     - 若为 BLDC 电机控制工况：必须精准围绕反电势动能泵升 ($E=\frac{1}{2}J\omega^2$)、母线电容与 TVS 吸收、全下桥/全上桥主动短路制动、MOSFET 耐压降额开展；
-     - 若为 EMC 辐射发射/传导工况：必须精准围绕 CISPR 25 Class 5 频段限值、共模电流回流环路、开关谐波、π型滤波、铁氧体磁珠阻抗匹配开展；
-     - 若为 MOSFET 缺料替代/热阻工况：必须精准围绕 RDS(on)、Qg/Qgd 驱动损耗、AEC-Q101 标准、瞬态 SOA 脉冲耐压及结温降额开展；
-     - 若为 WCCA 容差漂移工况：必须精准围绕最坏情况极值分析 (Extreme Worst-Case) 与均方根容差 (RSS) 开展。
-   - 必须精准回答车规 4 大黄金问题：
-     ① What is wrong: 精准列出当前超标物理量、测试条件与现象；
-     ② Why: 揭示深层物理机理（具体物理效应与电路参数）；
-     ③ What should we do now: 给出 3 个鲜明对立的候选方案（原位原封修改 / 系统软件控制标定 / 重新投板改版），必须结合当前工期倒计时（daysRemaining）严格判定交付可行性；
-     ④ What would prove it: 给出量化的台架实测判定指标与闭环验证步骤。
+   - 【已核算事实引用指令】：对于 Prompt 中注入的【本地物理预核算事实】，模型必须严格直接引用该数值与裕量结论，严禁自行凭空推翻或另造相冲突的数值；如有异议，必须在 assumptions 中说明充分理由。
+   - 绝对禁止脱离当前工况给出通用套话（如“建议优化走线”、“建议检查PCB”等模糊空话）。
 
 【输出格式强制要求】
 严格输出符合预定义JSON Schema的纯JSON文本，禁止带有任何Markdown代码块外壳（如 \`\`\`json），禁止任何前言和结语。
 `;
 
 /**
- * 2.2 响应修复容错拦截器 (Schema Healing Pipeline)
- * 纯函数管道清洗大模型残缺/带有 Markdown 代码块的返回，若解析崩溃毫秒级安全降级
+ * 响应修复容错拦截器 (Schema Healing Pipeline)
+ * 纯函数管道清洗大模型残缺/带有 Markdown 代码块的返回
  */
 function healAndParseJson(raw: string): any {
+  if (!raw || typeof raw !== 'string') {
+    throw new Error('Raw response is empty or non-string');
+  }
   let cleaned = raw.trim();
 
   // 1. 剔除开头的 ```json 或 ``` 及结尾的 ```
@@ -117,12 +121,21 @@ function healAndParseJson(raw: string): any {
     cleaned = cleaned.slice(firstBrace, lastBrace + 1);
   }
 
-  // 3. 尝试标准解析
-  return JSON.parse(cleaned);
+  // 3. 处理偶发的转义字符或尾逗号问题
+  try {
+    return JSON.parse(cleaned);
+  } catch (firstErr) {
+    // 尝试去除对象/数组尾部多余逗号 (Trailing commas)
+    const fixedComma = cleaned
+      .replace(/,\s*([}\]])/g, '$1')
+      .replace(/[\u0000-\u001F]+/g, (match) => (match === '\n' || match === '\r' || match === '\t' ? match : ''));
+    return JSON.parse(fixedComma);
+  }
 }
 
 /**
- * 通用 OpenAI 兼容协议调用函数 (支持 DeepSeek, 阿里通义千问 Qwen, 智谱 GLM, 月之暗面 Moonshot, 硅基流动, 自定义 API)
+ * 通用 OpenAI 兼容协议调用函数 (支持 DeepSeek, 阿里通义千问, 智谱 GLM, 月之暗面, 硅基流动等)
+ * 超时按模型架构动态区分：推理/思考模型（R1, O1, Reasoner）给予 120s，常规模型 55s
  */
 async function callCustomOpenAIModel(
   config: {
@@ -140,7 +153,14 @@ async function callCustomOpenAIModel(
   }
 
   const modelLower = (config.model || '').toLowerCase();
-  const isReasoner = modelLower.includes('reasoner') || modelLower.includes('r1');
+  const isReasoner =
+    modelLower.includes('reasoner') ||
+    modelLower.includes('r1') ||
+    modelLower.includes('o1') ||
+    modelLower.includes('o3') ||
+    modelLower.includes('thinking');
+
+  const timeoutMs = isReasoner ? 120000 : 55000;
 
   const bodyPayload: Record<string, any> = {
     model: config.model,
@@ -150,20 +170,20 @@ async function callCustomOpenAIModel(
     ],
   };
 
-  // 绝大多数标准模型支持 temperature；部分特定推理模型 (如 deepseek-reasoner) 限制传参
+  // 某些特定推理模型禁止传递 temperature 参数
   if (!isReasoner && typeof config.temperature === 'number') {
     bodyPayload.temperature = config.temperature;
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 75000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(normalizedBase, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey.trim()}`,
+        Authorization: `Bearer ${config.apiKey.trim()}`,
       },
       body: JSON.stringify(bodyPayload),
       signal: controller.signal,
@@ -184,12 +204,16 @@ async function callCustomOpenAIModel(
     return content;
   } catch (err: any) {
     clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(`模型响应超时 (${timeoutMs / 1000}s)，建议选择响应更快的模型或重试`);
+    }
     throw err;
   }
 }
 
 /**
  * Google GenAI 调用函数 (支持 Gemini 2.5 Flash / Pro 及环境变量 GEMINI_API_KEY)
+ * 根据模型版本智能调整超时 (Pro / Thinking 给予 120s，Flash 给予 60s)
  */
 async function callGeminiModel(
   config: {
@@ -225,11 +249,81 @@ async function callGeminiModel(
   return content;
 }
 
+/**
+ * 带有“自愈重问 + JSON解析单次修复”的弹性模型调用器
+ */
+async function queryModelWithResilience(
+  modelConfig: any,
+  prompt: string,
+  systemPrompt: string
+): Promise<{ rawContent: string; parsed: any; retryCount: number }> {
+  let retryCount = 0;
+  let rawContent = '';
+
+  const isGemini =
+    modelConfig.provider === 'gemini' ||
+    (modelConfig.model && modelConfig.model.toLowerCase().includes('gemini'));
+
+  // 1. 初次调用
+  if (isGemini) {
+    rawContent = await callGeminiModel(
+      {
+        apiKey: modelConfig.apiKey,
+        model: modelConfig.model,
+        temperature: modelConfig.temperature ?? 0.2,
+      },
+      prompt,
+      systemPrompt
+    );
+  } else {
+    rawContent = await callCustomOpenAIModel(
+      {
+        baseUrl: modelConfig.baseUrl,
+        apiKey: modelConfig.apiKey,
+        model: modelConfig.model,
+        temperature: modelConfig.temperature ?? 0.2,
+      },
+      prompt,
+      systemPrompt
+    );
+  }
+
+  // 2. 尝试解析 JSON
+  try {
+    const parsed = healAndParseJson(rawContent);
+    return { rawContent, parsed, retryCount };
+  } catch (parseErr: any) {
+    // 触发单次 JSON 语法修复重问 (待办 5.2)
+    retryCount++;
+    console.warn(`JSON 解析失败 (${parseErr.message})，发起单次语法自愈修复重试...`);
+    const fixPrompt = `上一轮输出未能通过 JSON.parse 标准解析。解析错误信息: ${parseErr.message}。
+原始输出片段:
+${rawContent.slice(0, 800)}...
+【紧急要求】：请严格将其修正为合法规范的单个纯 JSON 对象，输出纯 JSON 字符串，绝对不要包裹 markdown 代码块，不要添加任何说明文字：`;
+
+    let healedRaw = '';
+    if (isGemini) {
+      healedRaw = await callGeminiModel(
+        { apiKey: modelConfig.apiKey, model: modelConfig.model, temperature: 0.1 },
+        fixPrompt,
+        'You are a strict JSON formatting validator. Output pure valid JSON only.'
+      );
+    } else {
+      healedRaw = await callCustomOpenAIModel(
+        { baseUrl: modelConfig.baseUrl, apiKey: modelConfig.apiKey, model: modelConfig.model, temperature: 0.1 },
+        fixPrompt,
+        'You are a strict JSON formatting validator. Output pure valid JSON only.'
+      );
+    }
+    const parsed = healAndParseJson(healedRaw);
+    return { rawContent: healedRaw, parsed, retryCount };
+  }
+}
+
 // 模型 API 连通性测试接口
 app.post('/api/copilot/test-model', async (req, res) => {
   try {
     const { baseUrl, apiKey, model, provider } = req.body;
-
     const startTime = Date.now();
 
     if (provider === 'gemini') {
@@ -277,9 +371,7 @@ app.post('/api/copilot/test-model', async (req, res) => {
 
     const testPayload = {
       model: model.trim(),
-      messages: [
-        { role: 'user', content: '这是一次车规硬件决策系统 API 连通性检测，请仅回复："CONNECTED"' },
-      ],
+      messages: [{ role: 'user', content: '这是一次车规硬件决策系统 API 连通性检测，请仅回复："CONNECTED"' }],
       max_tokens: 30,
     };
 
@@ -287,7 +379,7 @@ app.post('/api/copilot/test-model', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey.trim()}`,
+        Authorization: `Bearer ${apiKey.trim()}`,
       },
       body: JSON.stringify(testPayload),
       signal: controller.signal,
@@ -326,7 +418,14 @@ app.post('/api/copilot/test-model', async (req, res) => {
 /**
  * 校验并用本地车规基准补全大模型推理结果，保证 100% 严谨性与输入工况强绑定
  */
-function validateAndEnrichAiResult(parsed: any, baseline: any, modelName: string, context: any, issue: any): any {
+function validateAndEnrichAiResult(
+  parsed: any,
+  baseline: any,
+  modelName: string,
+  context: any,
+  issue: any,
+  integrityAssessment?: any
+): any {
   if (!parsed || typeof parsed !== 'object') {
     return baseline;
   }
@@ -362,6 +461,7 @@ function validateAndEnrichAiResult(parsed: any, baseline: any, modelName: string
   parsed.next24HourPlan = parsed.next24HourPlan || baseline.next24HourPlan;
   parsed.edrRecord = parsed.edrRecord || baseline.edrRecord;
   parsed.redTeamChallenge = parsed.redTeamChallenge || baseline.redTeamChallenge;
+
   const md = parsed.multiDomainAnalysis;
   if (!md || typeof md !== 'object') {
     const primaryDomain = resolveEngineeringDomain(issue);
@@ -370,19 +470,27 @@ function validateAndEnrichAiResult(parsed: any, baseline: any, modelName: string
       primaryDomain,
       relatedDomains,
       domainAssessments: [primaryDomain, ...relatedDomains].map((domain, index) => ({
-        domain, role: index === 0 ? 'PRIMARY' : 'RELATED', evidenceLevel: 'UNKNOWN', knownFacts: [],
-        evidenceGaps: ['当前云端分析未返回该域的独立证据分层'], minimumValidation: '补齐该领域最小实测证据后重新判断', domainConclusion: '证据不足，不宣称根因已锁定',
+        domain,
+        role: index === 0 ? 'PRIMARY' : 'RELATED',
+        evidenceLevel: 'MEDIUM_INFERRED',
+        knownFacts: [],
+        evidenceGaps: ['当前分析未返回该域独立分层'],
+        minimumValidation: '补齐该领域最小实测证据后重新核对',
+        domainConclusion: '证据不足，需台架闭环',
       })),
       crossDomainLinks: [],
       crossDomainVetoes: [],
     };
   } else {
     md.primaryDomain = md.primaryDomain || resolveEngineeringDomain(issue);
-    md.relatedDomains = Array.isArray(md.relatedDomains) ? md.relatedDomains : resolveEngineeringDomains(issue).filter((d) => d !== md.primaryDomain);
+    md.relatedDomains = Array.isArray(md.relatedDomains)
+      ? md.relatedDomains
+      : resolveEngineeringDomains(issue).filter((d) => d !== md.primaryDomain);
     md.domainAssessments = Array.isArray(md.domainAssessments) ? md.domainAssessments : [];
     md.crossDomainLinks = Array.isArray(md.crossDomainLinks) ? md.crossDomainLinks : [];
     md.crossDomainVetoes = Array.isArray(md.crossDomainVetoes) ? md.crossDomainVetoes : [];
   }
+
   parsed.dualTimeline = parsed.dualTimeline || baseline.dualTimeline || buildDualTimelinePlan(parsed, context, issue);
   parsed.decisionFrame = parsed.decisionFrame || {
     decisionQuestion: `${context?.nextMilestone || '下一工程门禁'} 前是否具备继续推进的证据条件`,
@@ -391,7 +499,9 @@ function validateAndEnrichAiResult(parsed: any, baseline: any, modelName: string
     bestNextAction: parsed.finalRecommendation?.immediateSteps?.[0]?.action || '先完成当前关键未知量的最小验证',
     minimumEvidenceToProceed: [parsed.finalRecommendation?.preconditions?.[0] || '关键实测证据达到项目规范门槛'],
     unknownsBlockingDecision: Array.isArray(parsed.unknowns) ? parsed.unknowns.slice(0, 5) : ['关键输入数据不足'],
-    reversalCriteria: Array.isArray(parsed.finalRecommendation?.reEvaluationTriggers) ? parsed.finalRecommendation.reEvaluationTriggers.slice(0, 5) : ['关键实测证据与当前物理假设不一致'],
+    reversalCriteria: Array.isArray(parsed.finalRecommendation?.reEvaluationTriggers)
+      ? parsed.finalRecommendation.reEvaluationTriggers.slice(0, 5)
+      : ['关键实测证据与当前物理假设不一致'],
   };
 
   parsed.provenance = {
@@ -404,45 +514,116 @@ function validateAndEnrichAiResult(parsed: any, baseline: any, modelName: string
     transparencyNote: `本分析由云端大模型 [${modelName}] 严格限定在【${context?.projectName || '车载项目'} · ${context?.projectPhase || 'DV'}】输入工况及实测数据【${issue?.actualMeasurement || issue?.failurePhenomenon || '实测数据'}】下推演生成，严禁脱离实际随意作答。`,
   };
 
-  return parsed;
+  // 执行车规级 AI 结果全栈审计与防幻觉校准
+  const { sanitizedResult } = auditAiResult(parsed, baseline, context, issue, integrityAssessment);
+  return sanitizedResult;
 }
 
-// AI Analysis Endpoint
+// 专属接口：实时评估输入完整度等级，供前端交互感知
+app.post('/api/copilot/assess-input', (req, res) => {
+  try {
+    const { context, issue } = req.body;
+    const assessment = assessInputIntegrity(context, issue);
+    res.json({ success: true, assessment });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// AI Analysis Endpoint (主推理与决策推演接口)
 app.post('/api/copilot/analyze', async (req, res) => {
+  const startTime = Date.now();
   try {
     const { context, issue, modelConfig } = req.body;
 
-    // 1. 预先执行本地车规确定性专家引擎，提取物理机理与工程事实底线
-    const baseline = runExpertAnalysis(context, issue);
+    // 1. 预先执行输入完整度审计评估 (第一层防线)
+    const integrityAssessment = assessInputIntegrity(context, issue);
+    const integrityPromptDirectives = generatePromptIntegrityDirectives(integrityAssessment);
 
-    // 2. 根据输入实测与工况自适应匹配车规 Chief Engineer 专属专业领域指导
+    // 2. 预先执行本地车规确定性专家引擎，提取物理机理与工程事实底线
+    const baseline = runExpertAnalysis(context, issue);
+    if (baseline.provenance) {
+      baseline.provenance.inputIntegrity = integrityAssessment;
+    }
+
+    // 3. 本地车规物理引擎预核算注入 (待办 2.4 - 预计算注入消除幻觉)
+    const precomputedFacts = runDeterministicPrecomputations(context, issue);
+    const precomputedFactsText =
+      precomputedFacts.length > 0
+        ? precomputedFacts
+            .map(
+              (f) =>
+                `- 【${f.title}】${f.parameter} = ${f.calculatedValue} ${f.unit} (规范门限: ${f.specThreshold || 'N/A'}，安全裕量: ${f.safetyMargin || 'N/A'}，合规性: ${f.complianceVerdict})。\n  理论核算依据: ${f.formulaOrBasis}。\n  ★ 必须执行的引用指令: ${f.directiveForAi}`
+            )
+            .join('\n')
+        : '（当前工况下无特殊离散物理参数需要预核算）';
+
+    // 4. 多域编排与篇幅裁剪 (待办 1.1 - 主导域完整，弱相关域仅留跨域耦合与否决边界)
     const primaryDomain = resolveEngineeringDomain(issue);
-    const relatedDomains = resolveEngineeringDomains(issue).filter(d => d !== primaryDomain);
+    const relatedDomains = resolveEngineeringDomains(issue).filter((d) => d !== primaryDomain);
     const multiDomainGuidance = getMultiDomainAdaptivePromptGuidance(issue, context);
     const domainGuidance = multiDomainGuidance.primary;
-    const multiDomainEvidence = multiDomainGuidance.all.map((g) => `- ${g.title}\n  物理链：${g.physicsFormulas}\n  测试规约：${g.testProtocol}\n  跨域影响：${g.crossDisciplinaryImpact}\n  禁止空话：${g.prohibitedVagueness.join('；')}`).join('\n\n');
 
-    // 3. 逐字段核对实测参数的填写情况：区分"用户实际填了什么"与"这个域本来应该填什么"，
-    //    避免 AI 在不知道哪些字段是真空的情况下自行脑补默认值。
+    const primaryGuidanceText = `【主导工程领域：${domainGuidance.title}】(分配完整物理机理链)
+- 核心物理公式与因果推导:
+${domainGuidance.physicsFormulas}
+- 车规元器件成熟选型基准:
+${domainGuidance.componentSpecs}
+- 专业测试仪器与台架测量规程:
+${domainGuidance.testProtocol}
+- 跨专业协同要求:
+${domainGuidance.crossDisciplinaryImpact}
+- 严格禁止的模糊空话清单:
+${domainGuidance.prohibitedVagueness.map((v) => `  * ${v}`).join('\n')}`;
+
+    const relatedGuidanceText =
+      multiDomainGuidance.related.length > 0
+        ? multiDomainGuidance.related
+            .map(
+              (r) => `【强/弱相关领域：${r.title}】(聚焦跨域耦合与否决边界，防止篇幅发散)
+- 跨域耦合物理影响: ${r.crossDisciplinaryImpact}
+- 关联否决条件与防穿透红线: 必须确保在主导领域实施的对策不会突破本领域的器件额定耐压、温升限值或一票否决安全裕量！`
+            )
+            .join('\n\n')
+        : '无其他次级相关领域';
+
+    // 5. 跨工程域物理耦合关系矩阵注入 (待办 1.2)
+    const crossDomainCouplings = getCrossDomainCouplings(primaryDomain, relatedDomains);
+    const couplingText =
+      crossDomainCouplings.length > 0
+        ? crossDomainCouplings
+            .map(
+              (c) =>
+                `- 【${c.fromDomain} ➔ ${c.toDomain}】触发动作：${c.action} ➔ 物理量变化：${c.physicalChange} ➔ 权衡代价：${c.physicalTradeoff} ➔ 必须复核项：${c.requiredRevalidation.join('; ')}${c.vetoCondition ? ` ➔ 【硬性否决边界】：${c.vetoCondition}` : ''}`
+            )
+            .join('\n')
+        : '未检测到硬性跨域物理冲突规则';
+
+    // 6. 核对实测参数填写情况
     const filledValues = issue?.measuredValues || {};
     const isFilled = (v: unknown) => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
     const allExpectedFields = getDomainMeasurementFields(issue);
     const missingFieldsList = allExpectedFields.filter((f) => !isFilled(filledValues[f.key]));
     const missingFieldsText = missingFieldsList.length
-      ? missingFieldsList.map((f) => `- ${f.key}（${f.label}${f.unit ? `，单位 ${f.unit}` : ''}，${f.tag}${f.required ? '，必填缺失' : ''}）`).join('\n')
+      ? missingFieldsList
+          .map((f) => `- ${f.key}（${f.label}${f.unit ? `，单位 ${f.unit}` : ''}，${f.tag}${f.required ? '，必填缺失' : ''}）`)
+          .join('\n')
       : '（本次涉及的工程域测量字段均已填写）';
 
-    // 4. 按域拆分实测证据浓度：让 related domains 也有真实数据支撑，而不是仅靠 domain 名称脑补证据等级。
-    const domainEvidenceBreakdown = getDomainMeasurementGroups(issue).map((group, idx) => {
-      const filled = group.fields.filter((f) => isFilled(filledValues[f.key]));
-      const missing = group.fields.filter((f) => !isFilled(filledValues[f.key]));
-      const filledText = filled.length ? filled.map((f) => `${f.key}=${filledValues[f.key]}`).join(', ') : '无';
-      const missingText = missing.length ? missing.map((f) => f.key).join(', ') : '无';
-      return `【${idx === 0 ? '主导域' : '涉及域'} · ${getEngineeringDomainLabel(group.domain)}】已填：${filledText}；未填：${missingText}`;
-    }).join('\n');
+    // 7. 按域拆分实测证据浓度
+    const domainEvidenceBreakdown = getDomainMeasurementGroups(issue)
+      .map((group, idx) => {
+        const filled = group.fields.filter((f) => isFilled(filledValues[f.key]));
+        const missing = group.fields.filter((f) => !isFilled(filledValues[f.key]));
+        const filledText = filled.length ? filled.map((f) => `${f.key}=${filledValues[f.key]}`).join(', ') : '无';
+        const missingText = missing.length ? missing.map((f) => f.key).join(', ') : '无';
+        return `【${idx === 0 ? '主导域' : '涉及域'} · ${getEngineeringDomainLabel(group.domain)}】已填：${filledText}；未填：${missingText}`;
+      })
+      .join('\n');
 
+    // 8. 组装高定锚专业 Prompt
     const prompt = `
-你必须严格基于以下【输入工况】、【实测数据】与【${domainGuidance.title}】专属车规物理基准进行硬件工程决策推演，绝不脱离实际随意作答：
+你必须严格基于以下【输入工况】、【实测数据】与【本地确定性预核算事实】进行硬件工程决策推演，绝不脱离实际随意作答：
 
 =============================================
 【1. 输入工程背景 (PROJECT CONTEXT)】
@@ -467,94 +648,40 @@ app.post('/api/copilot/analyze', async (req, res) => {
 - 核心工程顾虑: ${issue?.engineeringConcern || '未提供顾虑'}
 - 关键实测数值: ${JSON.stringify(issue?.measuredValues || {}, null, 2)}
 
-【2.1 本次输入中未提供的工程参数（必须视为 UNKNOWN，严禁假设默认值替代）】
-${missingFieldsText}
-以上字段若对某候选方案的结论是必要输入，必须在该方案中明确指出"因缺少 XX 字段暂无法定量核算，已作为假设/待验证项处理"，不得直接代入经验默认值后当作已验证结论。
+【2.0 本地确定性数学物理预核算事实 (NON-NEGOTIABLE FACTS)】
+${precomputedFactsText}
+★ 核心准则：以上数值由本地经过车规方程标定的物理引擎计算所得。模型输出必须直接引用并以此作为事实锚点，严禁另造冲突数值！
 
-【2.2 按工程域拆分的实测证据浓度（用于校准 domainAssessments.evidenceLevel，禁止仅凭域名称主观判断证据等级）】
+【2.1 输入数据完整度车规审计等级与强约束】
+${integrityPromptDirectives}
+
+【2.2 本次输入中未提供的工程参数（必须视为 UNKNOWN，严禁假设默认值替代）】
+${missingFieldsText}
+
+【2.3 按工程域拆分的实测证据浓度（用于校准 domainAssessments.evidenceLevel）】
 ${domainEvidenceBreakdown}
 
-【3. 本工程多域物理与推演规约】
-【主导域：${domainGuidance.title}】
-[物理公式与机理推导要求]:
-${domainGuidance.physicsFormulas}
+【3. 多工程域物理与推演规约 (权重智能裁剪版)】
+${primaryGuidanceText}
 
-[车规元器件规格与成熟料号指导]:
-${domainGuidance.componentSpecs}
+${relatedGuidanceText}
 
-[专业测试仪器与台架测量规程]:
-${domainGuidance.testProtocol}
-
-[跨专业协同要求 (SW / System / PM)]:
-${domainGuidance.crossDisciplinaryImpact}
-
-[严禁出现的空话反模式 (PROHIBITED VAGUENESS)]:
-${domainGuidance.prohibitedVagueness.map(v => `* ${v}`).join('\n')}
-
-[所有涉及工程域的并行指导：]
-${multiDomainEvidence}
+【3.1 跨工程域物理耦合规则库 (CROSS-DOMAIN COUPLING MATRIX)】
+${couplingText}
+★ 规则回填要求：模型在 candidateActions[].crossDomainCouplingChecks 中，必须逐条复核以上规则是否受到本方案影响，并说明 addressed: true/false 及评估说明。
 
 【4. 车规基准定锚 (AUTOMOTIVE BENCHMARK)】
 - 确定性问题定性: ${baseline?.coreConclusion?.problemSummary || ''}
 - 核心物理失效机理: ${baseline?.physicalMechanism?.rootCauseAnalysis || ''}
 - 关键物理影响因子: ${JSON.stringify(baseline?.physicalMechanism?.keyPhysicalFactors || [], null, 2)}
 - 综合风险评级基准: ${baseline?.riskRatings?.overallRisk || 'Medium-High'} (${baseline?.riskRatings?.overallRiskScore ?? 75}分)
-- 多域确定性基线: ${JSON.stringify(baseline?.multiDomainAnalysis || {}, null, 2)}
 
-【5. 工程事实分层 (EVIDENCE HIERARCHY)】
-必须逐条区分以下信息等级，任何低等级信息不得伪装成高等级事实：
-- A · USER_MEASURED / 实测：用户明确提供的仪器读数、测试记录、样件现象；可直接作为现状证据。
-- B · IMPORTED / 外部导入：用户提供的测试报告、供应商数据、客户协议摘录；引用时说明来源。
-- C · SPEC / 规范：客户要求、项目规范、标准条款；不得自行创造不存在的限值。
-- D · CALCULATED / 物理计算：由输入实测值和明确公式计算得到；必须写出关键输入。
-- E · ASSUMPTION / 工程假设：用于推演但尚未证实；必须显式标为“假设”。
-- F · AI_INFERENCE / AI 推断：只能作为候选解释或方案，禁止写成已验证根因。
-- 当关键数据缺失时，不得补造数值。必须进入 unknowns，并说明“缺什么数据 + 为什么影响决策 + 最小验证方法”。
-
-【6. 当前决策态 (DECISION STATE)】
-请先在脑中建立以下状态，再输出结果：
-- 当前真正需要做的决定：${context?.nextMilestone || '下一工程门禁'} 前，当前缺陷能否继续推进/进入下一阶段。
-- 当前决策窗口：${context?.daysRemaining ?? 14} 天。
-- 主要硬约束：${context?.costConstraint || '未定义成本约束'}。
-- 当前样件边界：${context?.sampleStatus || '未定义'}。
-- 必须识别：当前最关键的 decision gate、最小证据集、最大未知量、方案被推翻的触发条件。
-
-【执行指令与车规专家落地硬性约束】
-1. 【深度咬合专属领域公式与器件规格】：
-   - 必须严格应用上述【${domainGuidance.title}】中的物理公式与机理进行量化推导，严禁张冠李戴；
-   - 只有在输入或领域指导明确支持时，才允许给出具体器件参数/料号；无法确认时必须标记“待选型确认”，不得虚构库存、交期或适配性。
-2. 【候选方案必须围绕当前决策窗口排序】:
-   - 每个候选方案必须回答：为什么适合/不适合当前工期、样件、成本和安全门禁；最快何时取得决定性证据；最晚何时必须切换；若不推荐，主拒绝理由是什么。
-3. 【台架实操抓波与判定规程】：
-   - 在候选方案的 verificationMethod 及 finalRecommendation.immediateSteps 中，必须给出“测什么、在哪里测、用什么仪器/探头、Pass/Fail 门槛”；
-   - 如果当前输入没有可靠的量化门槛，不得自行制造一个标准值，应返回“需要确认的规范/设计门槛”。
-4. 【时间红线与不可接受行为】：
-   - 必须把 ${context?.daysRemaining ?? 14} 天决策窗口与每个方案的实际工期相乘分析；PCB 改版、样件、软件标定等耗时只能作为“当前项目假设/经验估算”，除非输入已明确确认，不得视为普遍事实；
-   - 对每个方案必须明确：最快可验证时间、最晚决策点、错过门禁的直接后果；
-   - 在 engineeringDocs.pmDecisionEmail 中输出可直接复制发送给 PM 的汇报邮件，明确事实、风险、请求决策和责任边界。
-5. 【双层工程时间轴机制 (Dual-Timeline Action Architecture)】：
-   车规硬件决策绝非单选，必须在 JSON 中严格清晰拆分：
-   - containmentPhase (T+24h 应急临时遏制)：0天板卡改版工期（如原位阻容焊盘替换、软件寄存器展频、线束磁环套管），在当前交样节点前 24~48h 内完成闭环，满足装车验证与试验准入；
-   - permanentPhase (下一版本永久纠正)：在后续改版（如 C 样或 DV2/PV）中重新投板优化地回路/布局布线，彻底根除物理根因，通过全套规范与 PPAP Level 3 审查；
-   - strategicTradeoff：清晰阐明为什么绝不能只选其一，而是需要双轨闭环协同推进。
-6. 【多域决策硬约束】：
-   - 必须明确 primary domain 与 related domains；
-   - 必须识别至少 1 条真实的跨域因果链，格式为“域A → 物理机制 → 域B”，不得只罗列标签；
-   - 每个涉及域都必须给出证据充足度、关键缺口与最小验证项；
-   - 候选方案必须同时评价其对所有涉及域的正面收益、负面副作用和潜在一票否决项；
-   - 任何一个硬门限域触发 VETO 时，不得因为另一个域改善而判定整体放行。
-7. 【candidateActions.scores 打分锚点（禁止凭感觉打分，必须对照以下锚点定档）】：
-   - T 技术裕量：90-100=留有≥30%物理裕量且已有实测数据支撑；70-89=裕量20-30%，仅有计算/仿真支撑尚无实测；50-69=裕量<20%或关键参数依赖假设；<50=已知会突破额定值/规范限值。
-   - S 工期/进度可行性：90-100=可在当前决策窗口内完成且无需改版；70-89=需要少量工期但仍在窗口内；50-69=接近或压线决策窗口；<50=明确超出剩余天数。
-   - C 成本：90-100=零/极低成本（原位标定、软件）；70-89=小额BOM或工装变化；50-69=需要改版打样等中等成本；<50=显著BOM上升或需要重新开模/大改版。
-   - Q 质量与可靠性：90-100=有实测/仿真双重验证且无已知副作用；70-89=有一种验证手段支撑；50-69=仅有理论推导支撑；<50=已知存在未闭环的可靠性隐患。
-   - L 领导/干系人可接受度：90-100=完全符合当前 hwLeadStyle 与决策窗口预期；70-89=基本符合但需额外沟通；50-69=需要跨部门让步或特批；<50=预计会被否决或需升级评审。
-   - 每个方案的四个分项必须能在 description/expectedBenefit/verificationMethod 中找到对应的具体依据，不得出现"分数与文字描述对不上"的情况。
-8. 严格输出符合预定义 JSON Schema 的纯 JSON 文本，包含全部必须键。
-9. 【输出前自我核对（不得省略）】：
-   - 生成 candidateActions 后，逐条对照本域【严禁出现的空话反模式】清单自查每个方案的 description/expectedBenefit；
-   - 若命中任一反模式（如只写"加滤波电容/优化走线"而未写具体数值、封装、料号或测点），必须重写该字段后再输出，不允许原样保留空话表述；
-   - 若某个数值结论所需的关键字段在【2.1 未提供的工程参数】清单中，必须在该结论旁注明依赖假设，不得默认视为已验证事实。
+【5. 当前决策态与双层时间轴要求】
+- 决策窗口: 剩余 ${context?.daysRemaining ?? 14} 天
+- 必须严格提供双层时间轴：
+  - containmentPhase: T+24h 应急临时遏制（0天PCB改版工期，满足当前装车验证）；
+  - permanentPhase: 下一改版彻底根除物理根因；
+  - strategicTradeoff: 阐明为何双轨协同推进。
 
 Return a single JSON object with these exact keys:
 {
@@ -565,7 +692,7 @@ Return a single JSON object with these exact keys:
   },
   "decisionFrame": {
     "decisionQuestion": "明确回答当前到底要不要继续推进/放行/改版",
-    "currentDecisionGate": "当前所处工程门禁，例如 DV 准入 / EOL 放行 / 设计冻结",
+    "currentDecisionGate": "当前所处工程门禁",
     "decisionWindow": "结合 daysRemaining 给出实际剩余决策窗口",
     "bestNextAction": "未来 24 小时最应该做的一件事",
     "minimumEvidenceToProceed": ["进入下一阶段前必须拿到的最小证据"],
@@ -573,14 +700,13 @@ Return a single JSON object with these exact keys:
     "reversalCriteria": ["出现哪些证据时必须推翻当前推荐方案"]
   },
   "multiDomainAnalysis": {
-    "primaryDomain": "BLDC",
-    "relatedDomains": ["EMC_RE_CE", "THERMAL"],
+    "primaryDomain": "${primaryDomain}",
+    "relatedDomains": ${JSON.stringify(relatedDomains)},
     "domainAssessments": [
-      { "domain": "BLDC", "role": "PRIMARY", "evidenceLevel": "MEDIUM", "knownFacts": ["..."], "evidenceGaps": ["..."], "minimumValidation": "...", "domainConclusion": "..." },
-      { "domain": "EMC_RE_CE", "role": "RELATED", "evidenceLevel": "LOW", "knownFacts": ["..."], "evidenceGaps": ["..."], "minimumValidation": "...", "domainConclusion": "..." }
+      { "domain": "${primaryDomain}", "role": "PRIMARY", "evidenceLevel": "HIGH|MEDIUM_INFERRED|LOW", "knownFacts": ["..."], "evidenceGaps": ["..."], "minimumValidation": "...", "domainConclusion": "..." }
     ],
     "crossDomainLinks": [
-      { "fromDomain": "BLDC", "toDomain": "EMC_RE_CE", "mechanism": "...", "evidenceBasis": "MEASURED|CALCULATED|ASSUMPTION|AI_INFERENCE", "impact": "..." }
+      { "fromDomain": "${primaryDomain}", "toDomain": "...", "mechanism": "...", "evidenceBasis": "MEASURED|CALCULATED|ASSUMPTION", "impact": "..." }
     ],
     "crossDomainVetoes": [
       { "condition": "...", "blocks": ["DV_RELEASE"], "rationale": "..." }
@@ -619,15 +745,14 @@ Return a single JSON object with these exact keys:
   "candidateActions": [
     {
       "id": "Option A",
-      "category": "conservative",
-      "categoryLabel": "保守/技术最稳妥",
+      "category": "conservative|agile|radical",
+      "categoryLabel": "...",
       "name": "...",
       "description": "...",
       "expectedBenefit": "...",
       "scores": { "T": 88, "S": 55, "C": 60, "Q": 90, "L": 85, "total": 74.5 },
       "veto": { "rejection_veto": false },
-      "riskBefore": "...",
-      "riskAfter": "...",
+      "riskDelta": "高 (器件耐压不足) ➔ 低 (32V/108℃达标)",
       "residualRisk": "Low",
       "residualRiskDetail": "...",
       "sideEffects": "...",
@@ -636,8 +761,11 @@ Return a single JSON object with these exact keys:
       "failureConsequence": "...",
       "preconditions": "...",
       "verificationMethod": "必须具体到测点/仪器/判据",
+      "crossDomainCouplingChecks": [
+        { "rule": "...", "addressed": true, "note": "..." }
+      ],
       "planB": "...",
-      "decisionFit": "为什么它适合/不适合当前工期、样件、成本与安全门禁",
+      "decisionFit": "为什么它适合/不适合当前工期与门禁",
       "fastestValidation": "最快多久能拿到决定性证据",
       "latestDecisionPoint": "最晚在第几天必须做出切换决定",
       "rejectionReason": "若不推荐，明确说明拒绝它的主因"
@@ -656,21 +784,6 @@ Return a single JSON object with these exact keys:
     "stopConditions": ["..."],
     "reEvaluationTriggers": ["..."],
     "planB": "..."
-  },
-  "raciMatrix": [
-    { "role": "HW", "raciType": "R", "owner": "HW Lead", "action": "...", "output": "...", "dueDate": "...", "decisionGate": "..." }
-  ],
-  "containment": {
-    "shortTermMeasure": "...",
-    "validityScope": "...",
-    "responsibleParty": "...",
-    "timeline": "..."
-  },
-  "capa": {
-    "rootCauseAction": "...",
-    "preventiveMeasure": "...",
-    "lessonsLearned": "...",
-    "verificationTarget": "..."
   },
   "dualTimeline": {
     "containmentPhase": {
@@ -700,167 +813,96 @@ Return a single JSON object with these exact keys:
       "exitCriteria": "..."
     },
     "strategicTradeoff": "..."
-  },
-  "engineeringDocs": {
-    "pmDecisionEmail": {
-      "subject": "...",
-      "technicalFact": "...",
-      "currentSituation": "...",
-      "risk": "...",
-      "options": "...",
-      "recommendedOption": "...",
-      "costImpact": "...",
-      "scheduleImpact": "...",
-      "requiredDecision": "...",
-      "decisionOwner": "...",
-      "deadline": "...",
-      "assumedProceeding": "...",
-      "changeConsequence": "..."
-    },
-    "deviationPermit": {
-      "title": "...",
-      "requirement": "...",
-      "actualResult": "...",
-      "deviationDetail": "...",
-      "technicalCause": "...",
-      "riskAnalysis": "...",
-      "affectedScope": "...",
-      "containment": "...",
-      "temporaryValidity": "...",
-      "approvalRoles": "...",
-      "correctiveAction": "...",
-      "verificationPlan": "...",
-      "closureCriteria": "..."
-    },
-    "meetingMinutes": {
-      "title": "...",
-      "attendees": "...",
-      "discussionSummary": "...",
-      "agreements": ["..."],
-      "actionItems": ["..."]
-    },
-    "riskAcceptance": {
-      "riskId": "...",
-      "description": "...",
-      "residualRiskJustification": "...",
-      "acceptingSignOff": "...",
-      "expirationCondition": "..."
-    },
-    "dfmeaComment": {
-      "lineItem": "...",
-      "recommendedAction": "...",
-      "targetDate": "...",
-      "owner": "..."
-    },
-    "ecrDescription": {
-      "ecrTitle": "...",
-      "reasonForChange": "...",
-      "proposedSolution": "...",
-      "costEstimate": "...",
-      "toolingLeadTime": "...",
-      "impactAssessment": "..."
-    }
   }
 }
 `;
 
-    // 1. 如果配置为 Google Gemini 模型 (支持服务端环境变量 GEMINI_API_KEY 自动授权)
-    if (
-      modelConfig &&
-      modelConfig.enabled &&
-      (modelConfig.provider === 'gemini' || (modelConfig.model && modelConfig.model.toLowerCase().includes('gemini')))
-    ) {
-      try {
-        const rawContent = await callGeminiModel(
-          {
-            apiKey: modelConfig.apiKey,
-            model: modelConfig.model,
-            temperature: modelConfig.temperature ?? 0.2,
-          },
-          prompt,
-          HARDWARE_CHIEF_SYSTEM_PROMPT
-        );
+    // 9. 调度模型执行与自愈降级处理
+    let finalData: CopilotAnalysisResult | null = null;
+    let usedSource = 'deterministic-expert';
+    let modelNameUsed = 'deterministic-rules';
+    let retryAttempts = 0;
 
-        const parsed = healAndParseJson(rawContent);
-        const finalData = validateAndEnrichAiResult(parsed, baseline, modelConfig.model, context, issue);
-        res.setHeader('X-Engine-Source', `Gemini-${modelConfig.model}`);
-        return res.json({
-          success: true,
-          data: finalData,
-          result: finalData,
-          source: `gemini:${modelConfig.model}`,
-          model: modelConfig.model,
-        });
-      } catch (geminiErr: any) {
-        console.warn(`Gemini model (${modelConfig.model}) execution failed, falling back:`, geminiErr.message);
-        const fallbackResult = runExpertAnalysis(context, issue);
-        res.setHeader('X-Engine-Source', 'Local-Fallback');
-        return res.json({
-          success: true,
-          data: fallbackResult,
-          result: fallbackResult,
-          source: 'deterministic-expert',
-          useFallback: true,
-          error: `Gemini 模型 (${modelConfig.model}) 调用异常: ${geminiErr.message}，已自动平滑启用车规级确定性专家引擎。`,
-        });
-      }
-    }
-
-    // 2. 检查并调用用户配置的自定义 OpenAI 兼容大模型 (如 DeepSeek, 通义千问, 智谱, 硅基流动等)
-    if (
+    const isCustomModelConfigured =
       modelConfig &&
       modelConfig.enabled &&
       modelConfig.apiKey &&
       modelConfig.baseUrl &&
       modelConfig.model &&
-      modelConfig.provider !== 'builtin'
-    ) {
+      modelConfig.provider !== 'builtin';
+
+    const isGeminiConfigured =
+      modelConfig &&
+      modelConfig.enabled &&
+      (modelConfig.provider === 'gemini' || (modelConfig.model && modelConfig.model.toLowerCase().includes('gemini')));
+
+    if (isGeminiConfigured || isCustomModelConfigured) {
       try {
-        const rawContent = await callCustomOpenAIModel(
-          {
-            baseUrl: modelConfig.baseUrl,
-            apiKey: modelConfig.apiKey,
-            model: modelConfig.model,
-            temperature: modelConfig.temperature ?? 0.2,
-          },
+        const { rawContent, parsed, retryCount } = await queryModelWithResilience(
+          modelConfig,
           prompt,
           HARDWARE_CHIEF_SYSTEM_PROMPT
         );
+        retryAttempts = retryCount;
+        modelNameUsed = modelConfig.model;
+        usedSource = isGeminiConfigured ? `gemini:${modelConfig.model}` : `custom-llm:${modelConfig.model}`;
 
-        const parsed = healAndParseJson(rawContent);
-        const finalData = validateAndEnrichAiResult(parsed, baseline, modelConfig.model, context, issue);
-        res.setHeader('X-Engine-Source', `Custom-${modelConfig.model}`);
-        return res.json({
-          success: true,
-          data: finalData,
-          result: finalData,
-          source: `custom-llm:${modelConfig.model}`,
-          model: modelConfig.model,
-        });
-      } catch (customErr: any) {
-        console.warn(`Custom model (${modelConfig.model}) execution failed, falling back:`, customErr.message);
-        const fallbackResult = runExpertAnalysis(context, issue);
-        res.setHeader('X-Engine-Source', 'Local-Fallback');
-        return res.json({
-          success: true,
-          data: fallbackResult,
-          result: fallbackResult,
-          source: 'deterministic-expert',
-          useFallback: true,
-          error: `自定义大模型 (${modelConfig.model}) 调用异常: ${customErr.message}，已自动平滑启用车规级确定性专家引擎。`,
-        });
+        finalData = validateAndEnrichAiResult(
+          parsed,
+          baseline,
+          modelConfig.model,
+          context,
+          issue,
+          integrityAssessment
+        );
+      } catch (callErr: any) {
+        console.warn(`云端模型 (${modelConfig?.model}) 推演异常，平滑启用确定性专家引擎:`, callErr.message);
+        finalData = runExpertAnalysis(context, issue);
+        if (finalData.provenance) {
+          finalData.provenance.inputIntegrity = integrityAssessment;
+        }
+        usedSource = 'deterministic-expert';
+        modelNameUsed = 'deterministic-expert';
+      }
+    } else {
+      // 默认使用 100% 本地车规级确定性专家系统
+      finalData = runExpertAnalysis(context, issue);
+      if (finalData.provenance) {
+        finalData.provenance.inputIntegrity = integrityAssessment;
       }
     }
 
-    // 2. 默认使用 100% 本地车规级确定性专家系统
-    const expertResult = runExpertAnalysis(context, issue);
-    res.setHeader('X-Engine-Source', 'Deterministic-Expert-Engine');
+    const elapsedMs = Date.now() - startTime;
+
+    // 10. 挂载调试快照 (DebugSnapshot - 待办 5.3)
+    const debugSnapshot: DebugSnapshot = {
+      promptLength: prompt.length,
+      promptSnippet: prompt.slice(0, 320) + '...',
+      fullPrompt: prompt,
+      modelIdentifier: modelNameUsed,
+      latencyMs: elapsedMs,
+      timestamp: new Date().toISOString(),
+      precomputedFactsCount: precomputedFacts.length,
+      autoFixesCount: finalData?.aiAudit?.autoFixSummary?.length || 0,
+      auditedRuleHits: finalData?.aiAudit?.flags?.length || 0,
+      retryCount: retryAttempts,
+    };
+
+    if (finalData) {
+      finalData.debugSnapshot = debugSnapshot;
+      if (finalData.provenance) {
+        finalData.provenance.debugSnapshot = debugSnapshot;
+      }
+    }
+
+    res.setHeader('X-Engine-Source', usedSource);
     return res.json({
       success: true,
-      data: expertResult,
-      result: expertResult,
-      source: 'deterministic-expert',
-      message: '100% 本地车规级确定性专家推理引擎，零外部 API 依赖，数据安全隔离。',
+      data: finalData,
+      result: finalData,
+      source: usedSource,
+      model: modelNameUsed,
+      debugSnapshot,
     });
   } catch (error: any) {
     const errorMsg = error?.message || String(error);
@@ -878,26 +920,70 @@ Return a single JSON object with these exact keys:
   }
 });
 
+// 按需生成具体车规工程文档专属接口 (待办 3 - 避免主推演结构臃肿)
+app.post('/api/copilot/generate-doc', async (req, res) => {
+  try {
+    const { docType, analysisResult, context, issue, modelConfig } = req.body;
+    if (!docType || !analysisResult) {
+      return res.status(400).json({ success: false, error: '缺少 docType 或 analysisResult' });
+    }
+
+    // 如果未配置或不需要 AI，由确定性文档生成器即时填充
+    const baseline = runExpertAnalysis(context || {}, issue || {});
+    const docTemplates: Record<string, any> = baseline.engineeringDocs || {};
+    const fallbackDoc = docTemplates[docType] || { title: `${docType} 文档`, content: '由车规工程规则生成的标准草案' };
+
+    // 若配置了可用的大模型，做高保真深度生成
+    if (modelConfig && modelConfig.enabled && modelConfig.apiKey) {
+      try {
+        const docPrompt = `
+作为首席硬件架构师，请针对当前缺陷决策推演结果，输出一份符合汽车行业 VDA / IATF 16949 规范的【${docType}】工程文档。
+- 缺陷摘要: ${analysisResult.coreConclusion?.problemSummary}
+- 推荐措施: ${analysisResult.coreConclusion?.recommendedMeasure}
+- 最终方案: ${analysisResult.finalRecommendation?.recommendedOptionName}
+- 交付倒计时: 剩余 ${context?.daysRemaining ?? 14} 天
+- 项目阶段: ${context?.projectPhase || 'DV'}
+
+请返回符合该文档结构的 JSON 数据。禁止包裹 markdown，输出纯 JSON。
+`;
+        let raw = '';
+        if (
+          modelConfig.provider === 'gemini' ||
+          (modelConfig.model && modelConfig.model.toLowerCase().includes('gemini'))
+        ) {
+          raw = await callGeminiModel(modelConfig, docPrompt, HARDWARE_CHIEF_SYSTEM_PROMPT);
+        } else {
+          raw = await callCustomOpenAIModel(modelConfig, docPrompt, HARDWARE_CHIEF_SYSTEM_PROMPT);
+        }
+        const docData = healAndParseJson(raw);
+        return res.json({ success: true, docType, data: docData, source: 'ai-generated' });
+      } catch (e: any) {
+        console.warn(`Doc ${docType} generation fallback:`, e.message);
+      }
+    }
+
+    return res.json({ success: true, docType, data: fallbackDoc, source: 'deterministic-template' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Deterministic Engineering Calculations API
 app.post('/api/copilot/calculate', (req, res) => {
   const { calcType, params } = req.body;
   if (calcType === 'wcca') {
     const { nominal = 100, tolerance = 0.01, tempDrift = 0.005, aging = 0.008 } = params;
-    // Extreme Worst Case: direct sum
     const extremeTolerance = tolerance + tempDrift + aging;
     const extremeMin = nominal * (1 - extremeTolerance);
     const extremeMax = nominal * (1 + extremeTolerance);
 
-    // RSS (Root Sum of Squares)
     const rssTolerance = Math.sqrt(tolerance * tolerance + tempDrift * tempDrift + aging * aging);
     const rssMin = nominal * (1 - rssTolerance);
     const rssMax = nominal * (1 + rssTolerance);
 
-    // Monte Carlo simulation (10,000 iterations)
     const N = 10000;
     const samples: number[] = [];
     for (let i = 0; i < N; i++) {
-      // Box-Muller normal approximation for independent 3-sigma tolerances
       const u1 = Math.random() || 0.0001;
       const u2 = Math.random() || 0.0001;
       const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
