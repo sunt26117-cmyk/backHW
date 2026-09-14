@@ -73,7 +73,7 @@ function deriveScenarioRiskScore(issue: IssueInput, context: ProjectContext, dom
     if (Number.isFinite(rec) && rec > 100) score += Math.min(18, (rec - 100) / 10);
     if (/复位|reset|通信丢失|失效/i.test(text)) score += 10;
   } else if (domain === 'POWER_TRANSIENT') {
-    const peak = n('busVoltagePeakV'); const input = n('inputVoltageV');
+    const peak = n('pulseEcuBusPeakV'); const input = n('inputVoltageV');
     if (Number.isFinite(peak) && Number.isFinite(input) && input > 0) score += Math.min(22, Math.max(0, (peak / input - 1) * 18));
     if (/复位|reset|OVP|UVLO|过压/i.test(text)) score += 10;
   } else if (domain === 'COMPONENT') {
@@ -136,7 +136,7 @@ function buildDynamicCandidateActions(context: ProjectContext, issue: IssueInput
   }
 
   if (domain === 'POWER_TRANSIENT') {
-    const peak = metric(issue,'busVoltagePeakV'); const min = metric(issue,'busVoltageMinV');
+    const peak = metric(issue,'pulseEcuBusPeakV'); const min = metric(issue,'pulseEcuBusMinV');
     return [
       mk('Option A','conservative','保护链路整改','优化TVS/输入滤波/阻尼并复核内部电源轨',`围绕 ECU 端峰值 ${Number.isFinite(peak)?peak:'当前'}V 与最低值 ${Number.isFinite(min)?min:'当前'}V，区分源端与内部电源轨应力。`,`从能量路径上降低器件应力与复位风险。`,baseScores(28,62,50,93,94),'Low','硬件节奏较长，但风险下降最彻底。','器件/BOM或布局可能变化','5~10 天','源端+ECU端双测点，覆盖温度与规定脉冲族','保留软件复位恢复作为辅助，但不得替代保护整改。'),
       mk('Option B','balanced','系统优化','DC/DC控制环 + 输入阻抗 + 去耦组合调优',`针对内部电源轨动态响应，做补偿/去耦与源阻抗 A/B，找出哪一项决定峰值与恢复。`,`以较小改动提升瞬态裕量。`,baseScores(23,88,76,91,90),'Medium','需要控制环与硬件联合验证。','验证时间中等','3~6 天','双通道电源波形 + reset/CAN行为 + 热角点','必要时再上更强TVS。'),

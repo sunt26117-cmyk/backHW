@@ -62,8 +62,14 @@ const P: Record<EngineeringDomain, DomainProfile> = {
       {key:'junctionTempC',label:'结温',unit:'℃',description:'实测或热模型校核点',tag:'MEASURED'},
       {key:'vdsRatingV',label:'Vds额定耐压',unit:'V',description:'器件数据手册额定值',tag:'SPEC',required:true},
       {key:'deadTimeNs',label:'死区',unit:'ns',description:'控制器实际配置',tag:'CONTEXT'},
+      {key:'cBusUf',label:'母线电容 Cbus',unit:'μF',description:'DC-Link 总储能电容，用于泵升 ΔV=√(V0²+2E/Cbus) 定量计算，不填将退化为默认470μF假设',tag:'SPEC',required:true},
+      {key:'rotorInertiaKgm2',label:'转子转动惯量 J',unit:'kg·m²',description:'电机转子惯量，用于 E=1/2·J·ω² 定量计算，不填将退化为按转速经验估算',tag:'SPEC'},
+      {key:'rgOffOhm',label:'关断栅极电阻 Rg_off',unit:'Ω',description:'下桥MOSFET关断驱动电阻，影响米勒直通风险评估',tag:'SPEC'},
+      {key:'cgdPf',label:'米勒电容 Cgd',unit:'pF',description:'MOSFET栅漏电容，用于米勒直通尖峰 Vgs_induced 计算',tag:'SPEC'},
+      {key:'vthMinV',label:'Vgs开启阈值(最小值)',unit:'V',description:'器件数据手册最小开启阈值，用于判定米勒尖峰是否会误导通',tag:'SPEC'},
+      {key:'keVkrpm',label:'反电动势常数 Ke',unit:'V/krpm',description:'电机反电动势系数，用于交叉核验实测泵升与理论泵升是否一致',tag:'SPEC'},
     ],
-    knownPitfalls: ['不能用计算泵升峰值替代示波器实测峰值作为放行证据', 'RDS(on)/Qg/Qgd 不能只看室温 datasheet typ 值'],
+    knownPitfalls: ['不能用计算泵升峰值替代示波器实测峰值作为放行证据', 'RDS(on)/Qg/Qgd 不能只看室温 datasheet typ 值', '不填 Cbus/J 时公式只能用默认假设值推算，不能当作已验证的定量结论'],
   },
   ROBOT_JOINT: {
     key: 'ROBOT_JOINT', title: '机器人/协作臂关节机电系统层：背隙 / 编码器 / 谐振 / 力矩闭环 / STO / 总线周期',
@@ -140,8 +146,9 @@ const P: Record<EngineeringDomain, DomainProfile> = {
       {key:'dvdtVns',label:'dv/dt',unit:'V/ns',description:'开关节点边沿',tag:'MEASURED'},
       {key:'pwmFrequencyKhz',label:'PWM频率',unit:'kHz',description:'实际PWM频率',tag:'CONTEXT'},
       {key:'harnessLengthM',label:'线束长度',unit:'m',description:'测试线束',tag:'CONTEXT'},
+      {key:'testDistanceM',label:'测试距离',unit:'m',description:'天线/探头到DUT的标定测试距离，直接影响限值对比是否有效',tag:'CONTEXT',required:true},
     ],
-    knownPitfalls:['不能用“金属壳会压低很多dB”作为未经验证的假设', 'RE、CE和BCI是不同测试链路，不能混为一个EMC数字'],
+    knownPitfalls:['不能用“金属壳会压低很多dB”作为未经验证的假设', 'RE、CE和BCI是不同测试链路，不能混为一个EMC数字', 'emcPeakDb 必须注明是Peak/QP/Average哪种检波器结果，三者不可直接互相判定合格'],
   },
   EMC_ESD: {
     key:'EMC_ESD', title:'EMC ESD 抗扰度 / 放电路径与功能保持',
@@ -252,8 +259,8 @@ const P: Record<EngineeringDomain, DomainProfile> = {
   },
   POWER: {
     key:'POWER', title:'电源完整性 / 瞬态能量路径', question:'负载突变如何通过寄生L/C转化成过冲、跌落与保护触发？', chain:'负载阶跃 → di/dt → 寄生L/C → ΔV / ringing → 保护门限 → 系统行为', formulas:['ΔV≈L·di/dt','E=1/2·LI²','I=C·dV/dt'], tests:['最坏负载阶跃','启动/关断/短路','输入阻抗扫描','电源/地回流A-B'], outputs:['去耦/阻尼方案','保护门限','瞬态回归'], measurements:[
-    {key:'busVoltagePeakV',label:'母线峰值',unit:'V',description:'正向过冲',tag:'MEASURED'},
-    {key:'busVoltageMinV',label:'最低电压',unit:'V',description:'跌落',tag:'MEASURED'},
+    {key:'powerOvershootPeakV',label:'负载突变正向过冲峰值',unit:'V',description:'负载阶跃引起的正向过冲峰值（非电机泵升、非ISO7637脉冲，勿与其他域的母线峰值混填）',tag:'MEASURED'},
+    {key:'powerUndershootMinV',label:'负载突变跌落最低值',unit:'V',description:'负载阶跃引起的电压跌落最低值',tag:'MEASURED'},
     {key:'loadStepA',label:'负载阶跃',unit:'A',description:'阶跃幅值',tag:'MEASURED'},
     {key:'riseTimeUs',label:'阶跃边沿',unit:'μs',description:'负载变化时间',tag:'MEASURED'},
     {key:'inputVoltageV',label:'输入电压',unit:'V',description:'标称输入',tag:'CONTEXT'},
@@ -269,8 +276,8 @@ const P: Record<EngineeringDomain, DomainProfile> = {
     measurements:[
       {key:'pulseVoltageV',label:'脉冲电压',unit:'V',description:'源端/ECU端脉冲幅值',tag:'MEASURED',required:true},
       {key:'pulseDurationUs',label:'脉冲宽度',unit:'μs',description:'实际脉冲宽度',tag:'MEASURED'},
-      {key:'busVoltagePeakV',label:'ECU端峰值',unit:'V',description:'关键电源轨峰值',tag:'MEASURED'},
-      {key:'busVoltageMinV',label:'ECU端最低值',unit:'V',description:'关键电源轨跌落',tag:'MEASURED'},
+      {key:'pulseEcuBusPeakV',label:'ISO7637脉冲下ECU端峰值',unit:'V',description:'车规电源脉冲注入下的关键电源轨峰值（勿与电机泵升/负载突变的母线峰值混填）',tag:'MEASURED'},
+      {key:'pulseEcuBusMinV',label:'ISO7637脉冲下ECU端最低值',unit:'V',description:'车规电源脉冲注入下的关键电源轨跌落',tag:'MEASURED'},
       {key:'inputVoltageV',label:'标称输入',unit:'V',description:'车辆供电条件',tag:'CONTEXT'},
     ],
     knownPitfalls:['ISO 7637/用户脉冲波形定义必须与实际测试设备设置核对', '源端通过而ECU端不代表通过，内部节点仍可能越界'],
@@ -285,10 +292,10 @@ const P: Record<EngineeringDomain, DomainProfile> = {
   ], knownPitfalls:['软件降速不能替代硬件SI根因闭环'],
   },
   SAFETY: {key:'SAFETY',title:'功能安全 / 故障 → 诊断 → FTTI → 安全状态',question:'当前硬件异常是否在规定时间内被检测并带入安全状态？',chain:'Fault → Detection → Reaction → Safe State → Residual Risk',formulas:['FTTI≥Detection+Reaction+Transition','Residual risk与诊断覆盖/独立性有关'],tests:['Fault Injection','DC/diagnostic coverage','安全状态切换时间'],outputs:['HARA/FSR/TSR约束','安全机制缺口','门禁用例'],measurements:[{key:'fttiBudgetMs',label:'FTTI预算',unit:'ms',description:'系统给定窗口',tag:'SPEC'},{key:'detectionTimeMs',label:'检测时间',unit:'ms',description:'实测/计算',tag:'MEASURED'},{key:'reactionTimeMs',label:'反应时间',unit:'ms',description:'实测',tag:'MEASURED'}],knownPitfalls:['不能用“有诊断”替代诊断时序和安全状态证据']},
-  RELIABILITY: {key:'RELIABILITY',title:'可靠性 / 应力—损伤—寿命',question:'任务剖面下的温度、电应力与循环如何转化成寿命？',chain:'Mission profile → stress cycles → damage → drift → failure probability',formulas:['Arrhenius加速仅用于合适失效机理','温度循环/电应力需与失效机理匹配'],tests:['寿命/HTOL','热循环','参数漂移与失效统计'],outputs:['寿命边界','降额','关键特性控制'],measurements:[{key:'missionYears',label:'任务年限',unit:'year',description:'目标寿命',tag:'SPEC'},{key:'missionHours',label:'任务小时',unit:'h',description:'任务剖面',tag:'CONTEXT'},{key:'maxStressC',label:'最高温度',unit:'℃',description:'任务最大应力',tag:'MEASURED'}],knownPitfalls:['加速模型必须与实际失效机理对应']},
+  RELIABILITY: {key:'RELIABILITY',title:'可靠性 / 应力—损伤—寿命',question:'任务剖面下的温度、电应力与循环如何转化成寿命？',chain:'Mission profile → stress cycles → damage → drift → failure probability',formulas:['Arrhenius加速仅用于合适失效机理','温度循环/电应力需与失效机理匹配'],tests:['寿命/HTOL','热循环','参数漂移与失效统计'],outputs:['寿命边界','降额','关键特性控制'],measurements:[{key:'missionYears',label:'任务年限',unit:'year',description:'目标寿命',tag:'SPEC',required:true},{key:'missionHours',label:'任务小时',unit:'h',description:'任务剖面',tag:'CONTEXT'},{key:'maxStressC',label:'最高温度',unit:'℃',description:'任务最大应力',tag:'MEASURED',required:true}],knownPitfalls:['加速模型必须与实际失效机理对应']},
   DFM: {key:'DFM',title:'DFM / 制造窗口与设计鲁棒性',question:'设计窗口是否覆盖制造过程漂移？',chain:'Design tolerance → process variation → measured distribution → yield / field risk',formulas:['Cpk=min((USL-μ)/(3σ),(μ-LSL)/(3σ))'],tests:['DOE','Cpk/Ppk','首件/过程能力'],outputs:['CTQ','SPC','Control Plan'],measurements:[{key:'cpk',label:'Cpk',description:'过程能力',tag:'MEASURED'},{key:'ppk',label:'Ppk',description:'过程绩效',tag:'MEASURED'},{key:'sampleCount',label:'样本数',unit:'pcs',description:'样本',tag:'MEASURED'}],knownPitfalls:['不要把终检筛选能力当成设计本身鲁棒性']},
   PRODUCTION: {key:'PRODUCTION',title:'量产 / EOL / 异常批次闭环',question:'EOL筛查、过程能力与现场风险是否一致？',chain:'Process drift → parameter distribution → EOL screening → field behavior → containment',formulas:['False-NG与False-OK需分别评估','EOL阈值应由功能风险窗口反推'],tests:['批次追溯','EOL分布','现场回流关联'],outputs:['EOL阈值','反应计划','批次隔离'],measurements:[{key:'sampleCount',label:'样本数',unit:'pcs',description:'批次样本量',tag:'MEASURED'},{key:'falseNgPct',label:'False NG',unit:'%',description:'误判NG',tag:'MEASURED'},{key:'taktSec',label:'EOL节拍',unit:'s',description:'测试节拍',tag:'MEASURED'}],knownPitfalls:['放宽EOL阈值必须证明不会增加False-OK']},
-  COST: {key:'COST',title:'降本 / 全生命周期 Cost-Risk',question:'BOM节省是否被验证、可靠性和质量暴露成本吃掉？',chain:'BOM Delta → design change → test/reliability/quality exposure → TCO',formulas:['TCO = BOM + tooling + validation + expected failure exposure'],tests:['A/B样机','热/EMC/寿命回归','供应链质量证据'],outputs:['TCO矩阵','VETO清单','受控降本'],measurements:[{key:'bomDelta',label:'BOM变化',unit:'$',description:'单机成本变化',tag:'MEASURED'},{key:'annualVolume',label:'年产量',unit:'pcs',description:'规模',tag:'CONTEXT'}],knownPitfalls:['只看BOM节省而不算质量/返工/索赔风险']},
+  COST: {key:'COST',title:'降本 / 全生命周期 Cost-Risk',question:'BOM节省是否被验证、可靠性和质量暴露成本吃掉？',chain:'BOM Delta → design change → test/reliability/quality exposure → TCO',formulas:['TCO = BOM + tooling + validation + expected failure exposure'],tests:['A/B样机','热/EMC/寿命回归','供应链质量证据'],outputs:['TCO矩阵','VETO清单','受控降本'],measurements:[{key:'bomDelta',label:'BOM变化',unit:'$',description:'单机成本变化',tag:'MEASURED',required:true},{key:'annualVolume',label:'年产量',unit:'pcs',description:'规模',tag:'CONTEXT',required:true}],knownPitfalls:['只看BOM节省而不算质量/返工/索赔风险']},
   SCHEDULE: {key:'SCHEDULE',title:'节点冲突 / VOI / 最小信息试验',question:'剩余时间如何改变验证优先级，而不是放宽技术红线？',chain:'time remaining → uncertainty → VOI → minimum discriminating experiment → decision gate',formulas:['VOI = decision impact × uncertainty reduction / experiment time'],tests:['时间盒','并行A/B','Go/No-Go'],outputs:['24h行动计划','Plan B','门禁'],measurements:[{key:'daysRemaining',label:'剩余天数',unit:'day',description:'当前节点剩余时间',tag:'CONTEXT',required:true}],knownPitfalls:['时间紧不能证明技术风险变小']},
   TEST: {key:'TEST',title:'测试失败 / 复现—隔离—回归',question:'如何把“偶发失败”变成可重复、可反证的因果链？',chain:'failure → reproduce → isolate → hypothesis → counter-evidence → regression',formulas:['一次只改变关键变量','回归必须覆盖原失败窗口'],tests:['Repeatability','A/B','原窗口回归'],outputs:['复现矩阵','根因证据','回归标准'],measurements:[{key:'repeatCount',label:'复现次数',unit:'count',description:'有效重复次数',tag:'MEASURED'}],knownPitfalls:['没有失败原始条件就不能宣称根因已锁定']},
   CUSTOMER: {key:'CUSTOMER',title:'客户需求 / Interface Definition',question:'哪些信息必须形成书面基线，哪些只能作为Assumption？',chain:'customer request → assumption → design impact → written confirmation → controlled baseline',formulas:['沉默 ≠ 批准'],tests:['接口确认','书面回执','变更回归'],outputs:['Requirement baseline','Assumption log','ECR触发条件'],measurements:[],knownPitfalls:['口头确认不能当作正式需求基线']},
@@ -637,10 +644,10 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
     if (finite(qg)&&finite(qgd)&&qg>0) metrics.push({label:'Qgd/Qg',value:`${(qgd/qg*100).toFixed(1)}%`,note:'米勒电荷占比',tag:'CALCULATED'});
     if (finite(soa)) metrics.push({label:'SOA裕量',value:`${soa}%`,note:noteFor('soaMarginPct'),tag:tagFor('soaMarginPct')});
   } else if (d === 'POWER_TRANSIENT') {
-    const peak=n('busVoltagePeakV'), min=n('busVoltageMinV'), pulse=n('pulseVoltageV');
+    const peak=n('pulseEcuBusPeakV'), min=n('pulseEcuBusMinV'), pulse=n('pulseVoltageV');
     if (finite(pulse)) metrics.push({label:'脉冲源端',value:`${pulse} V`,note:noteFor('pulseVoltageV'),tag:tagFor('pulseVoltageV')});
-    if (finite(peak)) metrics.push({label:'ECU端峰值',value:`${peak} V`,note:noteFor('busVoltagePeakV'),tag:tagFor('busVoltagePeakV')});
-    if (finite(min)) metrics.push({label:'ECU端最低',value:`${min} V`,note:noteFor('busVoltageMinV'),tag:tagFor('busVoltageMinV')});
+    if (finite(peak)) metrics.push({label:'ECU端峰值',value:`${peak} V`,note:noteFor('pulseEcuBusPeakV'),tag:tagFor('pulseEcuBusPeakV')});
+    if (finite(min)) metrics.push({label:'ECU端最低',value:`${min} V`,note:noteFor('pulseEcuBusMinV'),tag:tagFor('pulseEcuBusMinV')});
   } else if (d === 'SIGNAL') {
     const os=n('overshootPct'), er=n('frameErrorRate');
     if (finite(os)) metrics.push({label:'过冲',value:`${os}%`,note:noteFor('overshootPct'),tag:tagFor('overshootPct')});

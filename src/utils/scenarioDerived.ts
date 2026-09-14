@@ -142,12 +142,15 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   ], isBenchmark ? 3.5 : NaN);
   rdsOnMilliOhm = preferMeasured(issue, 'rdsOnMilliOhm', rdsOnMilliOhm);
 
+  const jInertiaEstimate = Number.isFinite(rpm) ? 0.00015 * (rpm / 3800) ** 0.15 : NaN;
+  const jInertia = preferMeasured(issue, 'rotorInertiaKgm2', jInertiaEstimate);
+
   return {
     vbusNominal,
     vbusMeasuredPeak: Number.isFinite(vbusMeasuredPeak) ? vbusMeasuredPeak : undefined,
     vdsRating,
     rpm,
-    jInertia: Number.isFinite(rpm) ? 0.00015 * (rpm / 3800) ** 0.15 : NaN,
+    jInertia,
     cbusUf,
     tAmbientC,
     currentPeakA,

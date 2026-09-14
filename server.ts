@@ -7,7 +7,7 @@ import { GoogleGenAI } from '@google/genai';
 
 import { runExpertAnalysis } from './src/data/expertEngine';
 import { getDomainAdaptivePromptGuidance, getMultiDomainAdaptivePromptGuidance } from './src/utils/domainAdaptivePromptEngine';
-import { resolveEngineeringDomain, resolveEngineeringDomains, getEngineeringDomainLabel } from './src/utils/scenarioDomainEngine';
+import { resolveEngineeringDomain, resolveEngineeringDomains, getEngineeringDomainLabel, getDomainMeasurementFields, getDomainMeasurementGroups } from './src/utils/scenarioDomainEngine';
 import { buildDualTimelinePlan } from './src/utils/dualTimelineEngine';
 
 dotenv.config();
@@ -422,6 +422,25 @@ app.post('/api/copilot/analyze', async (req, res) => {
     const domainGuidance = multiDomainGuidance.primary;
     const multiDomainEvidence = multiDomainGuidance.all.map((g) => `- ${g.title}\n  物理链：${g.physicsFormulas}\n  测试规约：${g.testProtocol}\n  跨域影响：${g.crossDisciplinaryImpact}\n  禁止空话：${g.prohibitedVagueness.join('；')}`).join('\n\n');
 
+    // 3. 逐字段核对实测参数的填写情况：区分"用户实际填了什么"与"这个域本来应该填什么"，
+    //    避免 AI 在不知道哪些字段是真空的情况下自行脑补默认值。
+    const filledValues = issue?.measuredValues || {};
+    const isFilled = (v: unknown) => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
+    const allExpectedFields = getDomainMeasurementFields(issue);
+    const missingFieldsList = allExpectedFields.filter((f) => !isFilled(filledValues[f.key]));
+    const missingFieldsText = missingFieldsList.length
+      ? missingFieldsList.map((f) => `- ${f.key}（${f.label}${f.unit ? `，单位 ${f.unit}` : ''}，${f.tag}${f.required ? '，必填缺失' : ''}）`).join('\n')
+      : '（本次涉及的工程域测量字段均已填写）';
+
+    // 4. 按域拆分实测证据浓度：让 related domains 也有真实数据支撑，而不是仅靠 domain 名称脑补证据等级。
+    const domainEvidenceBreakdown = getDomainMeasurementGroups(issue).map((group, idx) => {
+      const filled = group.fields.filter((f) => isFilled(filledValues[f.key]));
+      const missing = group.fields.filter((f) => !isFilled(filledValues[f.key]));
+      const filledText = filled.length ? filled.map((f) => `${f.key}=${filledValues[f.key]}`).join(', ') : '无';
+      const missingText = missing.length ? missing.map((f) => f.key).join(', ') : '无';
+      return `【${idx === 0 ? '主导域' : '涉及域'} · ${getEngineeringDomainLabel(group.domain)}】已填：${filledText}；未填：${missingText}`;
+    }).join('\n');
+
     const prompt = `
 你必须严格基于以下【输入工况】、【实测数据】与【${domainGuidance.title}】专属车规物理基准进行硬件工程决策推演，绝不脱离实际随意作答：
 
@@ -447,6 +466,13 @@ app.post('/api/copilot/analyze', async (req, res) => {
 - 失效现象: ${issue?.failurePhenomenon || '未提供现象'}
 - 核心工程顾虑: ${issue?.engineeringConcern || '未提供顾虑'}
 - 关键实测数值: ${JSON.stringify(issue?.measuredValues || {}, null, 2)}
+
+【2.1 本次输入中未提供的工程参数（必须视为 UNKNOWN，严禁假设默认值替代）】
+${missingFieldsText}
+以上字段若对某候选方案的结论是必要输入，必须在该方案中明确指出"因缺少 XX 字段暂无法定量核算，已作为假设/待验证项处理"，不得直接代入经验默认值后当作已验证结论。
+
+【2.2 按工程域拆分的实测证据浓度（用于校准 domainAssessments.evidenceLevel，禁止仅凭域名称主观判断证据等级）】
+${domainEvidenceBreakdown}
 
 【3. 本工程多域物理与推演规约】
 【主导域：${domainGuidance.title}】
@@ -502,7 +528,7 @@ ${multiDomainEvidence}
 3. 【台架实操抓波与判定规程】：
    - 在候选方案的 verificationMethod 及 finalRecommendation.immediateSteps 中，必须给出“测什么、在哪里测、用什么仪器/探头、Pass/Fail 门槛”；
    - 如果当前输入没有可靠的量化门槛，不得自行制造一个标准值，应返回“需要确认的规范/设计门槛”。
-3. 【时间红线与不可接受行为】：
+4. 【时间红线与不可接受行为】：
    - 必须把 ${context?.daysRemaining ?? 14} 天决策窗口与每个方案的实际工期相乘分析；PCB 改版、样件、软件标定等耗时只能作为“当前项目假设/经验估算”，除非输入已明确确认，不得视为普遍事实；
    - 对每个方案必须明确：最快可验证时间、最晚决策点、错过门禁的直接后果；
    - 在 engineeringDocs.pmDecisionEmail 中输出可直接复制发送给 PM 的汇报邮件，明确事实、风险、请求决策和责任边界。
@@ -517,7 +543,18 @@ ${multiDomainEvidence}
    - 每个涉及域都必须给出证据充足度、关键缺口与最小验证项；
    - 候选方案必须同时评价其对所有涉及域的正面收益、负面副作用和潜在一票否决项；
    - 任何一个硬门限域触发 VETO 时，不得因为另一个域改善而判定整体放行。
-7. 严格输出符合预定义 JSON Schema 的纯 JSON 文本，包含全部必须键。
+7. 【candidateActions.scores 打分锚点（禁止凭感觉打分，必须对照以下锚点定档）】：
+   - T 技术裕量：90-100=留有≥30%物理裕量且已有实测数据支撑；70-89=裕量20-30%，仅有计算/仿真支撑尚无实测；50-69=裕量<20%或关键参数依赖假设；<50=已知会突破额定值/规范限值。
+   - S 工期/进度可行性：90-100=可在当前决策窗口内完成且无需改版；70-89=需要少量工期但仍在窗口内；50-69=接近或压线决策窗口；<50=明确超出剩余天数。
+   - C 成本：90-100=零/极低成本（原位标定、软件）；70-89=小额BOM或工装变化；50-69=需要改版打样等中等成本；<50=显著BOM上升或需要重新开模/大改版。
+   - Q 质量与可靠性：90-100=有实测/仿真双重验证且无已知副作用；70-89=有一种验证手段支撑；50-69=仅有理论推导支撑；<50=已知存在未闭环的可靠性隐患。
+   - L 领导/干系人可接受度：90-100=完全符合当前 hwLeadStyle 与决策窗口预期；70-89=基本符合但需额外沟通；50-69=需要跨部门让步或特批；<50=预计会被否决或需升级评审。
+   - 每个方案的四个分项必须能在 description/expectedBenefit/verificationMethod 中找到对应的具体依据，不得出现"分数与文字描述对不上"的情况。
+8. 严格输出符合预定义 JSON Schema 的纯 JSON 文本，包含全部必须键。
+9. 【输出前自我核对（不得省略）】：
+   - 生成 candidateActions 后，逐条对照本域【严禁出现的空话反模式】清单自查每个方案的 description/expectedBenefit；
+   - 若命中任一反模式（如只写"加滤波电容/优化走线"而未写具体数值、封装、料号或测点），必须重写该字段后再输出，不允许原样保留空话表述；
+   - 若某个数值结论所需的关键字段在【2.1 未提供的工程参数】清单中，必须在该结论旁注明依赖假设，不得默认视为已验证事实。
 
 Return a single JSON object with these exact keys:
 {
