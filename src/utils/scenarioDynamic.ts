@@ -457,16 +457,32 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
     }
   }
   const measuredInputs = Object.entries(issue.measuredValues || {}).filter(([,v]) => v !== '' && v !== null && v !== undefined).map(([k,v]) => `${k}=${v}`);
+  const priorAnalysisBasis = dynamic.analysisBasis;
   dynamic.analysisBasis = {
-    ruleInputs: [`场景规则：${domain}`, `项目阶段：${context.projectPhase}`, `ASIL：${context.asilLevel}`],
-    measuredInputs: measuredInputs.map(x => `${issue.measuredValueSource || 'USER_MEASURED'} · ${x}`),
-    calculatedOutputs: [
+    ruleInputs: [
+      ...(priorAnalysisBasis?.ruleInputs || []),
+      `场景规则：${domain}`,
+      `项目阶段：${context.projectPhase}`,
+      `ASIL：${context.asilLevel}`,
+    ],
+    measuredInputs: priorAnalysisBasis?.measuredInputs?.length
+      ? priorAnalysisBasis.measuredInputs
+      : measuredInputs.map(x => `${issue.measuredValueSource || 'USER_MEASURED'} · ${x}`),
+    calculatedOutputs: Array.from(new Set([
+      ...(priorAnalysisBasis?.calculatedOutputs || []),
       `风险评分：${dynamic.riskRatings.overallRiskScore}/100`,
       `物理机理：${dynamic.physicalMechanism.rootCauseAnalysis.slice(0,120)}`,
-      `候选方案：${dynamic.candidateActions?.length || 0} 个`
-    ],
-    assumptions: dynamic.assumptions || [],
-    fixedTemplateFields: ['专家规则/公式骨架', '模块布局与字段结构', '部分标准条款库；具体适用性仍需工程师确认', issue.measuredValueSource === 'BENCHMARK' ? '当前存在系统基准样例值：仅用于演示，不能作为项目实测证据' : '无系统基准样例值'],
+      `候选方案：${dynamic.candidateActions?.length || 0} 个`,
+    ])),
+    assumptions: Array.from(new Set([...(priorAnalysisBasis?.assumptions || []), ...(dynamic.assumptions || [])])),
+    fixedTemplateFields: Array.from(new Set([
+      ...(priorAnalysisBasis?.fixedTemplateFields || []),
+      '专家规则/公式骨架',
+      '模块布局与字段结构',
+      '部分标准条款库；具体适用性仍需工程师确认',
+      issue.measuredValueSource === 'BENCHMARK' ? '当前存在系统基准样例值：仅用于演示，不能作为项目实测证据' : '无系统基准样例值',
+    ])),
+    calculatedOutputEvidence: priorAnalysisBasis?.calculatedOutputEvidence || [],
   };
   return dynamic;
 }

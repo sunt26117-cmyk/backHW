@@ -5,6 +5,7 @@ import { applyScenarioDynamicLayer } from '../utils/scenarioDynamic';
 import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, getEngineeringDomainLabel, resolveEngineeringDomain, resolveEngineeringDomains } from '../utils/scenarioDomainEngine';
 import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 import { getCrossDomainCouplings } from '../utils/crossDomainCouplingMatrix';
+import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
 import {
   getEmcPillars,
   getComponentPillars,
@@ -48,6 +49,7 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     attachments: rawIssue?.attachments || [],
     measuredValues,
     measuredValueSource: rawIssue?.measuredValueSource || 'USER_MEASURED',
+    measurementProvenance: rawIssue?.measurementProvenance || {},
   };
 
   const cats = issue.issueCategories;
@@ -154,10 +156,22 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     crossDomainVetoes,
   };
   const combinedMetrics = calculateDomainMetrics(issue, context);
-  if (combinedMetrics.length) {
+  const bldcEvidence = isBldc ? calculateBldcDeterministicCalculations(issue) : [];
+  if (combinedMetrics.length || bldcEvidence.length) {
+    const calculatedEvidence = Array.from(
+      new Map([
+        ...(result.analysisBasis?.calculatedOutputEvidence || []),
+        ...bldcEvidence,
+      ].map((item) => [item.id || item.key, item])).values()
+    );
     result.analysisBasis = {
       ...(result.analysisBasis || { ruleInputs: [], measuredInputs: [], calculatedOutputs: [], assumptions: [], fixedTemplateFields: [] }),
-      calculatedOutputs: Array.from(new Set([...(result.analysisBasis?.calculatedOutputs || []), ...combinedMetrics.map((m) => `${m.label}=${m.value}`)])),
+      calculatedOutputs: Array.from(new Set([
+        ...(result.analysisBasis?.calculatedOutputs || []),
+        ...combinedMetrics.map((m) => `${m.label}=${m.value}`),
+        ...bldcEvidence.filter((e) => e.status === 'CALCULATED' && e.value !== undefined).map((e) => `${e.key}=${e.value} ${e.unit}; margin=${e.safetyMargin ?? 'N/A'}; verdict=${e.complianceVerdict ?? 'N/A'}`),
+      ])),
+      calculatedOutputEvidence: calculatedEvidence,
     };
   }
 

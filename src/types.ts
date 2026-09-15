@@ -292,6 +292,8 @@ export interface CandidateAction {
   latestDecisionPoint?: string;
   rejectionReason?: string;
   crossDomainCouplingChecks?: Array<{ rule: string; addressed: boolean; note: string }>; // 跨域耦合物理规则核对回填 (待办1)
+  /** 关键数值结论的证据来源键：measuredValues.<key> / baseline.analysisBasis.calculatedOutputs:<label> / precomputed.<id> */
+  citedFields?: string[];
 }
 
 export type RecommendationGrade =
@@ -661,7 +663,27 @@ export interface CopilotAnalysisResult {
     calculatedOutputs: string[];
     assumptions: string[];
     fixedTemplateFields: string[];
+    calculatedOutputEvidence?: Array<{
+      id: string;
+      key: string;
+      title: string;
+      status: 'CALCULATED' | 'INSUFFICIENT_INPUT';
+      value?: number;
+      unit: string;
+      engine: string;
+      calculation: string;
+      formula: string;
+      inputs: string[];
+      inputSources: Record<string, string>;
+      missingInputs: string[];
+      specThreshold?: number;
+      safetyMargin?: number;
+      complianceVerdict?: 'PASS' | 'MARGINAL' | 'FAIL' | 'CRITICAL';
+      directiveForAi: string;
+    }>;
   };
+  /** AI 数值结论的集中引用索引，供审计器做来源存在性与一致性核对。 */
+  citedFields?: string[];
   multiDomainAnalysis?: {
     primaryDomain: string;
     relatedDomains: string[];

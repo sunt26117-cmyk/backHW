@@ -75,6 +75,22 @@ function extractMeasuredKeyValues(issue?: IssueInput): Record<string, number> {
   return kv;
 }
 
+
+function getUnitHint(key: string): string {
+  const lower = key.toLowerCase();
+  if (/(vbus|voltage|vd[sx]?|vnode|vgs)/.test(lower)) return 'V';
+  if (/(current|amps?|ma|iinj|icm)/.test(lower)) return lower.includes('ma') || lower.includes('iinj') || lower.includes('icm') ? 'mA' : 'A';
+  if (/(temp|tj|ambient|case|pad)/.test(lower)) return '℃';
+  if (/dvdt/.test(lower)) return 'V\/ns';
+  if (/dead.?time/.test(lower)) return 'ns';
+  if (/(time|recovery|fault|delay)/.test(lower)) return 'ms';
+  if (/(freq|frequency)/.test(lower)) return 'MHz';
+  if (/(backlash|accuracy)/.test(lower)) return 'arcmin';
+  if (/(pct|percent|error)/.test(lower)) return '%';
+  if (/(resistance|ohm|rg)/.test(lower)) return 'Ω';
+  return '';
+}
+
 /**
  * 车规级 AI 推理结果全栈审计与防幻觉校准器 (V4+ 四层防御)
  * 严格覆盖：
@@ -123,13 +139,125 @@ export function auditAiResult(
   // 提取输入中的已知实测数值
   const measuredKeyValues = extractMeasuredKeyValues(issue);
 
+  // 证据引用审计：AI 必须能把关键数值结论落到已知输入或本地确定性计算。
+  const validCitationKeys = new Set<string>();
+  for (const key of Object.keys(issue?.measuredValues || {})) {
+    validCitationKeys.add(`measuredValues.${key}`);
+  }
+  const calculatedEvidence = baseline.analysisBasis?.calculatedOutputEvidence || [];
+  const calculatedByKey = new Map(calculatedEvidence.map((item) => [item.key, item]));
+  const calculatedById = new Map(calculatedEvidence.map((item) => [item.id, item]));
+  for (const output of baseline.analysisBasis?.calculatedOutputs || []) {
+    validCitationKeys.add(`baseline.analysisBasis.calculatedOutputs:${output}`);
+    const idx = (baseline.analysisBasis?.calculatedOutputs || []).indexOf(output);
+    validCitationKeys.add(`baseline.analysisBasis.calculatedOutputs[${idx}]`);
+  }
+  for (const item of calculatedEvidence) {
+    validCitationKeys.add(`baseline.analysisBasis.calculatedOutputs:${item.key}`);
+    validCitationKeys.add(`precomputed.${item.id}`);
+  }
+  const expectedForCitation = (citation: string) => {
+    const measured = citation.match(/^measuredValues\.(.+)$/);
+    if (measured) {
+      const key = measured[1];
+      const expected = issue?.measuredValues?.[key];
+      const expectedNum = typeof expected === 'number' ? expected : Number(expected);
+      return Number.isFinite(expectedNum) ? { value: expectedNum, unit: getUnitHint(key), source: citation } : undefined;
+    }
+
+    const named = citation.match(/^baseline\.analysisBasis\.calculatedOutputs:(.+)$/);
+    if (named) {
+      const key = named[1];
+      const item = calculatedByKey.get(key) || calculatedEvidence.find((candidate) => candidate.key === key || candidate.title === key);
+      if (item?.status === 'CALCULATED' && item.value !== undefined) {
+        return { value: item.value, unit: item.unit, source: citation };
+      }
+      return undefined;
+    }
+
+    const precomputed = citation.match(/^precomputed\.(.+)$/);
+    if (precomputed) {
+      const item = calculatedById.get(precomputed[1]);
+      if (item?.status === 'CALCULATED' && item.value !== undefined) {
+        return { value: item.value, unit: item.unit, source: citation };
+      }
+      return undefined;
+    }
+
+    const indexed = citation.match(/^baseline\.analysisBasis\.calculatedOutputs\[(\d+)\]$/);
+    if (indexed) {
+      const output = baseline.analysisBasis?.calculatedOutputs?.[Number(indexed[1])];
+      const item = calculatedEvidence.find((candidate) => output?.startsWith(`${candidate.key}=`));
+      if (item?.status === 'CALCULATED' && item.value !== undefined) {
+        return { value: item.value, unit: item.unit, source: citation };
+      }
+    }
+    return undefined;
+  };
+
+  const auditCitations = (owner: string, fields: unknown, text: string) => {
+    const citations = Array.isArray(fields) ? fields.filter((x): x is string => typeof x === 'string' && Boolean(x.trim())) : [];
+    const hasNumericUnit = /(?:\d+(?:\.\d+)?)\s*(?:V|A|℃|°C|ns|μs|ms|dB(?:μV(?:\/m)?)?|MHz|kHz|arcmin|%|Ω)/i.test(text);
+    if (hasNumericUnit && citations.length === 0) {
+      flags.push({
+        level: 'WARNING',
+        ruleId: 'RULE_12_CITATION_MISSING',
+        title: '关键数值结论缺少证据引用',
+        message: `${owner} 包含带单位的数值结论，但没有提供 citedFields；无法沿证据链回溯到 measuredValues 或本地计算。`,
+        fieldPath: owner === 'result' ? 'citedFields' : `${owner}.citedFields`,
+        autoFixApplied: false,
+      });
+    }
+    for (const citation of citations) {
+      const isPrecomputed = /^precomputed\.[^\s]+$/.test(citation) && calculatedById.has(citation.slice('precomputed.'.length));
+      const isBaselineIndexed = /^baseline\.analysisBasis\.calculatedOutputs\[\d+\]$/.test(citation) &&
+        Number(citation.match(/\[(\d+)\]$/)?.[1] || -1) < (baseline.analysisBasis?.calculatedOutputs || []).length;
+      const isBaselineNamed = citation.startsWith('baseline.analysisBasis.calculatedOutputs:') && (validCitationKeys.has(citation) || calculatedByKey.has(citation.slice('baseline.analysisBasis.calculatedOutputs:'.length)));
+      if (!validCitationKeys.has(citation) && !isPrecomputed && !isBaselineIndexed && !isBaselineNamed) {
+        flags.push({
+          level: 'WARNING',
+          ruleId: 'RULE_12_CITATION_UNKNOWN',
+          title: 'AI引用的证据键不存在',
+          message: `${owner} 引用了不存在的证据键 [${citation}]。`,
+          fieldPath: owner === 'result' ? 'citedFields' : `${owner}.citedFields`,
+          autoFixApplied: false,
+        });
+      }
+      const expected = expectedForCitation(citation);
+      if (expected && expected.unit) {
+        const escapedUnit = expected.unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const valuesInText = [...text.matchAll(new RegExp(`([+-]?\\d+(?:\\.\\d+)?)\\s*${escapedUnit}`, 'ig'))]
+          .map((x) => Number(x[1]))
+          .filter(Number.isFinite);
+        if (valuesInText.length && !valuesInText.some((actual) => Math.abs(actual - expected.value) <= Math.max(0.05, Math.abs(expected.value) * 0.01))) {
+          flags.push({
+            level: 'WARNING',
+            ruleId: 'RULE_12_CITED_VALUE_MISMATCH',
+            title: 'AI引用数值与证据值不一致',
+            message: `${owner} 声明引用 ${expected.source}，证据值为 ${expected.value}${expected.unit}，但该字段对应文本中的数值未与证据一致。`,
+            fieldPath: owner === 'result' ? 'citedFields' : `${owner}.citedFields`,
+            autoFixApplied: false,
+          });
+        }
+      }
+    }
+  };
+
   // 2. 审计候选方案
   const actions: CandidateAction[] = sanitized.candidateActions || [];
+  auditCitations('result', sanitized.citedFields, JSON.stringify({
+    coreConclusion: sanitized.coreConclusion,
+    knownFacts: sanitized.knownFacts,
+    physicalMechanism: sanitized.physicalMechanism,
+    finalRecommendation: sanitized.finalRecommendation,
+  }));
   const detectedDomains = issue ? resolveEngineeringDomains(issue) : [];
   const primaryDomain = detectedDomains[0] || 'BLDC';
   const relatedDomains = detectedDomains.slice(1);
 
   actions.forEach((action, idx) => {
+    auditCitations(`candidateActions[${idx}]`, action.citedFields, `${action.name || ''} ${action.description || ''} ${action.expectedBenefit || ''} ${action.riskDelta || ''} ${action.sideEffects || ''} ${action.verificationMethod || ''}`);
+
     // 2.1 评分自洽性 (RULE_04_SCORE_CONSISTENCY)
     if (action.scores) {
       const calculatedTotal = recalculateWeightedScore(action.scores);
@@ -181,6 +309,28 @@ export function auditAiResult(
             autoFixApplied: false,
           });
         }
+      }
+    }
+
+    // 2.3b 引用值与结构化输入/本地计算值核对：只在 AI 明确声明 citedFields 时检查。
+    const actionCitations = Array.isArray(action.citedFields) ? action.citedFields : [];
+    for (const citation of actionCitations) {
+      const expected = expectedForCitation(citation);
+      if (!expected || !expected.unit) continue;
+      const unit = expected.unit;
+      const escapedUnit = unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const valuesInText = [...combinedText.matchAll(new RegExp(`([+-]?\\d+(?:\\.\\d+)?)\\s*${escapedUnit}`, 'ig'))]
+        .map((x) => Number(x[1]))
+        .filter(Number.isFinite);
+      if (valuesInText.length && !valuesInText.some((actual) => Math.abs(actual - expected.value) <= Math.max(0.05, Math.abs(expected.value) * 0.01))) {
+        flags.push({
+          level: 'WARNING',
+          ruleId: 'RULE_12_CITED_VALUE_MISMATCH',
+          title: 'AI引用数值与证据值不一致',
+          message: `方案 [${action.id || idx}] 声明引用 ${expected.source}，证据值为 ${expected.value}${unit}，但方案文本中的 ${unit} 数值未与该值一致。`,
+          fieldPath: `candidateActions[${idx}].citedFields`,
+          autoFixApplied: false,
+        });
       }
     }
 

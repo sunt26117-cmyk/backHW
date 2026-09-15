@@ -734,7 +734,7 @@ export default function App() {
         )}
 
         {activeTab === 'calc' && (
-          <EngineeringCalculatorView context={context} issue={issue} />
+          <EngineeringCalculatorView context={context} issue={issue} setIssue={setIssue} />
         )}
         </PageErrorBoundary>
       </main>

@@ -1,5 +1,6 @@
 import { ProjectContext, IssueInput } from '../types';
-import { calculateBusPumping, checkMillerRisk } from './motorPhysicsEngine';
+import { calculateBldcDeterministicCalculations } from './bldcDeterministicEngine';
+import { resolveEngineeringDomains } from './scenarioDomainEngine';
 
 export interface PrecomputedFact {
   id: string;
@@ -13,6 +14,10 @@ export interface PrecomputedFact {
   safetyMargin?: number | string;
   complianceVerdict: 'PASS' | 'MARGINAL' | 'FAIL' | 'CRITICAL';
   directiveForAi: string; // 对大模型的强制引用指令
+  status?: 'CALCULATED' | 'INSUFFICIENT_INPUT';
+  inputs?: string[];
+  inputSources?: Record<string, string>;
+  missingInputs?: string[];
 }
 
 /**
@@ -41,73 +46,48 @@ export function runDeterministicPrecomputations(
   const facts: PrecomputedFact[] = [];
   const fullText = `${issue.failurePhenomenon || ''} ${issue.requirement || ''} ${issue.testCondition || ''} ${issue.actualMeasurement || ''} ${issue.engineeringConcern || ''} ${issue.notes || ''}`;
 
-  // 1. BLDC 母线泵升 (Bus Pumping) 预计算
-  const vbusNom = extractNumber(fullText, [/标称\s*([0-9.]+)\s*V/i, /VBUS\s*=\s*([0-9.]+)\s*V/i, /母线\s*([0-9.]+)\s*V/i], 12);
-  const vbusRating = extractNumber(fullText, [/MOSFET\s*(?:是|耐压)?\s*([0-9.]+)\s*V/i, /耐压\s*([0-9.]+)\s*V/i, /MOS\s*([0-9.]+)\s*V/i], 40);
-  const cbusUf = extractNumber(fullText, [/([0-9.]+)\s*uF/i, /([0-9.]+)\s*μF/i, /电容\s*([0-9.]+)\s*uF/i], 470);
-  const rpm = extractNumber(fullText, [/([0-9]+)\s*rpm/i, /转速\s*([0-9]+)/i], 3800);
-  const inertia = extractNumber(fullText, [/([0-9.]+)\s*kg·m/i, /转动惯量\s*([0-9.]+)/i], 0.00035);
+  // 1~2. BLDC Bus Pumping / Miller：只允许读取结构化 measuredValues，禁止自由文本正则与默认工程参数。
+  if (resolveEngineeringDomains(issue).includes('BLDC')) {
+    const bldcCalculations = calculateBldcDeterministicCalculations(issue);
 
-  if (vbusNom !== null && vbusRating !== null && cbusUf !== null && rpm !== null) {
-    try {
-      const pumping = calculateBusPumping({
-        V_bus_nom: vbusNom,
-        V_bus_max_rating: vbusRating,
-        C_dc_uF: cbusUf,
-        J_kg_m2: inertia || 0.00035,
-        n_rpm: rpm,
-        regenEfficiency: 0.75,
-      });
-
-      facts.push({
-        id: 'PRE_BUS_PUMPING',
-        category: 'BUS_PUMPING',
-        title: '急停母线倒灌理论泵升计算',
-        parameter: 'V_bus_peak (理论峰值)',
-        calculatedValue: Number(pumping.V_bus_peak.toFixed(1)),
-        unit: 'V',
-        formulaOrBasis: 'Ek=0.5*J*w^2 ➔ V_peak = sqrt(V_nom^2 + 2*E_regen/Cbus)',
-        specThreshold: `${vbusRating} V (器件耐压上限)`,
-        safetyMargin: `${pumping.voltageMarginV.toFixed(1)} V`,
-        complianceVerdict: pumping.isOverVoltage ? 'CRITICAL' : pumping.voltageMarginV < 3.0 ? 'MARGINAL' : 'PASS',
-        directiveForAi: `急停理论泵升峰值经动能平衡方程核算为 ${pumping.V_bus_peak.toFixed(1)}V（耐压裕量 ${pumping.voltageMarginV.toFixed(1)}V）。模型方案必须严格引用此理论值与实测值，严禁自行臆造其他泵升峰值。`,
-      });
-    } catch {
-      // ignore
-    }
-  }
-
-  // 2. 门极米勒效应 (Miller Effect) 瞬态感应抬升
-  const dvdt = extractNumber(fullText, [/dv\/dt\s*(?:达到|=)?\s*([0-9.]+)\s*V\/ns/i, /([0-9.]+)\s*V\/ns/i], null);
-  const vth = extractNumber(fullText, [/Vth\s*=\s*([0-9.]+)\s*V/i, /门槛电压\s*([0-9.]+)\s*V/i, /阈值\s*([0-9.]+)\s*V/i], 2.0);
-  const cgd = extractNumber(fullText, [/Cgd\s*=\s*([0-9.]+)\s*pF/i, /Crss\s*=\s*([0-9.]+)\s*pF/i], 45);
-  const rg = extractNumber(fullText, [/Rg\s*=\s*([0-9.]+)\s*Ω/i, /门极电阻\s*([0-9.]+)\s*Ω/i], 10);
-
-  if (dvdt !== null) {
-    try {
-      const miller = checkMillerRisk({
-        V_th_min: vth || 2.0,
-        C_gd_pF: cgd || 45,
-        C_gs_pF: 1500,
-        R_g_pulldown_ohm: rg || 10,
-        dv_dt_V_per_ns: dvdt,
-      });
+    for (const calc of bldcCalculations) {
+      if (calc.status === 'INSUFFICIENT_INPUT') {
+        facts.push({
+          id: calc.id,
+          category: calc.calculation === 'busPumping' ? 'BUS_PUMPING' : 'MILLER_TRANSIENT',
+          title: calc.title,
+          parameter: calc.key,
+          calculatedValue: 'INSUFFICIENT_INPUT',
+          unit: calc.unit,
+          formulaOrBasis: calc.formula,
+          safetyMargin: `缺失：${calc.missingInputs.join(', ')}`,
+          complianceVerdict: 'CRITICAL',
+          directiveForAi: calc.directiveForAi,
+          status: 'INSUFFICIENT_INPUT',
+          inputs: calc.inputs,
+          inputSources: calc.inputSources,
+          missingInputs: calc.missingInputs,
+        });
+        continue;
+      }
 
       facts.push({
-        id: 'PRE_MILLER_INDUCED',
-        category: 'MILLER_TRANSIENT',
-        title: '米勒电容瞬态门极感应抬升计算',
-        parameter: 'V_gs_induced (感应尖峰)',
-        calculatedValue: Number(miller.vGateInducedV.toFixed(2)),
-        unit: 'V',
-        formulaOrBasis: 'Vgs_induced = Rg_pulldown * Cgd * (dv/dt)',
-        specThreshold: `${(vth || 2.0).toFixed(1)} V (Vth_min 门极导通阈值)`,
-        safetyMargin: `${miller.safetyMarginV.toFixed(2)} V`,
-        complianceVerdict: miller.isRiskOfShootThrough ? 'CRITICAL' : miller.safetyMarginV < 0.5 ? 'MARGINAL' : 'PASS',
-        directiveForAi: `在 dv/dt=${dvdt}V/ns 工况下，门极感应抬升计算值为 ${miller.vGateInducedV.toFixed(2)}V（安全裕量 ${miller.safetyMarginV.toFixed(2)}V）。${miller.isRiskOfShootThrough ? '已击穿 Vth 门槛，存在上下桥微直通硬性风险，必须采取有源钳位或减小关断电阻对策！' : '在安全导通阈值以下。'}`,
+        id: calc.id,
+        category: calc.calculation === 'busPumping' ? 'BUS_PUMPING' : 'MILLER_TRANSIENT',
+        title: calc.title,
+        parameter: calc.key,
+        calculatedValue: calc.value!,
+        unit: calc.unit,
+        formulaOrBasis: calc.formula,
+        specThreshold: calc.specThreshold,
+        safetyMargin: calc.safetyMargin,
+        complianceVerdict: calc.complianceVerdict || 'PASS',
+        directiveForAi: calc.directiveForAi,
+        status: 'CALCULATED',
+        inputs: calc.inputs,
+        inputSources: calc.inputSources,
+        missingInputs: [],
       });
-    } catch {
-      // ignore
     }
   }
 

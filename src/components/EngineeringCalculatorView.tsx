@@ -353,9 +353,10 @@ const DistributionChart: React.FC<DistributionChartProps> = ({ stats }) => {
 interface EngineeringCalculatorViewProps {
   context?: ProjectContext;
   issue?: IssueInput;
+  setIssue?: (issue: IssueInput) => void;
 }
 
-export const EngineeringCalculatorView: React.FC<EngineeringCalculatorViewProps> = ({ context, issue }) => {
+export const EngineeringCalculatorView: React.FC<EngineeringCalculatorViewProps> = ({ context, issue, setIssue }) => {
   const [activeCalc, setActiveCalc] = useState<'wcca' | 'foster_thermal' | 'steady_thermal' | 'voltage' | 'motor_drive'>('motor_drive');
 
   // WCCA States
@@ -1216,7 +1217,7 @@ export const EngineeringCalculatorView: React.FC<EngineeringCalculatorViewProps>
 
         {/* ===================== 计算器 5: BLDC 电机驱动专项物理核算工具箱 ===================== */}
         {activeCalc === 'motor_drive' && (
-          <MotorDriveToolbox />
+          <MotorDriveToolbox issue={issue} onIssueChange={setIssue} />
         )}
       </div>
     </div>

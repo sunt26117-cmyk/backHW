@@ -92,7 +92,7 @@ export function calculateBusPumping(params: {
 export function checkMillerRisk(params: {
   V_th_min: number;              // 门极最小开启阈值电压 (V)，例如 2.0V
   C_gd_pF: number;               // 栅漏电容 / 米勒电容 (pF)，例如 35pF
-  C_gs_pF: number;               // 栅源输入电容 (pF)，例如 1500pF
+  C_gs_pF?: number;              // 栅源输入电容 (pF)，当前简化模型不直接参与数值计算
   R_g_pulldown_ohm: number;      // 门极关断回路总有效阻抗 (Ω, 驱动下拉内阻 + 外置阻抗 + MOS内部Rg)
   dv_dt_V_per_ns: number;        // 开关节点反向对管开启导致的电压上升率 (V/ns)，例如 5~15 V/ns
   hasActiveMillerClamp?: boolean;// 是否启用了预驱芯片内置的有源米勒钳位 (Active Miller Clamp)

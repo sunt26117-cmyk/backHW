@@ -28,8 +28,14 @@ import {
   SnubberCalcResult,
   ActuatorArchetype,
 } from '../types/motorDrive';
+import { IssueInput } from '../types';
 
-export const MotorDriveToolbox: React.FC = () => {
+interface MotorDriveToolboxProps {
+  issue?: IssueInput;
+  onIssueChange?: (issue: IssueInput) => void;
+}
+
+export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onIssueChange }) => {
   // 1. 急停母线泵升能量计算状态
   const [pumpingParams, setPumpingParams] = useState({
     V_bus_nom: 13.5,
@@ -100,6 +106,73 @@ export const MotorDriveToolbox: React.FC = () => {
     currentSenseDeviationPct: 3.2,
   });
   const [safetyChainResult, setSafetyChainResult] = useState<ReturnType<typeof evaluateSafetyChainTiming> | null>(null);
+
+  const issueNumber = (key: string): number | undefined => {
+    const value = Number(issue?.measuredValues?.[key]);
+    return Number.isFinite(value) ? value : undefined;
+  };
+
+  const updateIssueMeasuredValue = (key: string, rawValue: string) => {
+    if (!issue || !onIssueChange) return;
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    const source = new Set(['vdsRatingV', 'cBusUf', 'rotorInertiaKgm2', 'rgOffOhm', 'cgdPf', 'vthMinV']).has(key)
+      ? 'SPEC'
+      : key === 'busVoltageNominalV'
+      ? 'CONTEXT'
+      : 'USER_MEASURED';
+    onIssueChange({
+      ...issue,
+      measuredValues: { ...(issue.measuredValues || {}), [key]: value },
+      measurementProvenance: {
+        ...(issue.measurementProvenance || {}),
+        [key]: {
+          ...(issue.measurementProvenance?.[key] || {}),
+          source,
+          sourceLabel: `MotorDriveToolbox 手动输入 · ${source}`,
+          enteredAt: new Date().toISOString(),
+        },
+      },
+    });
+  };
+
+  // issue 切换后回填工具箱输入；缺失字段保留本地编辑值，但不会被写回 issue，更不会作为确定性 Grounding 输入。
+  useEffect(() => {
+    if (!issue) return;
+    const vbus = issueNumber('busVoltageNominalV');
+    const vds = issueNumber('vdsRatingV');
+    const cbus = issueNumber('cBusUf');
+    const rpm = issueNumber('rpm');
+    const j = issueNumber('rotorInertiaKgm2');
+    const l = issueNumber('harnessInductanceUh');
+    const current = issueNumber('currentPeakA');
+    const vth = issueNumber('vthMinV');
+    const cgd = issueNumber('cgdPf');
+    const rg = issueNumber('rgOffOhm');
+    const dvdt = issueNumber('dvdtVns');
+
+    setPumpingParams((prev) => ({
+      ...prev,
+      ...(vbus !== undefined ? { V_bus_nom: vbus } : {}),
+      ...(vds !== undefined ? { V_bus_max_rating: vds } : {}),
+      ...(cbus !== undefined ? { C_dc_uF: cbus } : {}),
+      ...(rpm !== undefined ? { n_rpm: rpm } : {}),
+      ...(j !== undefined ? { J_kg_m2: j } : {}),
+      ...(l !== undefined ? { L_harness_uH: l } : {}),
+      ...(current !== undefined ? { I_phase_A: current } : {}),
+    }));
+    setMillerParams((prev) => ({
+      ...prev,
+      ...(vth !== undefined ? { V_th_min: vth } : {}),
+      ...(cgd !== undefined ? { C_gd_pF: cgd } : {}),
+      ...(rg !== undefined ? { R_g_pulldown_ohm: rg } : {}),
+      ...(dvdt !== undefined ? { dv_dt_V_per_ns: dvdt } : {}),
+    }));
+  }, [issue]);
+
+  // 与工程 issue 绑定时，只有结构化关键输入齐全才运行确定性 BLDC 计算。
+  const linkedPumpingReady = !issue || ['busVoltageNominalV', 'vdsRatingV', 'cBusUf', 'rotorInertiaKgm2', 'rpm'].every((key) => issueNumber(key) !== undefined);
+  const linkedMillerReady = !issue || ['dvdtVns', 'cgdPf', 'rgOffOhm', 'vthMinV'].every((key) => issueNumber(key) !== undefined);
 
   // 一键加载典型电机应用场景预设
   const applyPreset = (preset: ActuatorArchetype) => {
@@ -187,21 +260,43 @@ export const MotorDriveToolbox: React.FC = () => {
 
   // 运行计算
   useEffect(() => {
-    const pRes = calculateBusPumping(pumpingParams);
-    setPumpingResult(pRes);
-  }, [pumpingParams]);
+    if (!linkedPumpingReady) {
+      setPumpingResult(null);
+      return;
+    }
+    const p = issue ? {
+      ...pumpingParams,
+      V_bus_nom: issueNumber('busVoltageNominalV')!,
+      V_bus_max_rating: issueNumber('vdsRatingV')!,
+      C_dc_uF: issueNumber('cBusUf')!,
+      J_kg_m2: issueNumber('rotorInertiaKgm2')!,
+      n_rpm: issueNumber('rpm')!,
+      I_phase_A: issueNumber('currentPeakA') ?? pumpingParams.I_phase_A,
+    } : pumpingParams;
+    setPumpingResult(calculateBusPumping(p));
+  }, [pumpingParams, issue, linkedPumpingReady]);
 
   useEffect(() => {
+    if (!linkedMillerReady) {
+      setMillerResult(null);
+      return;
+    }
+    const p = issue ? {
+      ...millerParams,
+      V_th_min: issueNumber('vthMinV')!,
+      C_gd_pF: issueNumber('cgdPf')!,
+      R_g_pulldown_ohm: issueNumber('rgOffOhm')!,
+      dv_dt_V_per_ns: issueNumber('dvdtVns')!,
+    } : millerParams;
     const mRes = checkMillerRisk({
-      V_th_min: millerParams.V_th_min,
-      C_gd_pF: millerParams.C_gd_pF,
-      C_gs_pF: millerParams.C_gs_pF,
-      R_g_pulldown_ohm: millerParams.R_g_pulldown_ohm,
-      dv_dt_V_per_ns: millerParams.dv_dt_V_per_ns,
-      hasActiveMillerClamp: millerParams.hasActiveMillerClamp,
+      V_th_min: p.V_th_min,
+      C_gd_pF: p.C_gd_pF,
+      R_g_pulldown_ohm: p.R_g_pulldown_ohm,
+      dv_dt_V_per_ns: p.dv_dt_V_per_ns,
+      hasActiveMillerClamp: p.hasActiveMillerClamp,
     });
     setMillerResult(mRes);
-  }, [millerParams]);
+  }, [millerParams, issue, linkedMillerReady]);
 
   useEffect(() => {
     const sRes = calculateSnubberParams({
@@ -317,9 +412,10 @@ export const MotorDriveToolbox: React.FC = () => {
               <input
                 type="number"
                 value={pumpingParams.V_bus_nom}
-                onChange={(e) =>
-                  setPumpingParams({ ...pumpingParams, V_bus_nom: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(e) => {
+                  setPumpingParams({ ...pumpingParams, V_bus_nom: parseFloat(e.target.value) || 0 });
+                  updateIssueMeasuredValue('busVoltageNominalV', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -328,9 +424,10 @@ export const MotorDriveToolbox: React.FC = () => {
               <input
                 type="number"
                 value={pumpingParams.V_bus_max_rating}
-                onChange={(e) =>
-                  setPumpingParams({ ...pumpingParams, V_bus_max_rating: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(e) => {
+                  setPumpingParams({ ...pumpingParams, V_bus_max_rating: parseFloat(e.target.value) || 0 });
+                  updateIssueMeasuredValue('vdsRatingV', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -339,9 +436,10 @@ export const MotorDriveToolbox: React.FC = () => {
               <input
                 type="number"
                 value={pumpingParams.C_dc_uF}
-                onChange={(e) =>
-                  setPumpingParams({ ...pumpingParams, C_dc_uF: parseFloat(e.target.value) || 1 })
-                }
+                onChange={(e) => {
+                  setPumpingParams({ ...pumpingParams, C_dc_uF: parseFloat(e.target.value) || 1 });
+                  updateIssueMeasuredValue('cBusUf', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -350,9 +448,10 @@ export const MotorDriveToolbox: React.FC = () => {
               <input
                 type="number"
                 value={pumpingParams.n_rpm}
-                onChange={(e) =>
-                  setPumpingParams({ ...pumpingParams, n_rpm: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(e) => {
+                  setPumpingParams({ ...pumpingParams, n_rpm: parseFloat(e.target.value) || 0 });
+                  updateIssueMeasuredValue('rpm', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -362,9 +461,10 @@ export const MotorDriveToolbox: React.FC = () => {
                 type="number"
                 step="0.00005"
                 value={pumpingParams.J_kg_m2}
-                onChange={(e) =>
-                  setPumpingParams({ ...pumpingParams, J_kg_m2: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(e) => {
+                  setPumpingParams({ ...pumpingParams, J_kg_m2: parseFloat(e.target.value) || 0 });
+                  updateIssueMeasuredValue('rotorInertiaKgm2', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -385,9 +485,10 @@ export const MotorDriveToolbox: React.FC = () => {
               <input
                 type="number"
                 value={pumpingParams.I_phase_A}
-                onChange={(e) =>
-                  setPumpingParams({ ...pumpingParams, I_phase_A: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(e) => {
+                  setPumpingParams({ ...pumpingParams, I_phase_A: parseFloat(e.target.value) || 0 });
+                  updateIssueMeasuredValue('currentPeakA', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -486,9 +587,10 @@ export const MotorDriveToolbox: React.FC = () => {
                 type="number"
                 step="0.1"
                 value={millerParams.V_th_min}
-                onChange={(e) =>
-                  setMillerParams({ ...millerParams, V_th_min: parseFloat(e.target.value) || 2.0 })
-                }
+                onChange={(e) => {
+                  setMillerParams({ ...millerParams, V_th_min: parseFloat(e.target.value) || 2.0 });
+                  updateIssueMeasuredValue('vthMinV', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -497,9 +599,10 @@ export const MotorDriveToolbox: React.FC = () => {
               <input
                 type="number"
                 value={millerParams.C_gd_pF}
-                onChange={(e) =>
-                  setMillerParams({ ...millerParams, C_gd_pF: parseFloat(e.target.value) || 10 })
-                }
+                onChange={(e) => {
+                  setMillerParams({ ...millerParams, C_gd_pF: parseFloat(e.target.value) || 10 });
+                  updateIssueMeasuredValue('cgdPf', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -509,9 +612,10 @@ export const MotorDriveToolbox: React.FC = () => {
                 type="number"
                 step="0.5"
                 value={millerParams.R_g_pulldown_ohm}
-                onChange={(e) =>
-                  setMillerParams({ ...millerParams, R_g_pulldown_ohm: parseFloat(e.target.value) || 1 })
-                }
+                onChange={(e) => {
+                  setMillerParams({ ...millerParams, R_g_pulldown_ohm: parseFloat(e.target.value) || 1 });
+                  updateIssueMeasuredValue('rgOffOhm', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -521,9 +625,10 @@ export const MotorDriveToolbox: React.FC = () => {
                 type="number"
                 step="0.5"
                 value={millerParams.dv_dt_V_per_ns}
-                onChange={(e) =>
-                  setMillerParams({ ...millerParams, dv_dt_V_per_ns: parseFloat(e.target.value) || 1 })
-                }
+                onChange={(e) => {
+                  setMillerParams({ ...millerParams, dv_dt_V_per_ns: parseFloat(e.target.value) || 1 });
+                  updateIssueMeasuredValue('dvdtVns', e.target.value);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>

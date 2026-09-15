@@ -1,4 +1,5 @@
 import { IssueInput, IssueCategory, ProjectContext, MeasurementSource } from '../types';
+import { calculateBldcDeterministicCalculations } from './bldcDeterministicEngine';
 
 export type EngineeringDomain =
   | 'BLDC'
@@ -62,14 +63,15 @@ const P: Record<EngineeringDomain, DomainProfile> = {
       {key:'junctionTempC',label:'结温',unit:'℃',description:'实测或热模型校核点',tag:'MEASURED'},
       {key:'vdsRatingV',label:'Vds额定耐压',unit:'V',description:'器件数据手册额定值',tag:'SPEC',required:true},
       {key:'deadTimeNs',label:'死区',unit:'ns',description:'控制器实际配置',tag:'CONTEXT'},
-      {key:'cBusUf',label:'母线电容 Cbus',unit:'μF',description:'DC-Link 总储能电容，用于泵升 ΔV=√(V0²+2E/Cbus) 定量计算，不填将退化为默认470μF假设',tag:'SPEC',required:true},
-      {key:'rotorInertiaKgm2',label:'转子转动惯量 J',unit:'kg·m²',description:'电机转子惯量，用于 E=1/2·J·ω² 定量计算，不填将退化为按转速经验估算',tag:'SPEC'},
+      {key:'cBusUf',label:'母线电容 Cbus',unit:'μF',description:'DC-Link 总储能电容，用于泵升定量计算；缺失时确定性计算不可用',tag:'SPEC',required:true},
+      {key:'rotorInertiaKgm2',label:'转子转动惯量 J',unit:'kg·m²',description:'电机转子与折算负载总惯量，用于 E=1/2·J·ω² 定量计算；缺失时确定性计算不可用',tag:'SPEC',required:true},
       {key:'rgOffOhm',label:'关断栅极电阻 Rg_off',unit:'Ω',description:'下桥MOSFET关断驱动电阻，影响米勒直通风险评估',tag:'SPEC'},
       {key:'cgdPf',label:'米勒电容 Cgd',unit:'pF',description:'MOSFET栅漏电容，用于米勒直通尖峰 Vgs_induced 计算',tag:'SPEC'},
       {key:'vthMinV',label:'Vgs开启阈值(最小值)',unit:'V',description:'器件数据手册最小开启阈值，用于判定米勒尖峰是否会误导通',tag:'SPEC'},
+      {key:'dvdtVns',label:'dv/dt',unit:'V/ns',description:'开关节点电压变化率，用于 BLDC Miller 风险确定性计算',tag:'MEASURED'},
       {key:'keVkrpm',label:'反电动势常数 Ke',unit:'V/krpm',description:'电机反电动势系数，用于交叉核验实测泵升与理论泵升是否一致',tag:'SPEC'},
     ],
-    knownPitfalls: ['不能用计算泵升峰值替代示波器实测峰值作为放行证据', 'RDS(on)/Qg/Qgd 不能只看室温 datasheet typ 值', '不填 Cbus/J 时公式只能用默认假设值推算，不能当作已验证的定量结论'],
+    knownPitfalls: ['不能用计算泵升峰值替代示波器实测峰值作为放行证据', 'RDS(on)/Qg/Qgd 不能只看室温 datasheet typ 值', 'Cbus/J/dvdt/Cgd/Rg/Vth 任一确定性计算关键输入缺失时，必须明确标记 INSUFFICIENT_INPUT，不得从自由文本或默认工程参数补齐'],
   },
   ROBOT_JOINT: {
     key: 'ROBOT_JOINT', title: '机器人/协作臂关节机电系统层：背隙 / 编码器 / 谐振 / 力矩闭环 / STO / 总线周期',
@@ -434,8 +436,12 @@ export function getDomainDataQuality(issue: IssueInput) {
     const v = values[field.key];
     return v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
   };
-  const requiredDone = required.filter(present).length;
-  const measured = fields.filter(f => (f.tag === 'MEASURED' || f.tag === 'SPEC' || f.tag === 'CONTEXT') && present(f)).length;
+  const sourceFor = (field: DomainMeasurementField): MeasurementSource =>
+    (provenance[field.key]?.source || (issue.measuredValueSource as MeasurementSource | undefined) ||
+      (field.tag === 'CALCULATED' ? 'CALCULATED' : field.tag === 'SPEC' ? 'SPEC' : field.tag === 'CONTEXT' ? 'CONTEXT' : 'UNKNOWN')) as MeasurementSource;
+  const trusted = (field: DomainMeasurementField) => sourceFor(field) === 'USER_MEASURED' || sourceFor(field) === 'IMPORTED';
+  const requiredDone = required.filter((field) => present(field) && trusted(field)).length;
+  const measured = fields.filter(f => (f.tag === 'MEASURED' || f.tag === 'SPEC' || f.tag === 'CONTEXT') && present(f) && trusted(f)).length;
   const sourceCounts = fields.reduce((acc, f) => {
     const v = values[f.key];
     if (v === undefined || v === null || v === '') return acc;
@@ -451,7 +457,10 @@ export function getDomainDataQuality(issue: IssueInput) {
     complete: requiredDone === required.length,
     measuredPresent: measured,
     inputFieldCount: fields.filter(f => f.tag !== 'CALCULATED').length,
-    missingRequired: required.filter(f => !present(f)).map(f => `${f.label}${f.unit ? ` (${f.unit})` : ''}`),
+    missingRequired: required.filter(f => !present(f) || !trusted(f)).map(f => {
+      const src = sourceFor(f);
+      return `${f.label}${f.unit ? ` (${f.unit})` : ''}${present(f) && src !== 'USER_MEASURED' && src !== 'IMPORTED' ? ` · 证据来源=${src}` : ''}`;
+    }),
     sourceCounts,
     benchmarkCount,
     trustedInputCount,
@@ -577,7 +586,27 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
   const tagFor = (key: string): 'MEASURED'|'BENCHMARK' => fieldSource(key) === 'BENCHMARK' ? 'BENCHMARK' : 'MEASURED';
   const noteFor = (key: string) => tagFor(key) === 'BENCHMARK' ? 'BENCHMARK · 仅演示，请用实测/导入数据覆盖' : `${fieldSource(key)} · 当前输入`;
   const metrics: Array<{label:string; value:string; note:string; tag:'MEASURED'|'CALCULATED'|'SPEC'|'BENCHMARK'}> = [];
-  if (d === 'ROBOT_JOINT') {
+  if (d === 'BLDC') {
+    const evidence = calculateBldcDeterministicCalculations(issue);
+    evidence.forEach((item) => {
+      if (item.status === 'CALCULATED' && item.value !== undefined) {
+        metrics.push({
+          label: item.key,
+          value: `${item.value.toFixed(2)} ${item.unit}`,
+          note: `CALCULATED · ${item.engine}.${item.calculation} · inputs=${item.inputs.join(', ')}`,
+          tag: 'CALCULATED',
+        });
+        if (item.safetyMargin !== undefined) {
+          metrics.push({
+            label: `${item.key}.safetyMargin`,
+            value: `${item.safetyMargin.toFixed(2)} ${item.unit}`,
+            note: `CALCULATED · safety margin against ${item.specThreshold ?? 'threshold'}`,
+            tag: 'CALCULATED',
+          });
+        }
+      }
+    });
+  } else if (d === 'ROBOT_JOINT') {
     const backlash = n('backlashArcmin'), stiffness = n('torsionalStiffnessNmPerRad'), torque = n('outputTorqueNm'), reqAccuracy = n('requiredPositionAccuracyArcmin');
     if (finite(backlash)) metrics.push({label:'背隙',value:`${backlash} arcmin`,note:noteFor('backlashArcmin'),tag:tagFor('backlashArcmin')});
     if (finite(backlash) && finite(stiffness) && finite(torque) && stiffness > 0) {
