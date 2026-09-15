@@ -610,6 +610,7 @@ export interface CopilotAnalysisResult {
     problemSummary: string;
     recommendedMeasure: string;
     reasonSummary: string;
+    coreRiskGrade?: string;
   };
   riskRatings: {
     overallRisk: RiskLevel;

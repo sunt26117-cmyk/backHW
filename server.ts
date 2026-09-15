@@ -978,6 +978,23 @@ ${couplingText}
       }
     }
 
+    if (!finalData.decisionFrame) {
+      finalData.decisionFrame = {
+        decisionQuestion: `${context?.nextMilestone || '下一工程门禁'} 前是否具备继续推进的证据条件`,
+        currentDecisionGate: context?.nextMilestone || '当前工程门禁',
+        decisionWindow: `剩余 ${context?.daysRemaining ?? 14} 天`,
+        bestNextAction: finalData.finalRecommendation?.immediateSteps?.[0]?.action || '先完成当前关键未知量的最小验证',
+        minimumEvidenceToProceed: [finalData.finalRecommendation?.preconditions?.[0] || '关键实测证据达到项目规范门槛'],
+        unknownsBlockingDecision: Array.isArray(finalData.unknowns) ? finalData.unknowns.slice(0, 5) : ['关键输入数据不足'],
+        reversalCriteria: Array.isArray(finalData.finalRecommendation?.reEvaluationTriggers)
+          ? finalData.finalRecommendation.reEvaluationTriggers.slice(0, 5)
+          : ['关键实测证据与当前物理假设不一致'],
+      };
+    }
+    if (finalData.coreConclusion && !finalData.coreConclusion.coreRiskGrade) {
+      finalData.coreConclusion.coreRiskGrade = finalData.riskRatings?.overallRisk || 'Medium';
+    }
+
     const elapsedMs = Date.now() - startTime;
 
     // 10. 挂载调试快照 (DebugSnapshot - 待办 5.3)

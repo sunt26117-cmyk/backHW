@@ -64,7 +64,11 @@ function extractPhysicalInputs(issue: IssueInput): Map<PhysicalDimension, number
 }
 
 function extractGoldPhysicalInputs(goldCase: (typeof GOLD_STANDARD_CASES)[number]): Map<PhysicalDimension, number[]> {
-  return collectPhysicalInputs(goldCase.input.issue.measuredValues);
+  const merged: Record<string, number | string> = {
+    ...((goldCase.input.issue as unknown as { measuredValues?: Record<string, number | string> }).measuredValues || {}),
+    ...(goldCase.expectedCalculation || {}),
+  };
+  return collectPhysicalInputs(merged);
 }
 
 function physicalSimilarity(issue: IssueInput, goldCase: (typeof GOLD_STANDARD_CASES)[number]): { ratioPenalty: number; hardReject: boolean } {

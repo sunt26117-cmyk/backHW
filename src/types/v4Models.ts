@@ -124,6 +124,7 @@ export interface EngineeringIssueModel {
   measuredData: string;
   requirement: string;
   engineeringConcern: string;
+  measuredValues?: Record<string, number | string>;
 }
 
 export interface UnifiedEngineeringModel {

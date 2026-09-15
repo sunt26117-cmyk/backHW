@@ -1,5 +1,6 @@
 import { IssueInput, IssueCategory, ProjectContext, MeasurementSource } from '../types';
 import { calculateBldcDeterministicCalculations } from './bldcDeterministicEngine';
+import { calculateTwoMassResonance } from './robotJointResonance';
 
 export type EngineeringDomain =
   | 'BLDC'
@@ -618,11 +619,42 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
     }
     const jMotor = n('motorInertiaKgm2'), jLoad = n('loadInertiaKgm2'), gearRatio = n('gearRatio'), vBw = n('velocityLoopBandwidthHz');
     if (finite(stiffness) && finite(jMotor) && jMotor > 0 && finite(jLoad) && finite(gearRatio) && gearRatio > 0) {
-      const jLoadReflected = jLoad / (gearRatio * gearRatio);
-      if (jLoadReflected > 0) {
-        const fRes = (1 / (2 * Math.PI)) * Math.sqrt(stiffness * (1 / jMotor + 1 / jLoadReflected));
-        metrics.push({label:'估算机械谐振频率',value:`${fRes.toFixed(1)} Hz`,note:'CALCULATED · 二质量弹簧系统简化模型',tag:'CALCULATED'});
-        if (finite(vBw) && vBw > 0) metrics.push({label:'谐振/带宽隔离度',value:`${(fRes / vBw).toFixed(2)}×`,note:'CALCULATED · 建议 ≥3×，否则需陷波滤波器',tag:'CALCULATED'});
+      const res = calculateTwoMassResonance({
+        torsionalStiffnessNmPerRad: stiffness,
+        motorInertiaKgm2: jMotor,
+        loadInertiaKgm2: jLoad,
+        gearRatio,
+        velocityLoopBandwidthHz: finite(vBw) && vBw > 0 ? vBw : undefined,
+      });
+      metrics.push({
+        label: '估算机械谐振频率 f_res',
+        value: `${res.resonanceFreqHz} Hz`,
+        note: res.isPlausible ? 'CALCULATED · 二质量输出侧折算极点' : `CALCULATED · ${res.plausibilityWarning}`,
+        tag: 'CALCULATED',
+      });
+      metrics.push({
+        label: '输出端反谐振频率 f_ar',
+        value: `${res.antiResonanceFreqHz} Hz`,
+        note: 'CALCULATED · 输出端零点 sqrt(K/J_L)/(2π)',
+        tag: 'CALCULATED',
+      });
+      metrics.push({
+        label: '关节惯量比 (J_L_refl/J_m)',
+        value: `${res.inertiaRatio} : 1`,
+        note: res.inertiaRatio <= 10 ? 'CALCULATED · 惯量匹配良好 (<=10)' : 'CALCULATED · 惯量比偏大 (>10)，需加强控制鲁棒性',
+        tag: 'CALCULATED',
+      });
+      if (finite(vBw) && vBw > 0) {
+        metrics.push({
+          label: '谐振/带宽隔离度',
+          value: `${res.bandwidthIsolationRatio}×`,
+          note: res.isBandwidthAboveResonance
+            ? 'CALCULATED · 严重不稳定！速度环带宽已骑在或高于谐振频率，闭环必剧烈啸叫'
+            : res.isBandwidthInvadingResonance
+            ? 'CALCULATED · 侵入谐振区 (<3×)，必须配置陷波器 (Notch Filter) 或下调带宽'
+            : 'CALCULATED · 隔离度良好 (>=3×)',
+          tag: 'CALCULATED',
+        });
       }
     }
     const regenPeak = n('regenPowerPeakW'), resistorRated = n('brakingResistorRatedContinuousW');
@@ -648,17 +680,53 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
     const budgetKeys=['shuntTolerancePct','afeOffsetBudgetPct','adcRefDriftBudgetPct','tempDriftBudgetPct','agingDriftBudgetPct'];
     const budget=budgetKeys.map(n).filter(finite);
     if (budget.length >= 2) {
-      const extreme=budget.reduce((a,b)=>a+Math.abs(b),0);
-      const rss=Math.sqrt(budget.reduce((a,b)=>a+b*b,0));
-      const rho=n('correlationFactor');
-      metrics.push({label:'WCCA Extreme(预算合成)',value:`±${extreme.toFixed(2)}%`,note:'CALCULATED · 预算项绝对值相加',tag:'CALCULATED'});
-      metrics.push({label:'WCCA RSS(独立假设)',value:`±${rss.toFixed(2)}%`,note:'CALCULATED · 假设输入误差项独立',tag:'CALCULATED'});
-      if (finite(rho) && rho >= 0 && rho <= 1) metrics.push({label:'相关性敏感RSS',value:`±${(rss*Math.sqrt(1+rho)).toFixed(2)}%`,note:'CALCULATED · 简化敏感性分析；正式签核需协方差矩阵',tag:'CALCULATED'});
+      const sumSq = budget.reduce((a, b) => a + b * b, 0);
+      const sumAbs = budget.reduce((a, b) => a + Math.abs(b), 0);
+      const extreme = sumAbs;
+      const rss = Math.sqrt(sumSq);
+      const rho = n('correlationFactor');
+
+      metrics.push({label:'WCCA Extreme(硬安全上界)',value:`±${extreme.toFixed(2)}%`,note:'CALCULATED · 预算项绝对值相加 (ρ=1 极端工况)',tag:'CALCULATED'});
+      metrics.push({label:'WCCA RSS(统计下界)',value:`±${rss.toFixed(2)}%`,note:'CALCULATED · 独立同方差假设 (ρ=0 理想统计)',tag:'CALCULATED'});
+      metrics.push({label:'WCCA 误差区间',value:`[±${rss.toFixed(2)}%, ±${extreme.toFixed(2)}%]`,note:'CALCULATED · 真实值落在区间内；硬安全门限必看 Extreme',tag:'CALCULATED'});
+
+      if (finite(rho) && rho >= 0 && rho <= 1) {
+        // 精确相关性合成式：Var = Σσᵢ² + ρ·((Σ|σᵢ|)² − Σσᵢ²)
+        const rssCorr = Math.sqrt(sumSq + rho * (sumAbs * sumAbs - sumSq));
+        metrics.push({
+          label:'相关性修正误差限 (精确二次型)',
+          value:`±${rssCorr.toFixed(2)}%`,
+          note:`CALCULATED · ρ=${rho} 精确合成；单一标量仅作敏感性扫描，硬安全门限严禁用非1相关系数直接放行`,
+          tag:'CALCULATED',
+        });
+      }
+
+      // 系统性漂移 (同号偏置线性累加) vs 随机离散项分离
+      const systematicKeys = ['tempDriftBudgetPct', 'agingDriftBudgetPct'];
+      const randomKeys = ['shuntTolerancePct', 'afeOffsetBudgetPct', 'adcRefDriftBudgetPct'];
+      const systematicTerms = systematicKeys.map(n).filter(finite);
+      const randomTerms = randomKeys.map(n).filter(finite);
+      if (systematicTerms.length > 0 && randomTerms.length > 0) {
+        const sysBias = systematicTerms.reduce((a, b) => a + Math.abs(b), 0);
+        const randSq = randomTerms.reduce((a, b) => a + b * b, 0);
+        const randAbs = randomTerms.reduce((a, b) => a + Math.abs(b), 0);
+        const randRss = Math.sqrt(randSq);
+        const randCorr = finite(rho) && rho >= 0 && rho <= 1
+          ? Math.sqrt(randSq + rho * (randAbs * randAbs - randSq))
+          : randRss;
+        const totalTripartite = sysBias + randCorr;
+        metrics.push({
+          label: '三段式综合误差限 (|ΣBias| + σ_rand)',
+          value: `±${totalTripartite.toFixed(2)}%`,
+          note: 'CALCULATED · 温漂/老化偏置线性累加 + 随机项合成，避免将同号系统性偏置错误平摊到RSS',
+          tag: 'CALCULATED',
+        });
+      }
     }
     const mean=n('sampleMeanPct'), sigma=n('sampleSigmaPct');
     if (finite(mean)&&finite(sigma)&&finite(lim)&&sigma>0) {
       const cpk=Math.min((lim-mean)/(3*sigma),(lim+mean)/(3*sigma));
-      metrics.push({label:'样本Cpk(对称规格)',value:cpk.toFixed(2),note:'CALCULATED · 基于输入样本均值/σ与规格限值',tag:'CALCULATED'});
+      metrics.push({label:'全样本制程能力 Ppk (常称Cpk)',value:cpk.toFixed(2),note:'CALCULATED · 基于全样本均值/σ；对称规格；小样本存在置信区间离散',tag:'CALCULATED'});
     }
     if (finite(raw)) metrics.push({label:'初始误差',value:`${raw}%`,note:noteFor('accuracyErrorPct'),tag:tagFor('accuracyErrorPct')});
     if (finite(hot)) metrics.push({label:'高温误差',value:`${hot}%`,note:noteFor('accuracyErrorHotPct'),tag:tagFor('accuracyErrorHotPct')});
