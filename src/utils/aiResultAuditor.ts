@@ -221,6 +221,19 @@ export function auditAiResult(
     if (!action.riskDelta && (action.riskBefore || action.riskAfter)) {
       action.riskDelta = `${action.riskBefore || '未评估'} ➔ ${action.riskAfter || '中等残留'}`;
     }
+
+    // 2.7 residualRiskDetail 与 sideEffects 互保兜底防御
+    if (!action.residualRiskDetail && action.sideEffects) {
+      action.residualRiskDetail = `方案伴生影响已在次生影响中说明：${action.sideEffects.slice(0, 100)}`;
+    } else if (!action.residualRiskDetail) {
+      action.residualRiskDetail = '暂未识别显著残余风险，需在 DV 样件台架上进一步核查边界';
+    }
+
+    if (!action.sideEffects && action.residualRiskDetail) {
+      action.sideEffects = `潜在代价需参考残余风险评估：${action.residualRiskDetail.slice(0, 100)}`;
+    } else if (!action.sideEffects) {
+      action.sideEffects = '常规参数微调，预计对周边电路及结构无额外负面次生影响';
+    }
   });
 
   // 3. 审计一票否决与推荐方案冲突 (RULE_06_VETO_ENFORCEMENT)

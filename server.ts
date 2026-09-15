@@ -158,9 +158,10 @@ async function callCustomOpenAIModel(
     modelLower.includes('r1') ||
     modelLower.includes('o1') ||
     modelLower.includes('o3') ||
-    modelLower.includes('thinking');
+    modelLower.includes('thinking') ||
+    modelLower.includes('-pro');
 
-  const timeoutMs = isReasoner ? 120000 : 55000;
+  const timeoutMs = isReasoner ? 150000 : 75000;
 
   const bodyPayload: Record<string, any> = {
     model: config.model,
@@ -169,6 +170,12 @@ async function callCustomOpenAIModel(
       { role: 'user', content: prompt },
     ],
   };
+
+  // 绝大多数 OpenAI 兼容端点（DeepSeek, 通义千问, GLM, Moonshot, 硅基流动等）支持 response_format
+  // 强制返回合法 JSON object，从协议层逼出严格 JSON，减少 markdown 干扰
+  if (!isReasoner) {
+    bodyPayload.response_format = { type: 'json_object' };
+  }
 
   // 某些特定推理模型禁止传递 temperature 参数
   if (!isReasoner && typeof config.temperature === 'number') {
@@ -232,15 +239,27 @@ async function callGeminiModel(
   const ai = new GoogleGenAI({ apiKey });
   const modelName = config.model?.trim() || 'gemini-2.5-flash';
 
-  const response = await ai.models.generateContent({
-    model: modelName,
-    contents: prompt,
-    config: {
-      systemInstruction: systemPrompt,
-      responseMimeType: 'application/json',
-      temperature: typeof config.temperature === 'number' ? config.temperature : 0.2,
-    },
-  });
+  const isSlowGemini = modelName.toLowerCase().includes('pro') || modelName.toLowerCase().includes('thinking');
+  const timeoutMs = isSlowGemini ? 150000 : 75000;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: modelName,
+      contents: prompt,
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: 'application/json',
+        temperature: typeof config.temperature === 'number' ? config.temperature : 0.2,
+        abortSignal: controller.signal,
+      },
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   const content = response.text;
   if (!content) {
@@ -296,10 +315,12 @@ async function queryModelWithResilience(
     // 触发单次 JSON 语法修复重问 (待办 5.2)
     retryCount++;
     console.warn(`JSON 解析失败 (${parseErr.message})，发起单次语法自愈修复重试...`);
-    const fixPrompt = `上一轮输出未能通过 JSON.parse 标准解析。解析错误信息: ${parseErr.message}。
-原始输出片段:
-${rawContent.slice(0, 800)}...
-【紧急要求】：请严格将其修正为合法规范的单个纯 JSON 对象，输出纯 JSON 字符串，绝对不要包裹 markdown 代码块，不要添加任何说明文字：`;
+    const fixPrompt = `你上一次的输出未能通过 JSON.parse 标准解析，解析错误信息: ${parseErr.message}。
+你上一次的原始输出如下（可能包含多余文字、未闭合括号、被截断或使用了非法转义）：
+---
+${rawContent.slice(0, 8000)}
+---
+【紧急要求】：请只输出修正后的合法纯 JSON 对象本身：不要包含任何 Markdown 代码块标记（如 \`\`\`json）、不要包含任何前言或解释文字、不要改变原有字段的实质内容，只修正 JSON 语法结构本身：`;
 
     let healedRaw = '';
     if (isGemini) {
@@ -534,7 +555,7 @@ app.post('/api/copilot/assess-input', (req, res) => {
 app.post('/api/copilot/analyze', async (req, res) => {
   const startTime = Date.now();
   try {
-    const { context, issue, modelConfig } = req.body;
+    const { context, issue, modelConfig, customAiResponse } = req.body;
 
     // 1. 预先执行输入完整度审计评估 (第一层防线)
     const integrityAssessment = assessInputIntegrity(context, issue);
@@ -836,7 +857,24 @@ Return a single JSON object with these exact keys:
       modelConfig.enabled &&
       (modelConfig.provider === 'gemini' || (modelConfig.model && modelConfig.model.toLowerCase().includes('gemini')));
 
-    if (isGeminiConfigured || isCustomModelConfigured) {
+    if (customAiResponse) {
+      try {
+        const parsed = typeof customAiResponse === 'string' ? JSON.parse(customAiResponse) : customAiResponse;
+        usedSource = 'injected-ai:custom-evaluation';
+        modelNameUsed = 'evaluator-ai';
+        finalData = validateAndEnrichAiResult(
+          parsed,
+          baseline,
+          'evaluator-ai',
+          context,
+          issue,
+          integrityAssessment
+        );
+      } catch (injectedErr: any) {
+        console.warn('解析注入的 AI 响应失败，使用基线:', injectedErr.message);
+        finalData = runExpertAnalysis(context, issue);
+      }
+    } else if (isGeminiConfigured || isCustomModelConfigured) {
       try {
         const { rawContent, parsed, retryCount } = await queryModelWithResilience(
           modelConfig,

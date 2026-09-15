@@ -28,6 +28,8 @@ import {
   ListChecks,
   DollarSign,
   Wrench,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface DecisionCockpitViewProps {
@@ -61,6 +63,13 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
 
   // 4.1 SOP 倒计时 / 节点剩余天数状态 (默认 14 天激活临界模式)
   const [remainingDays, setRemainingDays] = useState<number>(daysRemaining);
+
+  // 5大重型辅助分析模块默认折叠状态（降低视觉复杂度，按需点开）
+  const [isLeadStyleOpen, setIsLeadStyleOpen] = useState<boolean>(false);
+  const [isRiskBreakdownOpen, setIsRiskBreakdownOpen] = useState<boolean>(false);
+  const [isWhyNotOpen, setIsWhyNotOpen] = useState<boolean>(false);
+  const [isEconRiskOpen, setIsEconRiskOpen] = useState<boolean>(false);
+  const [is24HourPlanOpen, setIs24HourPlanOpen] = useState<boolean>(false);
 
   // 响应父组件工况切换与属性变化
   React.useEffect(() => {
@@ -185,7 +194,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
 
         {/* 4.2 直属领导处理风格注入控制卡 (M_lead Multiplier) */}
         <div className="mb-4 bg-slate-850 border border-slate-700/80 rounded-xl p-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
             <div className="flex items-center space-x-2">
               <UserCheck className="w-5 h-5 text-amber-400" />
               <div>
@@ -197,93 +206,105 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                 </span>
               </div>
             </div>
-            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-950 border border-blue-800 text-blue-300 self-start sm:self-auto">
-              当前加权模型: {currentLeadStyle === 'CONSERVATIVE' ? '技术求稳 (严禁低裕量)' : currentLeadStyle === 'AGILE_DELIVERY' ? '敏捷交付 (抗拒改版)' : '流程免责 (外部会签)'}
-            </span>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-950 border border-blue-800 text-blue-300">
+                当前: {currentLeadStyle === 'CONSERVATIVE' ? '技术求稳 (严禁低裕量)' : currentLeadStyle === 'AGILE_DELIVERY' ? '敏捷交付 (抗拒改版)' : '流程免责 (外部会签)'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsLeadStyleOpen(!isLeadStyleOpen)}
+                className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition cursor-pointer"
+              >
+                {isLeadStyleOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                <span>{isLeadStyleOpen ? '收起配置' : '切换风格'}</span>
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-            {/* 1. 技术求稳型 */}
-            <button
-              type="button"
-              onClick={() => handleStyleSelect('CONSERVATIVE')}
-              className={`p-3 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
-                currentLeadStyle === 'CONSERVATIVE'
-                  ? 'bg-blue-950/50 border-blue-500 text-white ring-1 ring-blue-500/50'
-                  : 'bg-slate-900/60 border-slate-700/60 text-slate-400 hover:border-slate-600'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-bold flex items-center text-xs">
-                  <ShieldAlert className="w-3.5 h-3.5 mr-1.5 text-blue-400" />
-                  🛡️ 技术求稳型 (Quality First)
-                </span>
-                {currentLeadStyle === 'CONSERVATIVE' && (
-                  <span className="text-[10px] text-blue-400 font-bold">● 已激活</span>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-300 leading-snug">
-                极度在乎裕量与部门声誉。宁可让项目稍微推迟 2 周，也绝不接受降额贴线或带病特采。
-              </p>
-              <div className="mt-2 pt-1.5 border-t border-slate-700/40 text-[10px] text-blue-300">
-                <span>乘数: 彻底根治方案 ×1.15 | 带病特采 ×0.7</span>
-              </div>
-            </button>
+          {isLeadStyleOpen && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs mt-3 pt-3 border-t border-slate-800">
+              {/* 1. 技术求稳型 */}
+              <button
+                type="button"
+                onClick={() => handleStyleSelect('CONSERVATIVE')}
+                className={`p-3 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
+                  currentLeadStyle === 'CONSERVATIVE'
+                    ? 'bg-blue-950/50 border-blue-500 text-white ring-1 ring-blue-500/50'
+                    : 'bg-slate-900/60 border-slate-700/60 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold flex items-center text-xs">
+                    <ShieldAlert className="w-3.5 h-3.5 mr-1.5 text-blue-400" />
+                    🛡️ 技术求稳型 (Quality First)
+                  </span>
+                  {currentLeadStyle === 'CONSERVATIVE' && (
+                    <span className="text-[10px] text-blue-400 font-bold">● 已激活</span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-300 leading-snug">
+                  极度在乎裕量与部门声誉。宁可让项目稍微推迟 2 周，也绝不接受降额贴线或带病特采。
+                </p>
+                <div className="mt-2 pt-1.5 border-t border-slate-700/40 text-[10px] text-blue-300">
+                  <span>乘数: 彻底根治方案 ×1.15 | 带病特采 ×0.7</span>
+                </div>
+              </button>
 
-            {/* 2. 敏捷交付型 */}
-            <button
-              type="button"
-              onClick={() => handleStyleSelect('AGILE_DELIVERY')}
-              className={`p-3 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
-                currentLeadStyle === 'AGILE_DELIVERY'
-                  ? 'bg-emerald-950/50 border-emerald-500 text-white ring-1 ring-emerald-500/50'
-                  : 'bg-slate-900/60 border-slate-700/60 text-slate-400 hover:border-slate-600'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-bold flex items-center text-xs">
-                  <Zap className="w-3.5 h-3.5 mr-1.5 text-emerald-400" />
-                  🚀 敏捷交付型 (Delivery First)
-                </span>
-                {currentLeadStyle === 'AGILE_DELIVERY' && (
-                  <span className="text-[10px] text-emerald-400 font-bold">● 已激活</span>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-300 leading-snug">
-                以保交付为第一要务。只要台架测过，优先在内部用软件或原位贴片消化，极力抗拒改版。
-              </p>
-              <div className="mt-2 pt-1.5 border-t border-slate-700/40 text-[10px] text-emerald-300">
-                <span>乘数: 原位吸收/软件 ×1.2 | PCB 改版 ×0.65</span>
-              </div>
-            </button>
+              {/* 2. 敏捷交付型 */}
+              <button
+                type="button"
+                onClick={() => handleStyleSelect('AGILE_DELIVERY')}
+                className={`p-3 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
+                  currentLeadStyle === 'AGILE_DELIVERY'
+                    ? 'bg-emerald-950/50 border-emerald-500 text-white ring-1 ring-emerald-500/50'
+                    : 'bg-slate-900/60 border-slate-700/60 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold flex items-center text-xs">
+                    <Zap className="w-3.5 h-3.5 mr-1.5 text-emerald-400" />
+                    🚀 敏捷交付型 (Delivery First)
+                  </span>
+                  {currentLeadStyle === 'AGILE_DELIVERY' && (
+                    <span className="text-[10px] text-emerald-400 font-bold">● 已激活</span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-300 leading-snug">
+                  以保交付为第一要务。只要台架测过，优先在内部用软件或原位贴片消化，极力抗拒改版。
+                </p>
+                <div className="mt-2 pt-1.5 border-t border-slate-700/40 text-[10px] text-emerald-300">
+                  <span>乘数: 原位吸收/软件 ×1.2 | PCB 改版 ×0.65</span>
+                </div>
+              </button>
 
-            {/* 3. 流程免责型 */}
-            <button
-              type="button"
-              onClick={() => handleStyleSelect('PROCESS_DEFENSIVE')}
-              className={`p-3 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
-                currentLeadStyle === 'PROCESS_DEFENSIVE'
-                  ? 'bg-amber-950/50 border-amber-500 text-white ring-1 ring-amber-500/50'
-                  : 'bg-slate-900/60 border-slate-700/60 text-slate-400 hover:border-slate-600'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-bold flex items-center text-xs">
-                  <Scale className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
-                  ⚖️ 流程免责型 (Boundary First)
-                </span>
-                {currentLeadStyle === 'PROCESS_DEFENSIVE' && (
-                  <span className="text-[10px] text-amber-400 font-bold">● 已激活</span>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-300 leading-snug">
-                极度注重权责划分。外部诱因坚决踢球发起外部 ECR 要资源，绝不让硬件单方面背锅。
-              </p>
-              <div className="mt-2 pt-1.5 border-t border-slate-700/40 text-[10px] text-amber-300">
-                <span>乘数: 外部会签/ECR ×1.25 | 硬件单方背锅 ×0.5</span>
-              </div>
-            </button>
-          </div>
+              {/* 3. 流程免责型 */}
+              <button
+                type="button"
+                onClick={() => handleStyleSelect('PROCESS_DEFENSIVE')}
+                className={`p-3 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
+                  currentLeadStyle === 'PROCESS_DEFENSIVE'
+                    ? 'bg-amber-950/50 border-amber-500 text-white ring-1 ring-amber-500/50'
+                    : 'bg-slate-900/60 border-slate-700/60 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold flex items-center text-xs">
+                    <Scale className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
+                    ⚖️ 流程免责型 (Boundary First)
+                  </span>
+                  {currentLeadStyle === 'PROCESS_DEFENSIVE' && (
+                    <span className="text-[10px] text-amber-400 font-bold">● 已激活</span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-300 leading-snug">
+                  极度注重权责划分。外部诱因坚决踢球发起外部 ECR 要资源，绝不让硬件单方面背锅。
+                </p>
+                <div className="mt-2 pt-1.5 border-t border-slate-700/40 text-[10px] text-amber-300">
+                  <span>乘数: 外部会签/ECR ×1.25 | 硬件单方背锅 ×0.5</span>
+                </div>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* 4.1 SOP 倒计时临界模式动态指示卡 */}
@@ -446,23 +467,39 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
         const veri = mb.verificationGap || mb.verificationRisk || { level: 'Low', score: 35, description: '台架验证覆盖度良好', unverifiedPoints: ['温升与瞬态复测'] };
 
         return (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
-                  <ShieldAlert className="w-4 h-4 mr-2 text-rose-400" />
-                  去黑箱化多维工程风险解构 (P0 级第二支柱：杜绝模糊综合分掩盖致命单点)
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center flex-wrap gap-2">
+                  <span className="flex items-center">
+                    <ShieldAlert className="w-4 h-4 mr-2 text-rose-400" />
+                    去黑箱化多维工程风险解构 (5维风险穿透)
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
+                    车规专家规则引擎 · 确定性底盘 (非AI生成)
+                  </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  严防“平均分 65”蒙混过关。芯片 SOA 越界、耐压击穿或客户 CSA 违约等致命硬伤坚决独立亮红，绝不与低成本相抵消。
+                  严防“平均分 65”蒙混过关。芯片 SOA 越界、耐压击穿等致命硬伤坚决独立亮红，绝不与低成本相抵消。
                 </p>
               </div>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-300 self-start sm:self-auto">
-                5 维硬件工程风险穿透
-              </span>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-300">
+                  裕量:{tech.score} | 应力:{reli.score} | 周期:{sched.score}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsRiskBreakdownOpen(!isRiskBreakdownOpen)}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition cursor-pointer"
+                >
+                  {isRiskBreakdownOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <span>{isRiskBreakdownOpen ? '收起详情' : '展开5维风险'}</span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
+            {isRiskBreakdownOpen && (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs mt-4 pt-4 border-t border-slate-800">
               {/* 1. 技术裕量 */}
               <div className="bg-slate-850 border border-slate-700/70 rounded-lg p-3 space-y-2">
                 <div className="flex items-center justify-between">
@@ -583,9 +620,10 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                 </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          )}
+        </div>
+      );
+    })()}
 
       {/* 2. C-T-S-Q-L Score Table & Ranking */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -887,23 +925,39 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
             ];
 
         return (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
-                  <Scale className="w-4 h-4 mr-2 text-indigo-400" />
-                  措施决策理由显性化 (P0 级第三支柱：为什么选推荐方案 vs 为什么不选 A/C)
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center flex-wrap gap-2">
+                  <span className="flex items-center">
+                    <Scale className="w-4 h-4 mr-2 text-indigo-400" />
+                    措施决策理由显性化 (为什么推荐 B 而不选 A/C 三栏对比)
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
+                    车规专家规则引擎 · 确定性底盘 (非AI生成)
+                  </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   向管理层与主机厂评审答辩时的“护身符”：清晰呈现权衡代价、否决硬因与备选方案重启条件。
                 </p>
               </div>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-950 border border-indigo-800 text-indigo-300 self-start sm:self-auto">
-                评审答辩三栏对比
-              </span>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-950 border border-indigo-800 text-indigo-300">
+                  三栏反证法
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsWhyNotOpen(!isWhyNotOpen)}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition cursor-pointer"
+                >
+                  {isWhyNotOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <span>{isWhyNotOpen ? '收起对比' : '展开三栏对比'}</span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            {isWhyNotOpen && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs mt-4 pt-4 border-t border-slate-800">
               {whyNotList.map((item: any, idx: number) => {
                 const isRec = item.isRecommended;
                 const isVeto = item.vetoTriggered || (!isRec && idx === 2);
@@ -970,9 +1024,10 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                 );
               })}
             </div>
-          </div>
-        );
-      })()}
+          )}
+        </div>
+      );
+    })()}
 
       {/* Section 11: 领导视角：项目经济风险 (Technical Risk x Business Impact) */}
       {(() => {
@@ -981,8 +1036,8 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
         const econRisk = evaluateLeadershipEconomicRisk(hasVeto, remainingDays);
 
         return (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
                   <DollarSign className="w-4 h-4 mr-2 text-amber-400" />
@@ -992,12 +1047,23 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                   将底层技术风险直接映射至质保索赔、召回曝光、停线违约与改板研发成本，助力高层决策。
                 </p>
               </div>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 self-start sm:self-auto font-bold">
-                {econRisk.financialDataNotice} (严禁伪造确定财务数据)
-              </span>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold">
+                  {econRisk.financialDataNotice}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsEconRiskOpen(!isEconRiskOpen)}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition cursor-pointer"
+                >
+                  {isEconRiskOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <span>{isEconRiskOpen ? '收起指标' : '展开经济风险'}</span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+            {isEconRiskOpen && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs mt-4 pt-4 border-t border-slate-800">
               <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
                 <div className="text-slate-400 text-[11px] mb-1">质保返修敞口 (Warranty Risk)</div>
                 <div className="text-amber-300 font-medium">{econRisk.warrantyCost}</div>
@@ -1028,9 +1094,10 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                 <div className="text-slate-200 font-mono">{econRisk.engineeringHours}</div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          )}
+        </div>
+      );
+    })()}
 
       {/* P0-4: 未来 24 小时执行时刻表与三色量化放行标准 (Next 24-Hour Plan & Pass/Fail Criteria) */}
       {result.next24HourPlan && (() => {
@@ -1041,23 +1108,39 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
         const redHardStop = plan.passCriteria?.redHardStop || plan.passFailCriteria?.[0]?.redCriteria || '坚决熔断，禁止出货，启动保守方案 PCB 打板改版。';
 
         return (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
-                  <Clock className="w-4 h-4 mr-2 text-cyan-400" />
-                  未来 24 小时攻关行动时刻表 (P0 级第四支柱：量化执行与三色判定门禁)
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center flex-wrap gap-2">
+                  <span className="flex items-center">
+                    <Clock className="w-4 h-4 mr-2 text-cyan-400" />
+                    未来 24 小时攻关行动时刻表 (量化执行与三色门禁)
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
+                    车规专家规则引擎 · 确定性底盘 (非AI生成)
+                  </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   拒绝空泛建议，按小时级节奏推进物理台架测试、交叉复核与量化门禁决策。
                 </p>
               </div>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800 text-cyan-300 self-start sm:self-auto">
-                24h 应急战役计划
-              </span>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800 text-cyan-300">
+                  {timelineList.length} 阶段节点
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIs24HourPlanOpen(!is24HourPlanOpen)}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition cursor-pointer"
+                >
+                  {is24HourPlanOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <span>{is24HourPlanOpen ? '收起计划' : '展开24h计划'}</span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {is24HourPlanOpen && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-4 pt-4 border-t border-slate-800">
               {/* Left: Hour-by-Hour Timeline */}
               <div className="lg:col-span-2 space-y-3">
                 <span className="text-xs font-bold text-slate-300 block uppercase tracking-wider">
@@ -1161,9 +1244,10 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                 </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          )}
+        </div>
+      );
+    })()}
     </div>
   );
 };

@@ -173,9 +173,14 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
           <div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
-              <ShieldCheck className="w-4 h-4 mr-2 text-blue-400" />
-              严谨信息类型分类审查 (P0 级第一原则：绝不把假设当事实)
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center flex-wrap gap-2">
+              <span className="flex items-center">
+                <ShieldCheck className="w-4 h-4 mr-2 text-blue-400" />
+                严谨信息类型分类审查 (P0 级第一原则：绝不把假设当事实)
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
+                车规专家规则引擎 · 确定性底盘 (非AI生成)
+              </span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               强制标识实测值、规范限值、物理计算、工程假设与未知盲区，杜绝“没有证据假装确定”。
@@ -316,8 +321,11 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
             <div className="flex items-center space-x-2">
               <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0" />
-              <h4 className="text-sm font-bold text-white tracking-wide">
-                红队逆向质疑与盲区审计 (Red Team Audit Challenge)
+              <h4 className="text-sm font-bold text-white tracking-wide flex items-center gap-2 flex-wrap">
+                <span>红队逆向质疑与盲区审计 (Red Team Audit Challenge)</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
+                  车规专家规则引擎 · 确定性底盘 (非AI生成)
+                </span>
               </h4>
             </div>
             <div className="flex items-center space-x-2 text-xs font-mono">

@@ -1,0 +1,300 @@
+
+你必须严格基于以下【输入工况】、【实测数据】与【本地确定性预核算事实】进行硬件工程决策推演，绝不脱离实际随意作答：
+
+=============================================
+【1. 输入工程背景 (PROJECT CONTEXT)】
+- 项目名称: 800V-SiC-TractionInverter-Gen1
+- ECU 类型: Dual-Core Lockstep MCU + Isolated Gate Driver + 1200V SiC Power Module + Resolver AFE (High-Voltage Electric Drive Traction Inverter (220kW))
+- 项目阶段: DV | 样品状态: DV pre-series vehicle-level inverter samples
+- 功能安全等级: ASIL D
+- 交付倒计时: 距离【Vehicle Winter Calibration Sign-off】仅剩【10天】
+- 成本约束: No hardware respin before winter calibration; BOM impact must be <= $0.50
+- 直属硬件领导风格: PROCESS_DEFENSIVE
+
+【2. 输入实测问题与工程顾虑 (ENGINEERING ISSUE)】
+- 主导工程领域: 【Power Integrity】
+- 涉及工程领域: 【Power Integrity / EMC / RE · CE / Signal Integrity / Functional Safety】
+- 关联工程领域: 【EMC / RE · CE / Signal Integrity / Functional Safety】
+- 领域分类: Power, EMC, Signal Integrity, Functional Safety
+- 规范要求: 1. 800V 母线工况下 SiC 开关产生高 dv/dt 不得耦合干扰旋变解码信号，转子角度抖动必须严格控制在 <= ±3.8° 以内；2. 故障诊断响应时间必须严格满足 ASIL D FTTI (<= 5ms)；3. 严禁在急加速工况误触发三相主动短路 (ASC) 紧急制动。
+- 实际测量结果: 1. 800V 母线、450A 大扭矩急加速时，SiC 开关 dv/dt 达到 36V/ns；2. 高频共模电流经定转子 380pF 寄生杂散电容流经壳体地，在旋变差分回授 SIN/COS 线上感应出 1.8Vpp 60MHz 衰减振铃共模噪声；3. 旋变数字转换芯片 (RDC) 跟踪鉴相环瞬时失步，角度估算产生 5.2° 剧烈抖动 (突破 ASIL D 3.8° 安全门限)，控制器在 4.2ms 内紧急触发 ASC 主动短路三相制动，整车产生严重顿挫。
+- 测试条件: 800V 直流母线，450A 相电流峰值，逆变器输出频率 0~600Hz，3.5m 高压三相屏蔽电缆，电机壳体接地阻抗 12mΩ
+- 测试环境: 整车动力总成台架实验室，环境温度 40℃，冷却液流量 12L/min
+- 失效现象: 百公里急加速深踩油门测试中，偶发整车剧烈机械顿挫，仪表盘报高压驱动系统故障码，逆变器记录 DTC 旋变信号丢失与 ASC 触发事件，无法达到整车标定通过要求。
+- 核心工程顾虑: 距离冬季标定仅剩 10 天。若在 SiC 驱动极串大栅极电阻 Rg 降低 dv/dt，则开关损耗激增 45% 导致结温超 155℃ 烧结；若软件拉大滤波时间窗或关小故障诊断，则无法在 5ms FTTI 内识别真实旋变硬件断线，面临 ISO 26262 ASIL D 法律红线。急需高频共模扼流抑制、差分共模滤波与锁相环容错的跨域精准闭环。
+- 关键实测数值: {
+  "busVoltageNominalV": 800,
+  "busVoltagePeakV": 840,
+  "dvdtVns": 36,
+  "currentPeakA": 450,
+  "strayCapacitancePf": 380,
+  "commonModeNoiseVpp": 1.8,
+  "noiseFrequencyMhz": 60,
+  "resolverAngleJitterDeg": 5.2,
+  "maxAllowedJitterDeg": 3.8,
+  "fttiLimitMs": 5,
+  "actualTripTimeMs": 4.2
+}
+
+【2.0 本地确定性数学物理预核算事实 (NON-NEGOTIABLE FACTS)】
+- 【急停母线倒灌理论泵升计算】V_bus_peak (理论峰值) = 297.6 V (规范门限: 40 V (器件耐压上限)，安全裕量: -257.6 V，合规性: CRITICAL)。
+  理论核算依据: Ek=0.5*J*w^2 ➔ V_peak = sqrt(V_nom^2 + 2*E_regen/Cbus)。
+  ★ 必须执行的引用指令: 急停理论泵升峰值经动能平衡方程核算为 297.6V（耐压裕量 -257.6V）。模型方案必须严格引用此理论值与实测值，严禁自行臆造其他泵升峰值。
+- 【米勒电容瞬态门极感应抬升计算】V_gs_induced (感应尖峰) = 16.2 V (规范门限: 2.0 V (Vth_min 门极导通阈值)，安全裕量: -14.20 V，合规性: CRITICAL)。
+  理论核算依据: Vgs_induced = Rg_pulldown * Cgd * (dv/dt)。
+  ★ 必须执行的引用指令: 在 dv/dt=36V/ns 工况下，门极感应抬升计算值为 16.20V（安全裕量 -14.20V）。已击穿 Vth 门槛，存在上下桥微直通硬性风险，必须采取有源钳位或减小关断电阻对策！
+- 【功率器件稳态结温与车规降额裕量推演】Tj_est (估计稳态结温) = 177.4 ℃ (规范门限: 150.0 ℃ (车规 80% 降额安全上限)，安全裕量: -27.4 ℃，合规性: CRITICAL)。
+  理论核算依据: Tj = Tc + P_loss * Rth(j-c) (AEC-Q101 降额标准)。
+  ★ 必须执行的引用指令: 稳态结温经热阻链推演约为 177.4℃，降额安全裕量为 -27.4℃。已击穿车规 150℃ 降额上限，必须有一票否决或紧急增加厚铜/导热垫对策！
+★ 核心准则：以上数值由本地经过车规方程标定的物理引擎计算所得。模型输出必须直接引用并以此作为事实锚点，严禁另造冲突数值！
+
+【2.1 输入数据完整度车规审计等级与强约束】
+【输入完整度车规审计等级】：C级 · 关键证据欠缺 (量化评分: 61/100)
+
+⚠️ 严正警告：本次输入在【Power Integrity】工程域缺少以下必填实测参数：
+  - EMC峰值 (emcPeakDb [dBμV/m])
+  - EMC限值 (emcLimitDb [dBμV/m])
+  - 问题频点 (emcFrequencyMhz [MHz])
+  - 测试距离 (testDistanceM [m])
+  - 总线速率 (busRateMbps [Mbps])
+
+【强制纪律】：你绝对禁止将上述未填写的参数虚构为“已实测数值”，在候选方案与物理机理推导中，必须显式标注“因缺少实测 [参数名]，此处基于车规工程假设推导，属于待台架闭环确认项”。
+
+🔴【C级约束】：由于关键证据欠缺，你不得在 finalRecommendation 中宣称“根因已 100% 锁定”，必须在 immediateSteps 中将“补齐上述关键测点实测波形”列为第 1 优先级前置步骤。
+
+【2.2 本次输入中未提供的工程参数（必须视为 UNKNOWN，严禁假设默认值替代）】
+- powerOvershootPeakV（负载突变正向过冲峰值，单位 V，MEASURED）
+- powerUndershootMinV（负载突变跌落最低值，单位 V，MEASURED）
+- loadStepA（负载阶跃，单位 A，MEASURED）
+- riseTimeUs（阶跃边沿，单位 μs，MEASURED）
+- inputVoltageV（输入电压，单位 V，CONTEXT）
+- emcPeakDb（EMC峰值，单位 dBμV/m，MEASURED，必填缺失）
+- emcLimitDb（EMC限值，单位 dBμV/m，SPEC，必填缺失）
+- emcFrequencyMhz（问题频点，单位 MHz，MEASURED，必填缺失）
+- commonModeCurrentMa（共模电流，单位 mA，MEASURED）
+- pwmFrequencyKhz（PWM频率，单位 kHz，CONTEXT）
+- harnessLengthM（线束长度，单位 m，CONTEXT）
+- testDistanceM（测试距离，单位 m，CONTEXT，必填缺失）
+- busRateMbps（总线速率，单位 Mbps，CONTEXT，必填缺失）
+- overshootPct（过冲，单位 %，MEASURED）
+- ringingV（振铃，单位 V，MEASURED）
+- frameErrorRate（错误帧率，MEASURED）
+- fttiBudgetMs（FTTI预算，单位 ms，SPEC）
+- detectionTimeMs（检测时间，单位 ms，MEASURED）
+- reactionTimeMs（反应时间，单位 ms，MEASURED）
+
+【2.3 按工程域拆分的实测证据浓度（用于校准 domainAssessments.evidenceLevel）】
+【主导域 · Power Integrity】已填：无；未填：powerOvershootPeakV, powerUndershootMinV, loadStepA, riseTimeUs, inputVoltageV
+【涉及域 · EMC / RE · CE】已填：dvdtVns=36；未填：emcPeakDb, emcLimitDb, emcFrequencyMhz, commonModeCurrentMa, pwmFrequencyKhz, harnessLengthM, testDistanceM
+【涉及域 · Signal Integrity】已填：无；未填：busRateMbps, harnessLengthM, overshootPct, ringingV, frameErrorRate
+【涉及域 · Functional Safety】已填：无；未填：fttiBudgetMs, detectionTimeMs, reactionTimeMs
+
+【3. 多工程域物理与推演规约 (权重智能裁剪版)】
+【主导工程领域：车规 BLDC 电机驱动功率级与反电势过压泵升】(分配完整物理机理链)
+- 核心物理公式与因果推导:
+- 电机反电势机械动能泵升能量: E_k = 0.5 * J * ω^2 (J为转子转动惯量 kg·m²，ω为角速度 rad/s)
+- 母线电容压升估算: ΔV = sqrt( V_0^2 + (2 * E_k / C_bus) ) - V_0
+- 功率管关断电压尖峰: V_spike = L_loop * (di/dt) (L_loop 为 DC-Link 高频去耦回路寄生电感)
+- 主动短路 (ASC) 最大短路冲击电流: I_sc_peak = (sqrt(2) * E_bemf) / sqrt( R_s^2 + (ω * L_s)^2 )
+- 门极米勒直通尖峰: V_gs_induced = ( C_gd / (C_gd + C_gs) ) * ΔV_ds (当 V_gs_induced > V_th 时引发致命上下桥臂直通短路)
+- 车规元器件成熟选型基准:
+- 母线高能 TVS 吸收管: DO-218AB 封装 6600W (如 Vishay SM8S36A 或 Littelfuse SLD 系列)，反向关断电压 Vrwm (24V~36V)，单体脉冲吸收能力强；
+- DC-Link 去耦电容组合: 多个 10μF 100V X7R 1210 陶瓷贴片电容紧贴 H 桥 MOS 引脚，并联大容量低 ESR 车规固态铝电解 (如 470μF 63V)；
+- 功率 MOSFET: 选用低内阻车规 MOS (如 Infineon OptiMOS 5 系列或 Nexperia TrenchMOS)，Vds 耐压预留充足降额 (48V 系统推荐选 80V/100V 耐压，12V 系统推荐 40V/60V 耐压)；
+- 驱动栅极电阻: 采用不对称充放电驱动网络 (开通 Rg_on = 10Ω ~ 22Ω 抑制开关 dv/dt 辐射，关断 Rg_off = 2.2Ω ~ 4.7Ω 配反向二极管强化关断抗米勒直通)。
+- 专业测试仪器与台架测量规程:
+- 示波器抓波规范: 带宽 ≥ 500MHz 示波器 + 高压差分探头或同轴接地弹簧探头 (严禁使用长鳄鱼接地夹)；
+- 测点位置: Phase-U/V/W 开关节点相对功率地 PGND、下桥 MOSFET Gate-Source 极间、母线电容两端；
+- 触发配置: 单次触发 (Single Trigger)，门限设为标称供电的 115%，采样率 ≥ 2.5GS/s，时基 500ns/div ~ 2μs/div；
+- 极限测试工况: 全转速极限急停 (Coast/Brake switch)、相间短路、电机堵转与高温舱内反向拖动；
+- 合格判据: 母线瞬态峰值绝对禁止超过 MOSFET 额定耐压的 90% (留出 10% 安全降额)，门极关断异常正尖峰必须 < Vth_min (通常 < 1.5V)。
+- 跨专业协同要求:
+- 软件控制标定: 协同电机算法工程师标定全下桥 ASC (Active Short Circuit) 刹车或采用斜坡减速 (Ramp-down braking)，将制动动能转化为电机定子铜损耗，避免回灌母线；
+- 硬件工期决策: PCB 改版打样需 18~25 天，若离 DV 装车仅剩不足 14 天，优先通过原位并联高能 TVS + 软件注入减速算法闭环。
+- 严格禁止的模糊空话清单:
+  * 严禁只写“加吸收电路”，必须写出 TVS 峰值功率、击穿电压区间及具体封装料号；
+  * 严禁忽视米勒电容 Cgd 引起的高速开关直通风险。
+
+【强/弱相关领域：车规 EMC 辐射发射 (RE) / 传导骚扰 (CE) [CISPR 25 Class 5]】(聚焦跨域耦合与否决边界，防止篇幅发散)
+- 跨域耦合物理影响: - 软件协同: 确认能否通过底层 MCU 寄存器开启主控开关时钟展频 (SSCG, ±2.5% 调制深度)，或修改 PWM 开关频率将谐波避开敏感无线电广播/通讯频段；
+- 结构协同: 评估壳体搭铁阻抗 (要求 ECU 外壳到整车车身接地电阻 < 2mΩ)，屏蔽罩卡扣接触阻抗；
+- PM 汇报: 改版 PCB 调整地回路通常需 20 天，若工期仅剩少于 14 天，优先通过线束磁环套管或贴片原位加大磁珠阻抗 + 软件展频联合闭环。
+- 关联否决条件与防穿透红线: 必须确保在主导领域实施的对策不会突破本领域的器件额定耐压、温升限值或一票否决安全裕量！
+
+【强/弱相关领域：高速信号完整性 (SI) 与车规车载通信 [CAN-FD / 100BASE-T1 / SPI]】(聚焦跨域耦合与否决边界，防止篇幅发散)
+- 跨域耦合物理影响: - 软件配置: 优化 CAN 控制器位时序寄存器配置，微调采样点位置 (Sample Point 从 80% 调整为 75% 或 70%) 以避开传输线反射振铃区；
+- 硬件规避: 严禁软件直接降速到 500kbps 传统 CAN 作为永久方案，必须彻底解决物理层硬件阻抗匹配。
+- 关联否决条件与防穿透红线: 必须确保在主导领域实施的对策不会突破本领域的器件额定耐压、温升限值或一票否决安全裕量！
+
+【强/弱相关领域：车规功能安全 (Functional Safety) [ISO 26262 ASIL-B / ASIL-D]】(聚焦跨域耦合与否决边界，防止篇幅发散)
+- 跨域耦合物理影响: - 软件架构: 编写安全机制诊断处理程序 (Safety Mechanism)，配合硬件定时喂狗与 RAM/ROM 自检；
+- 系统工程师: 协同更新安全概念 (FSC) 与技术安全要求 (TSR)；
+- 汇报红线: 若硬件修改导致原功能安全诊断时序破坏，必须立即启动 Safety Manager 联合评审。
+- 关联否决条件与防穿透红线: 必须确保在主导领域实施的对策不会突破本领域的器件额定耐压、温升限值或一票否决安全裕量！
+
+【3.1 跨工程域物理耦合规则库 (CROSS-DOMAIN COUPLING MATRIX)】
+- 【BLDC ➔ EMC_RE_CE】触发动作：减小 Rg_off（如 10Ω 降至 2.2Ω）或启用低阻下拉 ➔ 物理量变化：开关瞬态 dv/dt 和 di/dt 显著激增（>8V/ns），激发体二极管反向恢复震荡谐波 ➔ 权衡代价：减小关断电阻 Rg 或加剧死区虽抑制米勒直通，但直接恶化 CISPR 25 辐射发射 ➔ 必须复核项：CISPR 25 Class 5 30MHz-108MHz FM 频段全向天线辐射发射; 示波器高阻探头以接地弹簧实测开关节点真实 dv/dt 与 Vds 过冲峰值; 相线高频共模电流扼流圈发热与共模衰减度 ➔ 【硬性否决边界】：若为解决米勒直通将 dv/dt 提高致使 FM 频段超限 > 10dBμV/m 且无屏蔽隔离，予以一票否决
+- 【EMC_RE_CE ➔ BLDC】触发动作：增大 Rg_on / Rg_off（如由 4.7Ω 增大至 33Ω）或加大门极滤波容值 ➔ 物理量变化：开关交叠开通与关断时间 (tr, tf) 翻倍延长，密勒平台停留时间拉长 ➔ 权衡代价：EMC 高频谐波被滤除，但开关能量损耗 P_sw 成倍剧增，引发结温温升与控制精度恶化 ➔ 必须复核项：死区裕量重新校准（防止开关延时拉长导致对管微直通）; 重测全温区最差工况 MOSFET 交叠开关损耗 P_sw; FOC 电流环低占空比死区非线性补偿表重标定 ➔ 【硬性否决边界】：Rg 过大导致开关延迟超过预设死区时间造成上下桥直通，予以绝对一票否决
+- 【EMC_RE_CE ➔ THERMAL】触发动作：在桥臂开关节点并联高频无感吸收网络 (如 1nF + 2.2Ω) 并串联铁氧体磁珠 ➔ 物理量变化：每个 PWM 周期吸收电容充放电能量转化为纯热量 P_snubber = C * V^2 * f_sw ➔ 权衡代价：吸收尖峰抑制辐射骚扰 6~10dB，但单板引入 2~5W 集中热源 ➔ 必须复核项：温箱 85℃ 额定工况下吸收电阻实测稳态温度 (< 125℃ 额定上限); 核算磁珠额定直流偏置电流下的磁芯发热与居里点阻抗衰减; 最差输入母线电压 (如 32V 或 58V) 下的 Snubber 额定功耗耐量 ➔ 【硬性否决边界】：吸收电阻表面计算温升超过元器件额定降额温度上限 (150℃)，予以一票否决
+- 【ROBOT_JOINT ➔ SAFETY】触发动作：采用纯单通道软件 MCU 封锁 PWM 或无双重硬件切断回路 ➔ 物理量变化：主控死机时单通道无法切断转矩；机械反冲在急停瞬间引发端部振荡 ➔ 权衡代价：省去独立硬件 STO 开关电路节约成本与面积，但直接违背人机协作安全合规准入 ➔ 必须复核项：双通道硬件独立切断机制故障注入测试 (单通道失效时另一通道仍能 100% 断转矩); 示波器实测 STO 输入光耦至门极电压归零端到端物理响应时间 (<= 20ms); 机械抱闸动作时间与 STO 触发配合时序 ➔ 【硬性否决边界】：STO 安全转矩断开硬件延时超过安全预算或无硬件双通道独立性，予以绝对一票否决
+- 【EMC_BCI ➔ SIGNAL】触发动作：在运放采样差分输入端增大 RC 滤波电容抑制共模转差模扰动 ➔ 物理量变化：运放差分通道群延时增大，相电流采样产生数微秒相位滞后 ➔ 权衡代价：BCI 测试通过，但 FOC 控制动态响应劣化甚至引起电机控制发散 ➔ 必须复核项：Bode 图实测电流环相位裕量 (Phase Margin) 是否仍 >= 45 度; 高转速下采样延时引起的角度解算误差与弱磁失步风险; BCI 注入频点下运放输出漂移与 DTC 误报阈值 ➔ 【硬性否决边界】：滤波延时导致电流闭环控制相位裕量小于 45 度触发系统不稳定，予以一票否决
+★ 规则回填要求：模型在 candidateActions[].crossDomainCouplingChecks 中，必须逐条复核以上规则是否受到本方案影响，并说明 addressed: true/false 及评估说明。
+
+【4. 车规基准定锚 (AUTOMOTIVE BENCHMARK)】
+- 确定性问题定性: 【POWER / DV / 剩余10天】 百公里急加速深踩油门测试中，偶发整车剧烈机械顿挫，仪表盘报高压驱动系统故障码，逆变器记录 DTC 旋变信号丢失与 ASC 触发事件，无法达到整车标定通过要求。
+- 核心物理失效机理: 负载突变如何通过寄生L/C转化成过冲、跌落与保护触发？ 百公里急加速深踩油门测试中，偶发整车剧烈机械顿挫，仪表盘报高压驱动系统故障码，逆变器记录 DTC 旋变信号丢失与 ASC 触发事件，无法达到整车标定通过要求。
+- 关键物理影响因子: [
+  {
+    "factor": "负载阶跃",
+    "description": "1. 800V 母线、450A 大扭矩急加速时，SiC 开关 dv/dt 达到 36V/ns；2. 高频共模电流经定转子 380pF 寄生杂散电容流经壳体地，在旋变差分回授 SIN/COS 线上感应出 1.8Vpp 60MHz 衰减振铃共模噪声；3. 旋变数字转换芯片 (RDC) 跟踪鉴相环瞬时失步，角度估算产生 5.2° 剧烈抖动 (突破 ASIL D 3.8° 安全门限)，控制器在 4.2ms 内紧急触发 ASC 主动短路三相制动，整车产生严重顿挫。；【实测数值回填】busVoltageNominalV=800；busVoltagePeakV=840；dvdtVns=36；currentPeakA=450；strayCapacitancePf=380；commonModeNoiseVpp=1.8；noiseFrequencyMhz=60；resolverAngleJitterDeg=5.2；maxAllowedJitterDeg=3.8；fttiLimitMs=5；actualTripTimeMs=4.2"
+  },
+  {
+    "factor": "di/dt",
+    "description": "800V 直流母线，450A 相电流峰值，逆变器输出频率 0~600Hz，3.5m 高压三相屏蔽电缆，电机壳体接地阻抗 12mΩ"
+  },
+  {
+    "factor": "寄生L/C",
+    "description": "1. 800V 母线工况下 SiC 开关产生高 dv/dt 不得耦合干扰旋变解码信号，转子角度抖动必须严格控制在 <= ±3.8° 以内；2. 故障诊断响应时间必须严格满足 ASIL D FTTI (<= 5ms)；3. 严禁在急加速工况误触发三相主动短路 (ASC) 紧急制动。"
+  }
+]
+- 综合风险评级基准: Medium-High (69分)
+
+【5. 当前决策态与双层时间轴要求】
+- 决策窗口: 剩余 10 天
+- 必须严格提供双层时间轴：
+  - containmentPhase: T+24h 应急临时遏制（0天PCB改版工期，满足当前装车验证）；
+  - permanentPhase: 下一改版彻底根除物理根因；
+  - strategicTradeoff: 阐明为何双轨协同推进。
+
+Return a single JSON object with these exact keys:
+{
+  "coreConclusion": {
+    "problemSummary": "...",
+    "recommendedMeasure": "...",
+    "reasonSummary": "..."
+  },
+  "decisionFrame": {
+    "decisionQuestion": "明确回答当前到底要不要继续推进/放行/改版",
+    "currentDecisionGate": "当前所处工程门禁",
+    "decisionWindow": "结合 daysRemaining 给出实际剩余决策窗口",
+    "bestNextAction": "未来 24 小时最应该做的一件事",
+    "minimumEvidenceToProceed": ["进入下一阶段前必须拿到的最小证据"],
+    "unknownsBlockingDecision": ["当前阻塞决策的关键未知量"],
+    "reversalCriteria": ["出现哪些证据时必须推翻当前推荐方案"]
+  },
+  "multiDomainAnalysis": {
+    "primaryDomain": "POWER",
+    "relatedDomains": ["EMC_RE_CE","SIGNAL","SAFETY"],
+    "domainAssessments": [
+      { "domain": "POWER", "role": "PRIMARY", "evidenceLevel": "HIGH|MEDIUM_INFERRED|LOW", "knownFacts": ["..."], "evidenceGaps": ["..."], "minimumValidation": "...", "domainConclusion": "..." }
+    ],
+    "crossDomainLinks": [
+      { "fromDomain": "POWER", "toDomain": "...", "mechanism": "...", "evidenceBasis": "MEASURED|CALCULATED|ASSUMPTION", "impact": "..." }
+    ],
+    "crossDomainVetoes": [
+      { "condition": "...", "blocks": ["DV_RELEASE"], "rationale": "..." }
+    ]
+  },
+  "riskRatings": {
+    "overallRisk": "High|Medium-High|Medium|Low",
+    "overallRiskScore": 75,
+    "technicalRisk": "High|Medium-High|Medium|Low",
+    "qualityRisk": "High|Medium-High|Medium|Low",
+    "scheduleRisk": "High|Medium-High|Medium|Low",
+    "costRisk": "High|Medium-High|Medium|Low",
+    "reliabilityRisk": "High|Medium-High|Medium|Low",
+    "functionalSafetyRisk": "High|Medium-High|Medium|Low"
+  },
+  "knownFacts": ["..."],
+  "assumptions": ["..."],
+  "unknowns": ["..."],
+  "physicalMechanism": {
+    "rootCauseAnalysis": "...",
+    "keyPhysicalFactors": [{"factor": "...", "description": "..."}]
+  },
+  "dfmeaView": {
+    "failureMode": "...",
+    "failureCause": "...",
+    "localEffect": "...",
+    "systemEffect": "...",
+    "vehicleEffect": "...",
+    "severity": 8,
+    "occurrence": 4,
+    "detection": 3,
+    "safetyImpact": true,
+    "regulatoryImpact": false,
+    "massProductionImpact": true
+  },
+  "candidateActions": [
+    {
+      "id": "Option A",
+      "category": "conservative|agile|radical",
+      "categoryLabel": "...",
+      "name": "...",
+      "description": "...",
+      "expectedBenefit": "...",
+      "scores": { "T": 88, "S": 55, "C": 60, "Q": 90, "L": 85, "total": 74.5 },
+      "veto": { "rejection_veto": false },
+      "riskDelta": "高 (器件耐压不足) ➔ 低 (32V/108℃达标)",
+      "residualRisk": "Low",
+      "residualRiskDetail": "...",
+      "sideEffects": "...",
+      "verificationCost": "...",
+      "timeCost": "...",
+      "failureConsequence": "...",
+      "preconditions": "...",
+      "verificationMethod": "必须具体到测点/仪器/判据",
+      "crossDomainCouplingChecks": [
+        { "rule": "...", "addressed": true, "note": "..." }
+      ],
+      "planB": "...",
+      "decisionFit": "为什么它适合/不适合当前工期与门禁",
+      "fastestValidation": "最快多久能拿到决定性证据",
+      "latestDecisionPoint": "最晚在第几天必须做出切换决定",
+      "rejectionReason": "若不推荐，明确说明拒绝它的主因"
+    }
+  ],
+  "finalRecommendation": {
+    "recommendedOptionId": "Option C",
+    "recommendedOptionName": "...",
+    "recommendationGrade": "Recommended",
+    "whyReason": ["..."],
+    "immediateSteps": [
+      { "step": 1, "title": "...", "action": "...", "owner": "HW", "deadline": "..." }
+    ],
+    "preconditions": ["..."],
+    "unacceptableActions": ["..."],
+    "stopConditions": ["..."],
+    "reEvaluationTriggers": ["..."],
+    "planB": "..."
+  },
+  "dualTimeline": {
+    "containmentPhase": {
+      "phaseTag": "T_PLUS_24H_CONTAINMENT",
+      "timeWindow": "T + 24h 紧急应急围堵 (Containment)",
+      "title": "...",
+      "objective": "...",
+      "hardwareImpact": "...",
+      "responsibilityRole": "...",
+      "actions": [
+        { "step": "...", "detail": "...", "owner": "...", "duration": "...", "hardwareImpact": "...", "deliverable": "..." }
+      ],
+      "verificationCriteria": "...",
+      "exitCriteria": "..."
+    },
+    "permanentPhase": {
+      "phaseTag": "NEXT_PHASE_PERMANENT",
+      "timeWindow": "下一版本永久纠正 / SOP 封样",
+      "title": "...",
+      "objective": "...",
+      "hardwareImpact": "...",
+      "responsibilityRole": "...",
+      "actions": [
+        { "step": "...", "detail": "...", "owner": "...", "duration": "...", "hardwareImpact": "...", "deliverable": "..." }
+      ],
+      "verificationCriteria": "...",
+      "exitCriteria": "..."
+    },
+    "strategicTradeoff": "..."
+  }
+}

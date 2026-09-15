@@ -1,0 +1,288 @@
+
+你必须严格基于以下【输入工况】、【实测数据】与【本地确定性预核算事实】进行硬件工程决策推演，绝不脱离实际随意作答：
+
+=============================================
+【1. 输入工程背景 (PROJECT CONTEXT)】
+- 项目名称: MHEV-eTurbo-48V-Gen2
+- ECU 类型: 32-bit MCU + 48V Gate Driver + 6-MOSFET Inverter + Precision AFE (48V High-Power E-Charger Actuator)
+- 项目阶段: DV | 样品状态: DV2 functional prototype with casting enclosure
+- 功能安全等级: ASIL B
+- 交付倒计时: 距离【ISO 21780 Overvoltage & Thermal Sign-off】仅剩【14天】
+- 成本约束: Strict BOM cap: no upgrade to expensive 80V low-Rds MOSFET (BOM limit +$0.40)
+- 直属硬件领导风格: AGILE_DELIVERY
+
+【2. 输入实测问题与工程顾虑 (ENGINEERING ISSUE)】
+- 主导工程领域: 【Component】
+- 涉及工程领域: 【Power Transient / Thermal / Component / Functional Safety】
+- 关联工程领域: 【Power Transient / Thermal / Functional Safety】
+- 领域分类: Power, Thermal, Component Alternative, Functional Safety
+- 规范要求: 1. ISO 21780 48V 动态过压脉冲 (68V, 200ms) 钳位后母线残压不得突破 MOSFET 60V 耐压降额限值 (<=48V)；2. 满载 90A 堵转时相电流分流器 (Shunt) 采样温漂误差 <= ±1.5%；3. 严禁由于采样温漂误触发 ASIL B 级过流停机。
+- 实际测量结果: 1. 48V 动态过压测试时 TVS 钳位至 58V，下桥 MOSFET 开关尖峰达 63.4V 发生重复雪崩击穿 (击穿 60V 标称耐压)；2. 0.5mΩ 锰铜分流器持续 90A 峰值温升达 145℃，铜锰焊接端产生 45μV 塞贝克热电势，叠加高共模 dv/dt 致相电流采样产生 +6.8% 虚高突跃；3. FOC 控制环误判相电流超限，在加速阶段突发切断 PWM 停机。
+- 测试条件: 48V 标称供电，ISO 21780 脉冲注入 (68V 峰值 / 200ms)，90A 加速堵转，压铸密闭铝壳无主动风冷
+- 测试环境: 发动机舱高温区 (环境温度 105℃)
+- 失效现象: 动态过压叠加急加速工况下，下桥臂 MOSFET 瞬态发热异常且偶发驱动器 DESAT/OVP 保护，同时整车控制器收到电机控制器相电流过流硬件告警，电动增压器突发失速。
+- 核心工程顾虑: 距离 DV 试验签发仅剩 14 天。若直接换装 80V MOSFET，Rds(on) 增大 35% 导致结温超标且 BOM 超支；若直接在软件层屏蔽过流或加长消隐滤波，真实堵转时 MOSFET 无法承受短路冲击。亟需跨电源瞬态、功率半导体热阻与精密模拟采样热电势的综合解决方案。
+- 关键实测数值: {
+  "busVoltageNominalV": 48,
+  "busVoltagePeakV": 58,
+  "pulseVoltageV": 68,
+  "pulseDurationUs": 200000,
+  "junctionTempC": 145,
+  "currentPeakA": 90,
+  "vdsRatingV": 60,
+  "vdsSpikeV": 63.4,
+  "currentSenseErrorPct": 6.8,
+  "seebeckVoltageUv": 45
+}
+
+【2.0 本地确定性数学物理预核算事实 (NON-NEGOTIABLE FACTS)】
+- 【急停母线倒灌理论泵升计算】V_bus_peak (理论峰值) = 297.6 V (规范门限: 60 V (器件耐压上限)，安全裕量: -237.6 V，合规性: CRITICAL)。
+  理论核算依据: Ek=0.5*J*w^2 ➔ V_peak = sqrt(V_nom^2 + 2*E_regen/Cbus)。
+  ★ 必须执行的引用指令: 急停理论泵升峰值经动能平衡方程核算为 297.6V（耐压裕量 -237.6V）。模型方案必须严格引用此理论值与实测值，严禁自行臆造其他泵升峰值。
+- 【功率器件稳态结温与车规降额裕量推演】Tj_est (估计稳态结温) = 177.4 ℃ (规范门限: 150.0 ℃ (车规 80% 降额安全上限)，安全裕量: -27.4 ℃，合规性: CRITICAL)。
+  理论核算依据: Tj = Tc + P_loss * Rth(j-c) (AEC-Q101 降额标准)。
+  ★ 必须执行的引用指令: 稳态结温经热阻链推演约为 177.4℃，降额安全裕量为 -27.4℃。已击穿车规 150℃ 降额上限，必须有一票否决或紧急增加厚铜/导热垫对策！
+★ 核心准则：以上数值由本地经过车规方程标定的物理引擎计算所得。模型输出必须直接引用并以此作为事实锚点，严禁另造冲突数值！
+
+【2.1 输入数据完整度车规审计等级与强约束】
+【输入完整度车规审计等级】：C级 · 关键证据欠缺 (量化评分: 76/100)
+
+⚠️ 严正警告：本次输入在【Component】工程域缺少以下必填实测参数：
+  - 环境温度 (ambientTempC [℃])
+  - Tj允许上限 (tjLimitC [℃])
+
+【强制纪律】：你绝对禁止将上述未填写的参数虚构为“已实测数值”，在候选方案与物理机理推导中，必须显式标注“因缺少实测 [参数名]，此处基于车规工程假设推导，属于待台架闭环确认项”。
+
+🔴【C级约束】：由于关键证据欠缺，你不得在 finalRecommendation 中宣称“根因已 100% 锁定”，必须在 immediateSteps 中将“补齐上述关键测点实测波形”列为第 1 优先级前置步骤。
+
+【2.2 本次输入中未提供的工程参数（必须视为 UNKNOWN，严禁假设默认值替代）】
+- rdsOnMilliOhm（Rds(on)，单位 mΩ，MEASURED）
+- qgNc（Qg，单位 nC，MEASURED）
+- qgdNc（Qgd，单位 nC，MEASURED）
+- switchDelayNs（开关延迟，单位 ns，MEASURED）
+- soaMarginPct（SOA裕量，单位 %，MEASURED）
+- pulseEcuBusPeakV（ISO7637脉冲下ECU端峰值，单位 V，MEASURED）
+- pulseEcuBusMinV（ISO7637脉冲下ECU端最低值，单位 V，MEASURED）
+- inputVoltageV（标称输入，单位 V，CONTEXT）
+- ambientTempC（环境温度，单位 ℃，MEASURED，必填缺失）
+- tjLimitC（Tj允许上限，单位 ℃，SPEC，必填缺失）
+- powerLossW（功耗，单位 W，MEASURED）
+- thermalResistanceCPerW（热阻，单位 ℃/W，MEASURED）
+- loadCurrentA（负载电流，单位 A，MEASURED）
+- runTimeH（稳态时间，单位 h，CONTEXT）
+- fttiBudgetMs（FTTI预算，单位 ms，SPEC）
+- detectionTimeMs（检测时间，单位 ms，MEASURED）
+- reactionTimeMs（反应时间，单位 ms，MEASURED）
+
+【2.3 按工程域拆分的实测证据浓度（用于校准 domainAssessments.evidenceLevel）】
+【主导域 · Component】已填：junctionTempC=145, vdsRatingV=60；未填：rdsOnMilliOhm, qgNc, qgdNc, switchDelayNs, soaMarginPct
+【涉及域 · Power Transient】已填：pulseVoltageV=68, pulseDurationUs=200000；未填：pulseEcuBusPeakV, pulseEcuBusMinV, inputVoltageV
+【涉及域 · Thermal】已填：junctionTempC=145；未填：ambientTempC, tjLimitC, powerLossW, thermalResistanceCPerW, loadCurrentA, runTimeH
+【涉及域 · Functional Safety】已填：无；未填：fttiBudgetMs, detectionTimeMs, reactionTimeMs
+
+【3. 多工程域物理与推演规约 (权重智能裁剪版)】
+【主导工程领域：车规元器件替代 / 停产与变更 [AEC-Q100 / AEC-Q101 / PCN / PPAP]】(分配完整物理机理链)
+- 核心物理公式与因果推导:
+- Spec-to-Spec 关键电气参数匹配度: 严格核对耐压 Vds、稳态阻抗 Rds(on)、动态栅极电荷 Qg、栅漏反向传输电荷 Qgd 及输出电容 Coss
+- 体二极管反向恢复电荷与时间: Qrr / trr (若替代料 Qrr 偏大，在桥臂高速换相时会导致对管产生致命的倍增开通瞬态损耗与严重高频辐射)
+- 雪崩单脉冲耐受能量: Eas = 0.5 * L * I_AS^2 * (V_BR / (V_BR - V_DD))
+- 安全工作区 (SOA): 在 10μs / 100μs / 1ms 瞬态大脉冲电流下核查 Vds-Id 曲线，确保处于 SOA 边界安全线以下
+- 车规元器件成熟选型基准:
+- 汽车级认证要求: 必须具备第三方 AEC-Q101 (分立器件) 或 AEC-Q100 (IC) Grade 1 (-40℃ ~ +125℃) 报告；
+- 封装 Pin-to-Pin 匹配: 检查焊盘物理尺寸 (Footprint)、引脚公差、裸焊盘热阻与蠕变爬电距离 (Creepage and Clearance)；
+- 供应链成熟度: 供应商必须承诺车规产品供货周期 ≥ 10 年，且提供正式变更说明 (PCN) 与完整的 PPAP Level 3 文件包。
+- 专业测试仪器与台架测量规程:
+- 对比试验 (A/B Bench Testing): 相同测试台架同板原位替换，对比满载温升 (ΔT)、开关损耗 (Eon/Eoff)、门极驱动振铃 (Vgs ringing)；
+- EMC 摸底对比: 原位更换后必须跑一次辐射发射与传导发射复测，确认高频开关谐波是否恶化超标；
+- 可靠性验证: 高温栅极偏置 (HTGB)、高温反偏 (HTRB) 及温度循环实验数据核验；
+- 合格判据: 电气与热指标达到或优于原设计，EMC 限值留有充分裕量，满足整车厂零件变更批准准则。
+- 跨专业协同要求:
+- 采购商务: 核实新料采购前置周期 (Lead Time) 与批量采购单价 (BOM Delta)；
+- 质量体系: 启动工程变更请求 (ECR) 与整车厂客户 PPAP 会签放行，严禁私自未经批准偷换器件；
+- 进度管控: 若替代料需要重新改版 PCB，严格与当前交付节点剩余天数对标。
+- 严格禁止的模糊空话清单:
+  * 严禁仅凭“Pin-to-Pin 封装一样”就宣称可以免试直接替代；
+  * 严禁忽视体二极管反向恢复特性 (Qrr/trr) 对半桥开关损耗与 EMI 的剧烈破坏作用。
+
+【强/弱相关领域：汽车电源瞬态过压与抛负载 [ISO 7637-2 / ISO 16750-2]】(聚焦跨域耦合与否决边界，防止篇幅发散)
+- 跨域耦合物理影响: - 系统架构: 与整车厂电气工程师确认发电机是否有集中钳位功能 (Pulse 5a 还是 Pulse 5b)，核对源阻抗 Ri；
+- 硬件防护: 严格区分整车蓄电池输入母线与 ECU 内部敏感 5V/3.3V/1.2V 核心供电轨。
+- 关联否决条件与防穿透红线: 必须确保在主导领域实施的对策不会突破本领域的器件额定耐压、温升限值或一票否决安全裕量！
+
+【强/弱相关领域：车规热设计极限 / 瞬态热阻网络 / 结温降额 [ISO 16750-4]】(聚焦跨域耦合与否决边界，防止篇幅发散)
+- 跨域耦合物理影响: - 软件热保护: 设置多级软件降额策略 (如 T_pcb ≥ 95℃ 开启 80% 功率降额，T_pcb ≥ 110℃ 降为 50%，T_pcb ≥ 120℃ 停机保护)；
+- 结构设计: 强化外壳散热筋翅片面积与导热凸台平面度公差 (平面度 ≤ 0.1mm，无毛刺)；
+- 交付与成本: 加厚外壳和提高 TIM 等级会增加整机成本，若工期紧急，优先结合软件动态限流策略闭环。
+- 关联否决条件与防穿透红线: 必须确保在主导领域实施的对策不会突破本领域的器件额定耐压、温升限值或一票否决安全裕量！
+
+【强/弱相关领域：车规功能安全 (Functional Safety) [ISO 26262 ASIL-B / ASIL-D]】(聚焦跨域耦合与否决边界，防止篇幅发散)
+- 跨域耦合物理影响: - 软件架构: 编写安全机制诊断处理程序 (Safety Mechanism)，配合硬件定时喂狗与 RAM/ROM 自检；
+- 系统工程师: 协同更新安全概念 (FSC) 与技术安全要求 (TSR)；
+- 汇报红线: 若硬件修改导致原功能安全诊断时序破坏，必须立即启动 Safety Manager 联合评审。
+- 关联否决条件与防穿透红线: 必须确保在主导领域实施的对策不会突破本领域的器件额定耐压、温升限值或一票否决安全裕量！
+
+【3.1 跨工程域物理耦合规则库 (CROSS-DOMAIN COUPLING MATRIX)】
+- 【EMC_RE_CE ➔ THERMAL】触发动作：在桥臂开关节点并联高频无感吸收网络 (如 1nF + 2.2Ω) 并串联铁氧体磁珠 ➔ 物理量变化：每个 PWM 周期吸收电容充放电能量转化为纯热量 P_snubber = C * V^2 * f_sw ➔ 权衡代价：吸收尖峰抑制辐射骚扰 6~10dB，但单板引入 2~5W 集中热源 ➔ 必须复核项：温箱 85℃ 额定工况下吸收电阻实测稳态温度 (< 125℃ 额定上限); 核算磁珠额定直流偏置电流下的磁芯发热与居里点阻抗衰减; 最差输入母线电压 (如 32V 或 58V) 下的 Snubber 额定功耗耐量 ➔ 【硬性否决边界】：吸收电阻表面计算温升超过元器件额定降额温度上限 (150℃)，予以一票否决
+- 【THERMAL ➔ BLDC】触发动作：未及时下调相电流限幅，维持全扭矩输出 ➔ 物理量变化：硅半导体高温下电子迁移率降低，Rds(on) 按约 0.6%/℃ 正温度系数剧增 (150℃ 时达常温 1.7~2.0 倍) ➔ 权衡代价：追求全工况额定转矩不降额，导致 MOSFET 结温突破 175℃ 极限直接烧结 ➔ 必须复核项：Foster 热阻网络计算 150℃ 最高环温与最大相电流下的稳态 Tj; SOA 安全工作区曲线降额校验 (确保在热瞬态工作点落在 DC/10ms 安全线内); 电机堵转 3 秒硬件脱扣保护与结温峰值推演 ➔ 【硬性否决边界】：最坏工况下 MOSFET 计算结温 Tj >= Tj_max - 10℃ (击穿降额红线)，予以绝对一票否决
+- 【ROBOT_JOINT ➔ THERMAL】触发动作：提高驱动器斩波电流以追求更强动态加速响应 ➔ 物理量变化：电机定子发热与谐波减速机柔轮/刚轮齿面摩擦热叠加，密闭壳体内热通量暴增 ➔ 权衡代价：提升瞬态峰值输出扭矩将使减速器密封润滑脂迅速劣变，降低机械精度与寿命 ➔ 必须复核项：关节内部密闭腔体连续 2 小时额定工作热平衡红外/热电偶实测; 谐波减速器油脂额定工况接触面最高温度校验 (通常限值 85℃); 驱动板贴片元件环境温升由 40℃ 抬升至 80℃ 后的热降额重算 ➔ 【硬性否决边界】：减速机齿面持续工作温度超过润滑脂额定上限 (85℃)，触发机械热损伤否决
+- 【ROBOT_JOINT ➔ SAFETY】触发动作：采用纯单通道软件 MCU 封锁 PWM 或无双重硬件切断回路 ➔ 物理量变化：主控死机时单通道无法切断转矩；机械反冲在急停瞬间引发端部振荡 ➔ 权衡代价：省去独立硬件 STO 开关电路节约成本与面积，但直接违背人机协作安全合规准入 ➔ 必须复核项：双通道硬件独立切断机制故障注入测试 (单通道失效时另一通道仍能 100% 断转矩); 示波器实测 STO 输入光耦至门极电压归零端到端物理响应时间 (<= 20ms); 机械抱闸动作时间与 STO 触发配合时序 ➔ 【硬性否决边界】：STO 安全转矩断开硬件延时超过安全预算或无硬件双通道独立性，予以绝对一票否决
+★ 规则回填要求：模型在 candidateActions[].crossDomainCouplingChecks 中，必须逐条复核以上规则是否受到本方案影响，并说明 addressed: true/false 及评估说明。
+
+【4. 车规基准定锚 (AUTOMOTIVE BENCHMARK)】
+- 确定性问题定性: 【COMPONENT / DV / 剩余14天】 动态过压叠加急加速工况下，下桥臂 MOSFET 瞬态发热异常且偶发驱动器 DESAT/OVP 保护，同时整车控制器收到电机控制器相电流过流硬件告警，电动增压器突发失速。
+- 核心物理失效机理: Pin-to-Pin 是否真的等价？动态参数差异会不会改变热、EMC、安全与寿命？ 动态过压叠加急加速工况下，下桥臂 MOSFET 瞬态发热异常且偶发驱动器 DESAT/OVP 保护，同时整车控制器收到电机控制器相电流过流硬件告警，电动增压器突发失速。
+- 关键物理影响因子: [
+  {
+    "factor": "器件参数差异",
+    "description": "1. 48V 动态过压测试时 TVS 钳位至 58V，下桥 MOSFET 开关尖峰达 63.4V 发生重复雪崩击穿 (击穿 60V 标称耐压)；2. 0.5mΩ 锰铜分流器持续 90A 峰值温升达 145℃，铜锰焊接端产生 45μV 塞贝克热电势，叠加高共模 dv/dt 致相电流采样产生 +6.8% 虚高突跃；3. FOC 控制环误判相电流超限，在加速阶段突发切断 PWM 停机。；【实测数值回填】busVoltageNominalV=48；busVoltagePeakV=58；pulseVoltageV=68；pulseDurationUs=200000；junctionTempC=145；currentPeakA=90；vdsRatingV=60；vdsSpikeV=63.4；currentSenseErrorPct=6.8；seebeckVoltageUv=45"
+  },
+  {
+    "factor": "开关/导通损耗",
+    "description": "48V 标称供电，ISO 21780 脉冲注入 (68V 峰值 / 200ms)，90A 加速堵转，压铸密闭铝壳无主动风冷"
+  },
+  {
+    "factor": "Vds/Vgs瞬态",
+    "description": "1. ISO 21780 48V 动态过压脉冲 (68V, 200ms) 钳位后母线残压不得突破 MOSFET 60V 耐压降额限值 (<=48V)；2. 满载 90A 堵转时相电流分流器 (Shunt) 采样温漂误差 <= ±1.5%；3. 严禁由于采样温漂误触发 ASIL B 级过流停机。"
+  }
+]
+- 综合风险评级基准: Medium (55分)
+
+【5. 当前决策态与双层时间轴要求】
+- 决策窗口: 剩余 14 天
+- 必须严格提供双层时间轴：
+  - containmentPhase: T+24h 应急临时遏制（0天PCB改版工期，满足当前装车验证）；
+  - permanentPhase: 下一改版彻底根除物理根因；
+  - strategicTradeoff: 阐明为何双轨协同推进。
+
+Return a single JSON object with these exact keys:
+{
+  "coreConclusion": {
+    "problemSummary": "...",
+    "recommendedMeasure": "...",
+    "reasonSummary": "..."
+  },
+  "decisionFrame": {
+    "decisionQuestion": "明确回答当前到底要不要继续推进/放行/改版",
+    "currentDecisionGate": "当前所处工程门禁",
+    "decisionWindow": "结合 daysRemaining 给出实际剩余决策窗口",
+    "bestNextAction": "未来 24 小时最应该做的一件事",
+    "minimumEvidenceToProceed": ["进入下一阶段前必须拿到的最小证据"],
+    "unknownsBlockingDecision": ["当前阻塞决策的关键未知量"],
+    "reversalCriteria": ["出现哪些证据时必须推翻当前推荐方案"]
+  },
+  "multiDomainAnalysis": {
+    "primaryDomain": "COMPONENT",
+    "relatedDomains": ["POWER_TRANSIENT","THERMAL","SAFETY"],
+    "domainAssessments": [
+      { "domain": "COMPONENT", "role": "PRIMARY", "evidenceLevel": "HIGH|MEDIUM_INFERRED|LOW", "knownFacts": ["..."], "evidenceGaps": ["..."], "minimumValidation": "...", "domainConclusion": "..." }
+    ],
+    "crossDomainLinks": [
+      { "fromDomain": "COMPONENT", "toDomain": "...", "mechanism": "...", "evidenceBasis": "MEASURED|CALCULATED|ASSUMPTION", "impact": "..." }
+    ],
+    "crossDomainVetoes": [
+      { "condition": "...", "blocks": ["DV_RELEASE"], "rationale": "..." }
+    ]
+  },
+  "riskRatings": {
+    "overallRisk": "High|Medium-High|Medium|Low",
+    "overallRiskScore": 75,
+    "technicalRisk": "High|Medium-High|Medium|Low",
+    "qualityRisk": "High|Medium-High|Medium|Low",
+    "scheduleRisk": "High|Medium-High|Medium|Low",
+    "costRisk": "High|Medium-High|Medium|Low",
+    "reliabilityRisk": "High|Medium-High|Medium|Low",
+    "functionalSafetyRisk": "High|Medium-High|Medium|Low"
+  },
+  "knownFacts": ["..."],
+  "assumptions": ["..."],
+  "unknowns": ["..."],
+  "physicalMechanism": {
+    "rootCauseAnalysis": "...",
+    "keyPhysicalFactors": [{"factor": "...", "description": "..."}]
+  },
+  "dfmeaView": {
+    "failureMode": "...",
+    "failureCause": "...",
+    "localEffect": "...",
+    "systemEffect": "...",
+    "vehicleEffect": "...",
+    "severity": 8,
+    "occurrence": 4,
+    "detection": 3,
+    "safetyImpact": true,
+    "regulatoryImpact": false,
+    "massProductionImpact": true
+  },
+  "candidateActions": [
+    {
+      "id": "Option A",
+      "category": "conservative|agile|radical",
+      "categoryLabel": "...",
+      "name": "...",
+      "description": "...",
+      "expectedBenefit": "...",
+      "scores": { "T": 88, "S": 55, "C": 60, "Q": 90, "L": 85, "total": 74.5 },
+      "veto": { "rejection_veto": false },
+      "riskDelta": "高 (器件耐压不足) ➔ 低 (32V/108℃达标)",
+      "residualRisk": "Low",
+      "residualRiskDetail": "...",
+      "sideEffects": "...",
+      "verificationCost": "...",
+      "timeCost": "...",
+      "failureConsequence": "...",
+      "preconditions": "...",
+      "verificationMethod": "必须具体到测点/仪器/判据",
+      "crossDomainCouplingChecks": [
+        { "rule": "...", "addressed": true, "note": "..." }
+      ],
+      "planB": "...",
+      "decisionFit": "为什么它适合/不适合当前工期与门禁",
+      "fastestValidation": "最快多久能拿到决定性证据",
+      "latestDecisionPoint": "最晚在第几天必须做出切换决定",
+      "rejectionReason": "若不推荐，明确说明拒绝它的主因"
+    }
+  ],
+  "finalRecommendation": {
+    "recommendedOptionId": "Option C",
+    "recommendedOptionName": "...",
+    "recommendationGrade": "Recommended",
+    "whyReason": ["..."],
+    "immediateSteps": [
+      { "step": 1, "title": "...", "action": "...", "owner": "HW", "deadline": "..." }
+    ],
+    "preconditions": ["..."],
+    "unacceptableActions": ["..."],
+    "stopConditions": ["..."],
+    "reEvaluationTriggers": ["..."],
+    "planB": "..."
+  },
+  "dualTimeline": {
+    "containmentPhase": {
+      "phaseTag": "T_PLUS_24H_CONTAINMENT",
+      "timeWindow": "T + 24h 紧急应急围堵 (Containment)",
+      "title": "...",
+      "objective": "...",
+      "hardwareImpact": "...",
+      "responsibilityRole": "...",
+      "actions": [
+        { "step": "...", "detail": "...", "owner": "...", "duration": "...", "hardwareImpact": "...", "deliverable": "..." }
+      ],
+      "verificationCriteria": "...",
+      "exitCriteria": "..."
+    },
+    "permanentPhase": {
+      "phaseTag": "NEXT_PHASE_PERMANENT",
+      "timeWindow": "下一版本永久纠正 / SOP 封样",
+      "title": "...",
+      "objective": "...",
+      "hardwareImpact": "...",
+      "responsibilityRole": "...",
+      "actions": [
+        { "step": "...", "detail": "...", "owner": "...", "duration": "...", "hardwareImpact": "...", "deliverable": "..." }
+      ],
+      "verificationCriteria": "...",
+      "exitCriteria": "..."
+    },
+    "strategicTradeoff": "..."
+  }
+}

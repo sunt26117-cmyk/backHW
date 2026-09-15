@@ -72,7 +72,12 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
   };
   const [currentRound, setCurrentRound] = useState<number>(1);
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('ALL');
-  const [isWargameOpen, setIsWargameOpen] = useState<boolean>(true);
+  
+  // 复杂深层剖析默认收起（降低首屏视觉压力，按需展开）
+  const [isWargameOpen, setIsWargameOpen] = useState<boolean>(false);
+  const [isRolePsychologyOpen, setIsRolePsychologyOpen] = useState<boolean>(false);
+  const [isRaciOpen, setIsRaciOpen] = useState<boolean>(false);
+  const [isDualTimelineOpen, setIsDualTimelineOpen] = useState<boolean>(false);
 
   if (!result) {
     return <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-sm text-slate-400">当前典型工况分析结果尚未生成，请稍候。</div>;
@@ -710,8 +715,8 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
       </div>
 
       {/* 3. 汽车开发链条 8 大核心角色深度心理透视与攻心策略卡片 */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
               <Users className="w-4 h-4 mr-2 text-indigo-400" />
@@ -722,33 +727,46 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
             </p>
           </div>
 
-          {/* 角色筛选器 */}
-          <div className="flex items-center space-x-1 overflow-x-auto text-[11px]">
-            {[
-              { id: 'ALL', label: '全部 8 角色' },
-              { id: 'HW', label: '硬件主管' },
-              { id: 'PM', label: '项目经理' },
-              { id: 'SW', label: '底层软件' },
-              { id: 'SYS', label: '系统整车' },
-              { id: 'DVT', label: '测试验证' },
-              { id: 'QA', label: '品质质量' },
-              { id: 'SCM', label: '采购供应' },
-              { id: 'PSCR', label: '安全PSCR' },
-            ].map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setSelectedRoleFilter(f.id)}
-                className={`px-2.5 py-1 rounded-md transition cursor-pointer whitespace-nowrap ${
-                  selectedRoleFilter === f.id
-                    ? 'bg-indigo-600 text-white font-semibold'
-                    : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setIsRolePsychologyOpen(!isRolePsychologyOpen)}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition cursor-pointer"
+            >
+              {isRolePsychologyOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              <span>{isRolePsychologyOpen ? '收起角色剖析' : '展开8角色透视'}</span>
+            </button>
           </div>
         </div>
+
+        {isRolePsychologyOpen && (
+          <div className="mt-4 pt-4 border-t border-slate-800">
+            {/* 角色筛选器 */}
+            <div className="flex items-center space-x-1 overflow-x-auto text-[11px] mb-4 pb-1">
+              {[
+                { id: 'ALL', label: '全部 8 角色' },
+                { id: 'HW', label: '硬件主管' },
+                { id: 'PM', label: '项目经理' },
+                { id: 'SW', label: '底层软件' },
+                { id: 'SYS', label: '系统整车' },
+                { id: 'DVT', label: '测试验证' },
+                { id: 'QA', label: '品质质量' },
+                { id: 'SCM', label: '采购供应' },
+                { id: 'PSCR', label: '安全PSCR' },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setSelectedRoleFilter(f.id)}
+                  className={`px-2.5 py-1 rounded-md transition cursor-pointer whitespace-nowrap ${
+                    selectedRoleFilter === f.id
+                      ? 'bg-indigo-600 text-white font-semibold'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
           {/* 1. 硬件负责人 / 直属领导 */}
@@ -1152,10 +1170,12 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
           )}
         </div>
       </div>
+    )}
+  </div>
 
       {/* 3. RACI Matrix (含 PSCR 独立卡点行) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
               <Users className="w-4 h-4 mr-2 text-blue-400" />
@@ -1165,10 +1185,25 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
               R (执行负责人) · A (最终追责与审批人) · C (咨询顾问) · I (抄送知情) · PSCR (产品安全与符合性独立代表)
             </p>
           </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-950 border border-blue-800 text-blue-300">
+              {enhancedRaciMatrix.length} 个跨专业矩阵项
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsRaciOpen(!isRaciOpen)}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition cursor-pointer"
+            >
+              {isRaciOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              <span>{isRaciOpen ? '收起矩阵' : '展开 RACI 矩阵'}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border border-slate-800 rounded-lg overflow-hidden">
+        {isRaciOpen && (
+          <div className="overflow-x-auto mt-4 pt-4 border-t border-slate-800">
+            <table className="w-full text-left text-xs border border-slate-800 rounded-lg overflow-hidden">
             <thead className="bg-slate-800 text-slate-300 font-semibold border-b border-slate-700">
               <tr>
                 <th className="p-3">专业角色</th>
@@ -1216,7 +1251,8 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
             </tbody>
           </table>
         </div>
-      </div>
+      )}
+    </div>
 
       {/* 3. 双层工程时间轴机制：T+24h 应急临时遏制 vs 下一阶段永久纠正 (Upgrade 2) */}
       {(() => {
@@ -1353,7 +1389,7 @@ ${dualTimeline.strategicTradeoff}`;
                     {hasCopiedTimeline ? (
                       <>
                         <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-300">已复制执行清单</span>
+                        <span className="text-emerald-300">已复制清单</span>
                       </>
                     ) : (
                       <>
@@ -1362,30 +1398,45 @@ ${dualTimeline.strategicTradeoff}`;
                       </>
                     )}
                   </button>
+
+                  {/* 收起/展开双轨详情 */}
+                  <button
+                    type="button"
+                    onClick={() => setIsDualTimelineOpen(!isDualTimelineOpen)}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 flex items-center gap-1 transition cursor-pointer"
+                  >
+                    {isDualTimelineOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    <span>{isDualTimelineOpen ? '收起双轨详情' : '展开双轨详情'}</span>
+                  </button>
                 </div>
               </div>
 
-              {/* 战略权衡 Callout: 为什么不能只选其一？ */}
-              <div className="mt-4 bg-gradient-to-r from-amber-950/30 via-slate-900 to-emerald-950/30 border border-slate-700/70 rounded-lg p-4 text-xs">
-                <div className="flex items-start gap-2.5">
-                  <Scale className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                  <div className="space-y-1.5 text-slate-300">
-                    <div className="font-semibold text-slate-200 flex items-center gap-2">
-                      <span>双层时间轴协同逻辑与工程权衡 (Strategic Trade-off)</span>
-                      <span className="text-[10px] px-2 py-0.2 rounded bg-blue-500/20 text-blue-300 font-mono">
-                        车规质量与进度博弈平衡
-                      </span>
+              {isDualTimelineOpen && (
+                <>
+                  {/* 战略权衡 Callout: 为什么不能只选其一？ */}
+                  <div className="mt-4 bg-gradient-to-r from-amber-950/30 via-slate-900 to-emerald-950/30 border border-slate-700/70 rounded-lg p-4 text-xs">
+                    <div className="flex items-start gap-2.5">
+                      <Scale className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1.5 text-slate-300">
+                        <div className="font-semibold text-slate-200 flex items-center gap-2">
+                          <span>双层时间轴协同逻辑与工程权衡 (Strategic Trade-off)</span>
+                          <span className="text-[10px] px-2 py-0.2 rounded bg-blue-500/20 text-blue-300 font-mono">
+                            车规质量与进度博弈平衡
+                          </span>
+                        </div>
+                        <p className="leading-relaxed text-slate-300 whitespace-pre-line text-[11px]">
+                          {dualTimeline.strategicTradeoff}
+                        </p>
+                      </div>
                     </div>
-                    <p className="leading-relaxed text-slate-300 whitespace-pre-line text-[11px]">
-                      {dualTimeline.strategicTradeoff}
-                    </p>
                   </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
 
             {/* 双轨时间轴对比卡片 */}
-            <div className={`grid gap-6 ${timelineFilter === 'ALL' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+            {isDualTimelineOpen && (
+              <div className={`grid gap-6 ${timelineFilter === 'ALL' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
               {/* Track 1: T+24h 应急临时遏制 (Containment Phase) */}
               {(timelineFilter === 'ALL' || timelineFilter === 'CONTAINMENT') && (
                 <div className="bg-slate-900 border-2 border-amber-500/40 rounded-xl p-5 shadow-lg flex flex-col justify-between">
@@ -1626,8 +1677,9 @@ ${dualTimeline.strategicTradeoff}`;
                 </div>
               )}
             </div>
-          </div>
-        );
+          )}
+        </div>
+      );
       })()}
     </div>
   );

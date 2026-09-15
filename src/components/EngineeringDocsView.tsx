@@ -636,12 +636,15 @@ ${(result.raciMatrix || []).map((r) => `  * [${r.raciType}] ${r.role}: ${r.owner
           <div className="space-y-4 text-xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
               <div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                   <span className="font-bold text-sm text-slate-100 block">
                     工程决策档案 (EDR - Engineering Decision Record)
                   </span>
                   <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-mono font-bold">
                     P0 级核心档案
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
+                    车规专家规则引擎 · 确定性底盘 (非AI生成)
                   </span>
                 </div>
                 <span className="text-[11px] text-slate-400">

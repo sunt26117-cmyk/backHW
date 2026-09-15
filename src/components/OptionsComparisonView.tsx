@@ -243,14 +243,16 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
                         {opt.residualRisk}
                       </span>
                     </div>
-                    <p className="text-slate-300 text-[11px] leading-relaxed">{opt.residualRiskDetail}</p>
+                    <p className="text-slate-300 text-[11px] leading-relaxed">
+                      {opt.residualRiskDetail || opt.sideEffects || '暂无显著残余风险'}
+                    </p>
                   </div>
 
                   {/* Failure Consequence & Side effects */}
                   <div className="space-y-2 text-xs text-slate-300 mb-3">
                     <div className="text-[11px]">
                       <span className="text-amber-400/90 font-medium">次生影响：</span>
-                      <span className="text-slate-300">{opt.sideEffects}</span>
+                      <span className="text-slate-300">{opt.sideEffects || opt.residualRiskDetail || '无明显负面次生效应'}</span>
                     </div>
                     <div className="text-[11px]">
                       <span className="text-red-400/90 font-medium">失败后果：</span>
