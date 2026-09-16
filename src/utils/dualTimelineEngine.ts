@@ -608,3 +608,63 @@ T+24h 内利用“5.0W/mK 绝缘垫 + 软件动态限流降额”可以在不花
 
   }
 }
+
+/**
+ * 解析工期字符串（例如 "2 小时", "3 天"）转换为小时
+ */
+export function parseDuration(durationStr: string): number {
+  if (!durationStr) return 0;
+  
+  const hMatch = durationStr.match(/(\d+(?:\.\d+)?)\s*小时/);
+  if (hMatch) return parseFloat(hMatch[1]);
+  
+  const dMatch = durationStr.match(/(\d+(?:\.\d+)?)\s*天/);
+  if (dMatch) return parseFloat(dMatch[1]) * 24;
+  
+  return 0;
+}
+
+/**
+ * 确保分析结果中拥有带有可行性校验的 DualTimeline
+ */
+export function ensureDualTimeline(
+  result: Partial<CopilotAnalysisResult>,
+  context: ProjectContext,
+  issue: IssueInput,
+  phaseBudgetHours: number = 24
+): DualTimelineActionPlan {
+  // 构建 baseline timeline
+  const timeline = buildDualTimelinePlan(result, context, issue);
+  
+  // 对于 containmentPhase 进行 durationHours 计算与可行性校验
+  let totalContainmentHours = 0;
+  
+  if (timeline.containmentPhase && Array.isArray(timeline.containmentPhase.actions)) {
+    timeline.containmentPhase.actions.forEach(action => {
+      if (!action.durationHours) {
+        action.durationHours = parseDuration(action.duration || '');
+      }
+      totalContainmentHours += action.durationHours;
+    });
+    
+    if (totalContainmentHours > phaseBudgetHours) {
+      timeline.containmentPhase.timeFeasibility = `[警告] 围堵窗口不可行：累计耗时 ${totalContainmentHours}h，超出 T+${phaseBudgetHours}h 限制。请裁剪次要验证环节或增加并行资源！`;
+      if (!timeline.containmentPhase.verificationCriteria.includes('围堵窗口不可行')) {
+         timeline.containmentPhase.verificationCriteria += `\n\n${timeline.containmentPhase.timeFeasibility}`;
+      }
+    } else {
+      timeline.containmentPhase.timeFeasibility = `[可行] 围堵总耗时 ${totalContainmentHours}h，满足 T+${phaseBudgetHours}h 紧急响应要求。`;
+    }
+  }
+  
+  // 对于 permanentPhase 也可以可选地进行类似计算（主要关注天数，非强制校验 24h）
+  if (timeline.permanentPhase && Array.isArray(timeline.permanentPhase.actions)) {
+    timeline.permanentPhase.actions.forEach(action => {
+      if (!action.durationHours) {
+        action.durationHours = parseDuration(action.duration || '');
+      }
+    });
+  }
+  
+  return timeline;
+}

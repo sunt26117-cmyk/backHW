@@ -194,6 +194,7 @@ export interface DualTimelineStep {
   detail: string;
   owner: string;
   duration: string;
+  durationHours?: number;
   hardwareImpact: string;
   deliverable: string;
 }
@@ -208,6 +209,7 @@ export interface DualTimelinePhase {
   verificationCriteria: string;
   exitCriteria: string;
   responsibilityRole: string;
+  timeFeasibility?: string;
 }
 
 export interface DualTimelineActionPlan {

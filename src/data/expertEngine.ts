@@ -3,7 +3,7 @@ import { generateBldcMotorAnalysis } from './bldcMotorExpert';
 import { generateRobotJointAnalysis, getRobotJointPillars } from './robotJointExpert';
 import { applyScenarioDynamicLayer } from '../utils/scenarioDynamic';
 import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, getEngineeringDomainLabel, resolveEngineeringDomain, resolveEngineeringDomains } from '../utils/scenarioDomainEngine';
-import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
+import { ensureDualTimeline } from '../utils/dualTimelineEngine';
 import { getCrossDomainCouplings } from '../utils/crossDomainCouplingMatrix';
 import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
 import { extractUnifiedEngineeringModel } from '../utils/unifiedStateExtractor';
@@ -118,7 +118,7 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   }
 
   // 补全升级2：双层工程时间轴 (T+24h 应急临时遏制 vs 下一阶段永久纠正)
-  result.dualTimeline = result.dualTimeline || buildDualTimelinePlan(result, context, issue);
+  result.dualTimeline = result.dualTimeline || ensureDualTimeline(result, context, issue);
 
   // 多域基线：保留原有“主导域”规则，同时为所有涉及领域生成独立证据就绪度、计算结果与域级结论，供后续页面和 AI 决策消费。
   const domainList = resolveEngineeringDomains(issue);

@@ -41,7 +41,7 @@ import {
   Milestone,
   ExternalLink,
 } from 'lucide-react';
-import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
+import { ensureDualTimeline } from '../utils/dualTimelineEngine';
 
 interface RecommendationRaciViewProps {
   result: CopilotAnalysisResult | null;
@@ -1282,7 +1282,7 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
           attachments: [],
         };
 
-        const dualTimeline = result.dualTimeline || buildDualTimelinePlan(result, effectiveContext, effectiveIssue);
+        const dualTimeline = result.dualTimeline || ensureDualTimeline(result, effectiveContext, effectiveIssue);
 
         const handleCopyTimeline = () => {
           if (!dualTimeline) return;

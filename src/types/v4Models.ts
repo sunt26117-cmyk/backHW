@@ -120,6 +120,15 @@ export interface MotorModel {
   sensorType: 'HALL' | 'ENCODER' | 'RESOLVER' | 'SENSORLESS';
 }
 
+export type ParamOrigin = "MEASURED" | "DATASHEET" | "TEXT_INFERRED" | "ENGINE_DEFAULT";
+
+export interface Param {
+  value: number;
+  origin: ParamOrigin;
+  tolerance: number;
+  source: string;
+}
+
 export interface PowerStageModel {
   mosfetPartNumber: string;
   rthJc?: ParamOrigin<KelvinPerWatt>;
