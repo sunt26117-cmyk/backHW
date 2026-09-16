@@ -44,6 +44,7 @@ interface NavbarProps {
   onImportBackup: (file: File) => void;
   onExportMarkdown: () => void;
   onDownloadOfflineHtml?: () => void;
+  onOpenSourceDownload?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -65,6 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onImportBackup,
   onExportMarkdown,
   onDownloadOfflineHtml,
+  onOpenSourceDownload,
 }) => {
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [showBackupMenu, setShowBackupMenu] = useState(false);
@@ -461,6 +463,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                     </a>
 
+                    {/* 5. 下载系统完整源代码与多物理场架构优化指南 (.zip) */}
+                    <button
+                      id="download-full-source-zip-btn"
+                      onClick={() => {
+                        setShowBackupMenu(false);
+                        if (onOpenSourceDownload) onOpenSourceDownload();
+                      }}
+                      className="w-full px-3 py-2.5 flex items-start gap-2.5 text-left hover:bg-slate-800/80 transition cursor-pointer text-slate-200 border-t border-slate-800/60 bg-emerald-950/20"
+                    >
+                      <Download className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+                          <span>下载全套源码与优化指南 (.zip)</span>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">含 AI 优化指南</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">
+                          包含物理引擎、状态机、专家推理规则与 AI_OPTIMIZATION_GUIDE.md，供发给其他 AI 优化。
+                        </div>
+                      </div>
+                    </button>
+
                     {/* Clear SW Cache & Hard Reload */}
                     <button
                       id="clear-cache-reload-btn"
@@ -499,6 +522,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </>
               )}
             </div>
+
+            {/* Quick Source & AI Guide Button */}
+            {onOpenSourceDownload && (
+              <button
+                id="header-open-source-download-btn"
+                onClick={onOpenSourceDownload}
+                className="flex items-center space-x-1.5 bg-emerald-600/20 hover:bg-emerald-600/35 active:bg-emerald-600/40 text-emerald-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-emerald-500/40 transition shadow-sm cursor-pointer shrink-0"
+                title="打开源码下载与 AI 优化指南窗口"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">源码与优化指南</span>
+                <span className="sm:hidden">源码包</span>
+              </button>
+            )}
 
             {/* Run Analysis CTA */}
             <button

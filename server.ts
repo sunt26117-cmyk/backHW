@@ -72,6 +72,30 @@ app.get('/api/download/offline-html', (req, res) => {
   }
 });
 
+// Download Full Source Code Zip Archive (for external AI review and offline analysis)
+app.get(['/api/download/source-zip', '/downloads/ecu_hardware_copilot_full_source.zip'], (req, res) => {
+  const zipPath = path.join(process.cwd(), 'public', 'downloads', 'ecu_hardware_copilot_full_source.zip');
+  if (fs.existsSync(zipPath)) {
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="ecu_hardware_copilot_full_source.zip"');
+    res.sendFile(zipPath);
+  } else {
+    res.status(404).send('Source zip archive not found.');
+  }
+});
+
+// Download Full Source Code Tar.Gz Archive
+app.get(['/api/download/source-tar', '/downloads/ecu_hardware_copilot_full_source.tar.gz'], (req, res) => {
+  const tarPath = path.join(process.cwd(), 'public', 'downloads', 'ecu_hardware_copilot_full_source.tar.gz');
+  if (fs.existsSync(tarPath)) {
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', 'attachment; filename="ecu_hardware_copilot_full_source.tar.gz"');
+    res.sendFile(tarPath);
+  } else {
+    res.status(404).send('Source tar archive not found.');
+  }
+});
+
 
 /**
  * AI 返回结构协议：字段结构与原 user prompt 的 JSON 示例保持一一对应。

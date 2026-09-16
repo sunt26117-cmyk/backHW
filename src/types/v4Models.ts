@@ -86,6 +86,9 @@ export interface PowerStageModel {
   mosfetPartNumber: string;
   vdsRating: number;   // V (额定击穿电压)
   rdsOnMilliOhm: number; // mΩ
+  vthMinV?: number;    // V (门极阈值电压下限)
+  dvdtVns?: number;    // V/ns (最大开关瞬态斜率)
+  cgdPf?: number;      // pF (米勒电容，精确值)
   qgNc: number;        // nC
   qgdNc: number;       // nC
   qrrNc: number;       // nC
@@ -127,6 +130,17 @@ export interface EngineeringIssueModel {
   measuredValues?: Record<string, number | string>;
 }
 
+export interface MechanicalModel {
+  gearRatio: number;
+  backlashArcmin: number;
+  torsionalStiffnessNmPerRad: number;
+  loadInertiaKgm2: number;
+  requiredPositionAccuracyArcmin?: number;
+  velocityLoopBandwidthHz?: number;
+  regenPowerPeakW?: number;
+  brakingResistorRatedContinuousW?: number;
+}
+
 export interface UnifiedEngineeringModel {
   project: ProjectModel;
   electrical: ElectricalModel;
@@ -134,6 +148,7 @@ export interface UnifiedEngineeringModel {
   powerStage: PowerStageModel;
   currentSense: CurrentSenseModel;
   environment: EnvironmentModel;
+  mechanical: MechanicalModel;
   issue: EngineeringIssueModel;
 }
 

@@ -6,6 +6,8 @@ import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, getEngi
 import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 import { getCrossDomainCouplings } from '../utils/crossDomainCouplingMatrix';
 import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
+import { extractUnifiedEngineeringModel } from '../utils/unifiedStateExtractor';
+import { runDeterministicPrecomputations } from '../utils/deterministicPrecomputation';
 import {
   getEmcPillars,
   getComponentPillars,
@@ -156,12 +158,31 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     crossDomainVetoes,
   };
   const combinedMetrics = calculateDomainMetrics(issue, context);
-  const bldcEvidence = isBldc ? calculateBldcDeterministicCalculations(issue) : [];
-  if (combinedMetrics.length || bldcEvidence.length) {
+  const precomputedFacts = runDeterministicPrecomputations(context, issue);
+  const factsAsEvidence = precomputedFacts.map((fact) => ({
+    id: fact.id,
+    key: fact.parameter,
+    title: fact.title,
+    engine: 'deterministicPrecomputation',
+    calculation: fact.title,
+    formula: fact.formulaOrBasis,
+    value: typeof fact.calculatedValue === 'number' ? fact.calculatedValue : Number(fact.calculatedValue) || 0,
+    unit: fact.unit,
+    inputs: fact.inputs || [],
+    inputSources: fact.inputSources || {},
+    missingInputs: fact.missingInputs || [],
+    specThreshold: typeof fact.specThreshold === 'number' ? fact.specThreshold : (fact.specThreshold ? parseFloat(String(fact.specThreshold)) : undefined),
+    safetyMargin: typeof fact.safetyMargin === 'number' ? fact.safetyMargin : (fact.safetyMargin ? parseFloat(String(fact.safetyMargin)) : undefined),
+    complianceVerdict: fact.complianceVerdict,
+    directiveForAi: fact.directiveForAi,
+    status: (fact.status || 'CALCULATED') as 'CALCULATED' | 'INSUFFICIENT_INPUT',
+  }));
+
+  if (combinedMetrics.length || factsAsEvidence.length) {
     const calculatedEvidence = Array.from(
       new Map([
         ...(result.analysisBasis?.calculatedOutputEvidence || []),
-        ...bldcEvidence,
+        ...factsAsEvidence,
       ].map((item) => [item.id || item.key, item])).values()
     );
     result.analysisBasis = {
@@ -169,7 +190,7 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
       calculatedOutputs: Array.from(new Set([
         ...(result.analysisBasis?.calculatedOutputs || []),
         ...combinedMetrics.map((m) => `${m.label}=${m.value}`),
-        ...bldcEvidence.filter((e) => e.status === 'CALCULATED' && e.value !== undefined).map((e) => `${e.key}=${e.value} ${e.unit}; margin=${e.safetyMargin ?? 'N/A'}; verdict=${e.complianceVerdict ?? 'N/A'}`),
+        ...factsAsEvidence.filter((e) => e.status === 'CALCULATED' && e.value !== undefined).map((e) => `${e.key}=${e.value} ${e.unit}; margin=${e.safetyMargin ?? 'N/A'}; verdict=${e.complianceVerdict ?? 'N/A'}`),
       ])),
       calculatedOutputEvidence: calculatedEvidence,
     };

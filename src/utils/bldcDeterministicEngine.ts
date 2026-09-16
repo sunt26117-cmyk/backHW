@@ -1,5 +1,7 @@
-import { IssueInput, MeasurementSource } from '../types';
+import { IssueInput, MeasurementSource, ProjectContext } from '../types';
+import { UnifiedEngineeringModel } from '../types/v4Models';
 import { calculateBusPumping, checkMillerRisk } from './motorPhysicsEngine';
+import { extractUnifiedEngineeringModel } from './unifiedStateExtractor';
 
 export type DeterministicCalculationStatus = 'CALCULATED' | 'INSUFFICIENT_INPUT';
 
@@ -22,23 +24,27 @@ export interface BldcCalculationEvidence {
   directiveForAi: string;
 }
 
-function finiteNumber(issue: IssueInput, key: string): number | undefined {
-  const raw = issue.measuredValues?.[key];
-  if (raw === undefined || raw === null || raw === '') return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
+function sourceFor(issue: IssueInput, key: string, value: any): MeasurementSource | 'MISSING' {
+  if (value === undefined || value === null) return 'MISSING';
+  if (issue.measuredValues && issue.measuredValues[key] !== undefined && issue.measuredValues[key] !== '') {
+    return issue.measurementProvenance?.[key]?.source || issue.measuredValueSource || 'USER_MEASURED';
+  }
+  return 'TEXT_INFERRED' as any;
 }
 
-function sourceFor(issue: IssueInput, key: string): MeasurementSource | 'MISSING' {
-  if (finiteNumber(issue, key) === undefined) return 'MISSING';
-  return issue.measurementProvenance?.[key]?.source || issue.measuredValueSource || 'UNKNOWN';
-}
-
-function buildBusPumping(issue: IssueInput): BldcCalculationEvidence {
+function buildBusPumping(issue: IssueInput, state: UnifiedEngineeringModel): BldcCalculationEvidence {
   const inputs = ['busVoltageNominalV', 'cBusUf', 'rotorInertiaKgm2', 'rpm', 'vdsRatingV'];
-  const values = Object.fromEntries(inputs.map((key) => [key, finiteNumber(issue, key)])) as Record<string, number | undefined>;
+  
+  const values: Record<string, number | undefined> = {
+    busVoltageNominalV: state.electrical.vbusNominal || undefined,
+    cBusUf: state.powerStage.cbusUf || undefined,
+    rotorInertiaKgm2: state.motor.j || undefined,
+    rpm: state.motor.maxRpm || undefined,
+    vdsRatingV: state.powerStage.vdsRating || undefined,
+  };
+
   const missingInputs = inputs.filter((key) => values[key] === undefined);
-  const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key)])) as BldcCalculationEvidence['inputSources'];
+  const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key, values[key])])) as BldcCalculationEvidence['inputSources'];
 
   if (missingInputs.length > 0) {
     return {
@@ -50,9 +56,9 @@ function buildBusPumping(issue: IssueInput): BldcCalculationEvidence {
       engine: 'motorPhysicsEngine',
       calculation: 'busPumping',
       formula: 'V_peak = sqrt(V_nom² + 2·E_regen/Cbus)，E_regen 基于 0.5·J·ω²',
-      inputs: inputs.map((key) => `measuredValues.${key}`),
+      inputs: inputs.map((key) => `state.${key}`),
       inputSources,
-      missingInputs: missingInputs.map((key) => `measuredValues.${key}`),
+      missingInputs: missingInputs.map((key) => `state.${key}`),
       directiveForAi: `当前 BLDC 母线泵升缺少结构化输入：${missingInputs.join(', ')}。不得输出确定性的泵升峰值；不得从自由文本或默认参数补齐。`,
     };
   }
@@ -76,7 +82,7 @@ function buildBusPumping(issue: IssueInput): BldcCalculationEvidence {
     engine: 'motorPhysicsEngine',
     calculation: 'busPumping',
     formula: 'V_peak = sqrt(V_nom² + 2·E_regen/Cbus)，E_regen 基于 0.5·J·ω²',
-    inputs: inputs.map((key) => `measuredValues.${key}`),
+    inputs: inputs.map((key) => `state.${key}`),
     inputSources,
     missingInputs: [],
     specThreshold: values.vdsRatingV,
@@ -86,11 +92,18 @@ function buildBusPumping(issue: IssueInput): BldcCalculationEvidence {
   };
 }
 
-function buildMiller(issue: IssueInput): BldcCalculationEvidence {
+function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel): BldcCalculationEvidence {
   const inputs = ['dvdtVns', 'cgdPf', 'rgOffOhm', 'vthMinV'];
-  const values = Object.fromEntries(inputs.map((key) => [key, finiteNumber(issue, key)])) as Record<string, number | undefined>;
+  
+  const values: Record<string, number | undefined> = {
+    dvdtVns: state.powerStage.dvdtVns,
+    cgdPf: state.powerStage.cgdPf || (state.powerStage.qgdNc ? state.powerStage.qgdNc * 1000 / 12 : undefined),
+    rgOffOhm: state.powerStage.rgOffOhm,
+    vthMinV: state.powerStage.vthMinV,
+  };
+
   const missingInputs = inputs.filter((key) => values[key] === undefined);
-  const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key)])) as BldcCalculationEvidence['inputSources'];
+  const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key, values[key])])) as BldcCalculationEvidence['inputSources'];
 
   if (missingInputs.length > 0) {
     return {
@@ -102,9 +115,9 @@ function buildMiller(issue: IssueInput): BldcCalculationEvidence {
       engine: 'motorPhysicsEngine',
       calculation: 'millerRisk',
       formula: 'Vgs_induced ≈ Cgd·dv/dt·Rg',
-      inputs: inputs.map((key) => `measuredValues.${key}`),
+      inputs: inputs.map((key) => `state.${key}`),
       inputSources,
-      missingInputs: missingInputs.map((key) => `measuredValues.${key}`),
+      missingInputs: missingInputs.map((key) => `state.${key}`),
       directiveForAi: `当前 BLDC Miller 计算缺少结构化输入：${missingInputs.join(', ')}。不得用自由文本或默认参数替代，也不得输出确定性的感应峰值。`,
     };
   }
@@ -126,7 +139,7 @@ function buildMiller(issue: IssueInput): BldcCalculationEvidence {
     engine: 'motorPhysicsEngine',
     calculation: 'millerRisk',
     formula: 'Vgs_induced ≈ Cgd·dv/dt·Rg',
-    inputs: inputs.map((key) => `measuredValues.${key}`),
+    inputs: inputs.map((key) => `state.${key}`),
     inputSources,
     missingInputs: [],
     specThreshold: values.vthMinV,
@@ -136,6 +149,6 @@ function buildMiller(issue: IssueInput): BldcCalculationEvidence {
   };
 }
 
-export function calculateBldcDeterministicCalculations(issue: IssueInput): BldcCalculationEvidence[] {
-  return [buildBusPumping(issue), buildMiller(issue)];
+export function calculateBldcDeterministicCalculations(issue: IssueInput, state: UnifiedEngineeringModel): BldcCalculationEvidence[] {
+  return [buildBusPumping(issue, state), buildMiller(issue, state)];
 }

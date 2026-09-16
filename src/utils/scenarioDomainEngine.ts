@@ -1,6 +1,8 @@
 import { IssueInput, IssueCategory, ProjectContext, MeasurementSource } from '../types';
 import { calculateBldcDeterministicCalculations } from './bldcDeterministicEngine';
+import { calculateRobotJointDeterministicCalculations } from './robotJointDeterministicEngine';
 import { calculateTwoMassResonance } from './robotJointResonance';
+import { extractUnifiedEngineeringModel } from './unifiedStateExtractor';
 
 export type EngineeringDomain =
   | 'BLDC'
@@ -587,8 +589,9 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
   const tagFor = (key: string): 'MEASURED'|'BENCHMARK' => fieldSource(key) === 'BENCHMARK' ? 'BENCHMARK' : 'MEASURED';
   const noteFor = (key: string) => tagFor(key) === 'BENCHMARK' ? 'BENCHMARK · 仅演示，请用实测/导入数据覆盖' : `${fieldSource(key)} · 当前输入`;
   const metrics: Array<{label:string; value:string; note:string; tag:'MEASURED'|'CALCULATED'|'SPEC'|'BENCHMARK'}> = [];
+  const state = extractUnifiedEngineeringModel(context || {} as any, issue);
   if (d === 'BLDC') {
-    const evidence = calculateBldcDeterministicCalculations(issue);
+    const evidence = calculateBldcDeterministicCalculations(issue, state);
     evidence.forEach((item) => {
       if (item.status === 'CALCULATED' && item.value !== undefined) {
         metrics.push({
@@ -608,57 +611,23 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
       }
     });
   } else if (d === 'ROBOT_JOINT') {
-    const backlash = n('backlashArcmin'), stiffness = n('torsionalStiffnessNmPerRad'), torque = n('outputTorqueNm'), reqAccuracy = n('requiredPositionAccuracyArcmin');
-    if (finite(backlash)) metrics.push({label:'背隙',value:`${backlash} arcmin`,note:noteFor('backlashArcmin'),tag:tagFor('backlashArcmin')});
-    if (finite(backlash) && finite(stiffness) && finite(torque) && stiffness > 0) {
-      const windupArcmin = (torque / stiffness) * (180 / Math.PI) * 60;
-      const totalErrorArcmin = backlash + windupArcmin;
-      metrics.push({label:'扭转柔性附加误差',value:`${windupArcmin.toFixed(1)} arcmin`,note:'CALCULATED · T_out/K_stiffness 折算',tag:'CALCULATED'});
-      metrics.push({label:'输出端运动学总误差(估算)',value:`${totalErrorArcmin.toFixed(1)} arcmin`,note:'CALCULATED · 背隙 + 扭转柔性，不含传感器与控制误差',tag:'CALCULATED'});
-      if (finite(reqAccuracy)) metrics.push({label:'定位精度裕量',value:`${(reqAccuracy - totalErrorArcmin).toFixed(1)} arcmin`,note:'规格要求 - 估算总误差',tag:'CALCULATED'});
-    }
-    const jMotor = n('motorInertiaKgm2'), jLoad = n('loadInertiaKgm2'), gearRatio = n('gearRatio'), vBw = n('velocityLoopBandwidthHz');
-    if (finite(stiffness) && finite(jMotor) && jMotor > 0 && finite(jLoad) && finite(gearRatio) && gearRatio > 0) {
-      const res = calculateTwoMassResonance({
-        torsionalStiffnessNmPerRad: stiffness,
-        motorInertiaKgm2: jMotor,
-        loadInertiaKgm2: jLoad,
-        gearRatio,
-        velocityLoopBandwidthHz: finite(vBw) && vBw > 0 ? vBw : undefined,
-      });
-      metrics.push({
-        label: '估算机械谐振频率 f_res',
-        value: `${res.resonanceFreqHz} Hz`,
-        note: res.isPlausible ? 'CALCULATED · 二质量输出侧折算极点' : `CALCULATED · ${res.plausibilityWarning}`,
-        tag: 'CALCULATED',
-      });
-      metrics.push({
-        label: '输出端反谐振频率 f_ar',
-        value: `${res.antiResonanceFreqHz} Hz`,
-        note: 'CALCULATED · 输出端零点 sqrt(K/J_L)/(2π)',
-        tag: 'CALCULATED',
-      });
-      metrics.push({
-        label: '关节惯量比 (J_L_refl/J_m)',
-        value: `${res.inertiaRatio} : 1`,
-        note: res.inertiaRatio <= 10 ? 'CALCULATED · 惯量匹配良好 (<=10)' : 'CALCULATED · 惯量比偏大 (>10)，需加强控制鲁棒性',
-        tag: 'CALCULATED',
-      });
-      if (finite(vBw) && vBw > 0) {
+    const jointCalculations = calculateRobotJointDeterministicCalculations(issue, state);
+    jointCalculations.forEach((calc) => {
+      if (calc.status === 'CALCULATED') {
         metrics.push({
-          label: '谐振/带宽隔离度',
-          value: `${res.bandwidthIsolationRatio}×`,
-          note: res.isBandwidthAboveResonance
-            ? 'CALCULATED · 严重不稳定！速度环带宽已骑在或高于谐振频率，闭环必剧烈啸叫'
-            : res.isBandwidthInvadingResonance
-            ? 'CALCULATED · 侵入谐振区 (<3×)，必须配置陷波器 (Notch Filter) 或下调带宽'
-            : 'CALCULATED · 隔离度良好 (>=3×)',
+          label: calc.title,
+          value: `${calc.value} ${calc.unit}`,
+          note: `CALCULATED · 裕量: ${calc.safetyMargin?.toFixed(2) ?? 'N/A'}`,
           tag: 'CALCULATED',
         });
       }
-    }
+    });
+    
+    // 保留非物理确定性的剩余几个散装指标，如电阻额定比
     const regenPeak = n('regenPowerPeakW'), resistorRated = n('brakingResistorRatedContinuousW');
-    if (finite(regenPeak) && finite(resistorRated) && resistorRated > 0) metrics.push({label:'峰值回馈/泄放电阻额定比',value:`${((regenPeak / resistorRated) * 100).toFixed(0)}%`,note:'CALCULATED · 需结合占空比看平均功率，非直接判据',tag:'CALCULATED'});
+    if (finite(regenPeak) && finite(resistorRated) && resistorRated > 0) {
+      metrics.push({label:'峰值回馈/泄放电阻额定比',value:`${((regenPeak / resistorRated) * 100).toFixed(0)}%`,note:'CALCULATED · 需结合占空比看平均功率，非直接判据',tag:'CALCULATED'});
+    }
   } else if (d === 'EMC_BCI') {
     const inj=n('bciInjectionMa'), err=n('currentSenseErrorPct'), rec=n('recoveryTimeMs'), icm=n('commonModeCurrentMa'), vnode=n('bciNodeVoltageV');
     if (finite(inj)) metrics.push({label:'BCI注入',value:`${inj} mA`,note:noteFor('bciInjectionMa'),tag:tagFor('bciInjectionMa')});
