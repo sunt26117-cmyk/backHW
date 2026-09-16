@@ -1,3 +1,4 @@
+import { ConfidenceLevel } from "../types/v4Models";
 import { ProjectContext, IssueInput } from '../types';
 import { calculateBldcDeterministicCalculations } from './bldcDeterministicEngine';
 import { calculateRobotJointDeterministicCalculations } from './robotJointDeterministicEngine';
@@ -18,6 +19,8 @@ export interface PrecomputedFact {
   complianceVerdict: 'PASS' | 'MARGINAL' | 'FAIL' | 'CRITICAL';
   directiveForAi: string; // 对大模型的强制引用指令
   status?: 'CALCULATED' | 'INSUFFICIENT_INPUT';
+  confidence?: ConfidenceLevel;
+  confidenceReason?: string;
   inputs?: string[];
   inputSources?: Record<string, string>;
   missingInputs?: string[];
@@ -50,7 +53,8 @@ export function runDeterministicPrecomputations(
     facts.push(thermalResult.fact);
     // 注入恶化参数到状态树 (Pipeline DAG)
     state.powerStage.vthMinV = thermalResult.vthHot;
-    state.powerStage.rdsOnMilliOhm = thermalResult.rdsOnHot;
+    // we shouldn't overwrite the original ParamOrigin, maybe just set the value
+      state.powerStage.rdsOnMilliOhm = { ...state.powerStage.rdsOnMilliOhm, value: thermalResult.rdsOnHot as any };
     // 此高温甚至会导致关断更慢，如果后续有专门模型可以继续在此叠加大
   }
 

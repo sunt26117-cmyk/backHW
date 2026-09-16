@@ -200,7 +200,7 @@ export function auditAiResult(
     const hasNumericUnit = /(?:\d+(?:\.\d+)?)\s*(?:V|A|℃|°C|ns|μs|ms|dB(?:μV(?:\/m)?)?|MHz|kHz|arcmin|%|Ω)/i.test(text);
     if (hasNumericUnit && citations.length === 0) {
       flags.push({
-        level: 'WARNING',
+        level: 'FATAL',
         ruleId: 'RULE_12_CITATION_MISSING',
         title: '关键数值结论缺少证据引用',
         message: `${owner} 包含带单位的数值结论，但没有提供 citedFields；无法沿证据链回溯到 measuredValues 或本地计算。`,
@@ -291,23 +291,40 @@ export function auditAiResult(
     }
 
     // 2.3 审计数值一致性 (RULE_07_NUMERICAL_CONSISTENCY)
-    // 检查方案描述是否对用户输入实测值产生明显篡改（如实测 37.8V 篡改为 46V）
-    if (measuredKeyValues.vbus) {
-      const vbusRegex = /(?:实测|峰值|达到|泵升至)\s*([0-9.]+)\s*V/i;
-      const match = combinedText.match(vbusRegex);
-      if (match && match[1]) {
-        const aiNum = parseFloat(match[1]);
-        const inputNum = measuredKeyValues.vbus;
-        // 如果差异 > 10% 且绝对值 > 2V，且该数值不是耐压阈值 (如40V/60V)
-        if (Math.abs(aiNum - inputNum) > 2.0 && Math.abs(aiNum - 40) > 0.5 && Math.abs(aiNum - 60) > 0.5) {
-          flags.push({
-            level: 'WARNING',
-            ruleId: 'RULE_07_NUMERICAL_CONSISTENCY',
-            title: '实测数值引用偏离真实输入',
-            message: `方案 [${action.id || idx}] 描述中引用实测母线电压为 ${aiNum}V，与用户输入工况实测值 ${inputNum}V 存在明显矛盾。`,
-            fieldPath: `candidateActions[${idx}].description`,
-            autoFixApplied: false,
-          });
+    // 将 RULE_07 泛化至所有 measuredKeyValues
+    for (const [key, inputNum] of Object.entries(measuredKeyValues)) {
+      const unit = getUnitHint(key);
+      if (!unit) continue;
+      
+      const escapedUnit = unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const valuesInText = [...combinedText.matchAll(new RegExp(`([+-]?\\d+(?:\\.\\d+)?)\\s*${escapedUnit}`, 'ig'))]
+        .map((x) => Number(x[1]))
+        .filter(Number.isFinite);
+
+      if (valuesInText.length > 0) {
+        for (const aiNum of valuesInText) {
+          let allowedDelta = Math.max(0.05, Math.abs(inputNum) * 0.1); // 默认允许 10% 的误差
+          if (unit === 'V') allowedDelta = 2.0;
+          else if (unit === '℃' || unit === '°C') allowedDelta = 5.0;
+          else if (unit === 'A') allowedDelta = 1.0;
+          else if (unit === '%') allowedDelta = 2.0;
+          else if (unit === 'ms') allowedDelta = 10.0;
+          
+          if (Math.abs(aiNum - inputNum) > allowedDelta) {
+            // 忽略常见的绝对阈值（如耐压 40V/60V，硅结温限制 175℃ 等），避免误伤
+            const isCommonThreshold = (unit === 'V' && (Math.abs(aiNum - 40) < 0.5 || Math.abs(aiNum - 60) < 0.5)) ||
+                                      (unit === '℃' && Math.abs(aiNum - 175) < 0.5);
+            if (!isCommonThreshold) {
+              flags.push({
+                level: 'WARNING',
+                ruleId: 'RULE_07_NUMERICAL_CONSISTENCY',
+                title: '实测数值引用偏离真实输入',
+                message: `方案 [${action.id || idx}] 描述中引用 ${key} 数值为 ${aiNum}${unit}，与用户输入工况实测值 ${inputNum}${unit} 存在矛盾。`,
+                fieldPath: `candidateActions[${idx}].description`,
+                autoFixApplied: false,
+              });
+            }
+          }
         }
       }
     }
@@ -514,9 +531,13 @@ export function auditAiResult(
   auditScore = Math.max(0, Math.min(100, auditScore));
 
   const hasFatal = flags.some((f) => f.level === 'FATAL');
+  const hasUncited = flags.some((f) => f.ruleId === 'RULE_12_CITATION_MISSING');
   let overallStatus: AiAuditResult['overallStatus'] = 'APPROVED';
-  if (hasFatal || auditScore < 50) {
-    overallStatus = hasFatal ? 'REJECTED_AUDIT_FAILED' : 'FLAGGED_NEEDS_REVIEW';
+  
+  if (hasFatal || hasUncited) {
+    overallStatus = 'NEEDS_VERIFICATION';
+  } else if (auditScore < 50) {
+    overallStatus = 'FLAGGED_NEEDS_REVIEW';
   } else if (auditScore < 85) {
     overallStatus = 'PASSED_WITH_WARNINGS';
   }

@@ -82,7 +82,7 @@ export interface IssueInput {
   notes?: string;
   attachments?: IssueAttachment[];
   /** 实测数值回填：键值由工程师输入，参与本地专家引擎与各页面的场景化计算 */
-  measuredValues?: Record<string, number | string>;
+  measuredValues?: Record<string, number | string | boolean>;
   measuredValueSource?: 'USER_MEASURED' | 'BENCHMARK' | 'IMPORTED';
   /** 每个字段独立记录来源，避免整个工程被一个 source 标签绑死。 */
   measurementProvenance?: Record<string, MeasurementProvenance>;
@@ -293,7 +293,7 @@ export interface CandidateAction {
   rejectionReason?: string;
   crossDomainCouplingChecks?: Array<{ rule: string; addressed: boolean; note: string }>; // 跨域耦合物理规则核对回填 (待办1)
   /** 关键数值结论的证据来源键：measuredValues.<key> / baseline.analysisBasis.calculatedOutputs:<label> / precomputed.<id> */
-  citedFields?: string[];
+  citedFields: string[];
 }
 
 export type RecommendationGrade =
@@ -684,7 +684,7 @@ export interface CopilotAnalysisResult {
     }>;
   };
   /** AI 数值结论的集中引用索引，供审计器做来源存在性与一致性核对。 */
-  citedFields?: string[];
+  citedFields: string[];
   multiDomainAnalysis?: {
     primaryDomain: string;
     relatedDomains: string[];
@@ -772,7 +772,7 @@ export interface AiAuditFlag {
 export interface AiAuditResult {
   passed: boolean;
   auditScore: number; // 0 - 100
-  overallStatus: 'APPROVED' | 'PASSED_WITH_WARNINGS' | 'FLAGGED_NEEDS_REVIEW' | 'REJECTED_AUDIT_FAILED';
+  overallStatus: 'APPROVED' | 'PASSED_WITH_WARNINGS' | 'FLAGGED_NEEDS_REVIEW' | 'REJECTED_AUDIT_FAILED' | 'NEEDS_VERIFICATION';
   flags: AiAuditFlag[];
   autoFixSummary: string[];
   auditedAt: string;

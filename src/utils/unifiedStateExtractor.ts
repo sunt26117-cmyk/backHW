@@ -1,5 +1,5 @@
 import { IssueInput, ProjectContext } from '../types';
-import { UnifiedEngineeringModel } from '../types/v4Models';
+import { UnifiedEngineeringModel, createParam, OriginTier } from '../types/v4Models';
 
 // 正则提取辅助函数
 function extractNumber(text: string, patterns: RegExp[], fallback: number | null = null): number | null {
@@ -28,13 +28,36 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
   const getNum = (key: string, patterns: RegExp[], fallback: number | null = null): number => {
     const raw = issue.measuredValues?.[key];
     if (raw !== undefined && raw !== null && raw !== '') {
-      const parsed = Number(raw);
-      if (!isNaN(parsed)) return parsed;
+      return Number(raw);
     }
-    // If structured input is missing, attempt to extract from text
-    const extracted = extractNumber(fullText, patterns, fallback);
-    return extracted !== null ? extracted : (fallback !== null ? fallback : 0); // defaulting to 0 for strict types, though missing values will fail checks later
+    const extracted = extractNumber(fullText, patterns);
+    return extracted !== null ? extracted : (fallback || 0);
   };
+  
+  const getParam = <T>(key: string, patterns: RegExp[], fallback: number): import('../types/v4Models').ParamOrigin<T> => {
+    const raw = issue.measuredValues?.[key];
+    if (raw !== undefined && raw !== null && raw !== '') {
+      return createParam<T>(Number(raw), 'MEASURED', 'User Input');
+    }
+    const extracted = extractNumber(fullText, patterns);
+    if (extracted !== null) {
+      return createParam<T>(extracted, 'MEASURED', 'Text Extraction');
+    }
+    return createParam<T>(fallback, 'DEFAULT', 'Fallback Value');
+  };
+  
+  const getOptionalParam = <T>(key: string, patterns: RegExp[], fallback?: number): import('../types/v4Models').ParamOrigin<T> | undefined => {
+    const raw = issue.measuredValues?.[key];
+    if (raw !== undefined && raw !== null && raw !== '') {
+      return createParam<T>(Number(raw), 'MEASURED', 'User Input');
+    }
+    const extracted = extractNumber(fullText, patterns);
+    if (extracted !== null) {
+      return createParam<T>(extracted, 'MEASURED', 'Text Extraction');
+    }
+    return fallback !== undefined ? createParam<T>(fallback, 'DEFAULT', 'Fallback Value') : undefined;
+  };
+
   
   const getOptionalNum = (key: string, patterns: RegExp[], fallback: number | null = null): number | undefined => {
     const raw = issue.measuredValues?.[key];
@@ -81,17 +104,20 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
     powerStage: {
       mosfetPartNumber: issue.measuredValues?.mosfetPartNumber as string || 'Unknown_MOSFET',
       vdsRating: getNum('vdsRatingV', [/Vds耐压\s*([0-9.]+)\s*V/i, /Vds\s*=\s*([0-9.]+)\s*V/i, /([0-9.]+)\s*V耐压/i], 40),
-      rdsOnMilliOhm: getNum('rdsOnMilliOhm', [/Rds\(on\)\s*([0-9.]+)\s*mΩ/i, /导通电阻\s*([0-9.]+)\s*mΩ/i], 2.5),
+      rdsOnMilliOhm: getParam('rdsOnMilliOhm', [/Rds\(on\)\s*([0-9.]+)\s*mΩ/i, /导通电阻\s*([0-9.]+)\s*mΩ/i], 2.5),
+      rthJc: getOptionalParam('rthJc', [/Rth_jc\s*([0-9.]+)/i]),
+      cissPf: getOptionalParam('cissPf', [/Ciss\s*([0-9.]+)/i]),
+      lsNh: getOptionalParam('lsNh', [/Ls\s*([0-9.]+)/i]),
       vthMinV: getOptionalNum('vthMinV', [/Vth_min\s*=\s*([0-9.]+)\s*V/i, /阈值下限\s*([0-9.]+)\s*V/i]),
       dvdtVns: getOptionalNum('dvdtVns', [/dv\/dt\s*([0-9.]+)\s*V\/ns/i, /dvdt\s*([0-9.]+)\s*V\/ns/i]),
-      cgdPf: getOptionalNum('cgdPf', [/Cgd\s*=\s*([0-9.]+)\s*pF/i, /米勒电容\s*([0-9.]+)\s*pF/i]),
+      cgdPf: getOptionalParam('cgdPf', [/Cgd\s*=\s*([0-9.]+)\s*pF/i, /米勒电容\s*([0-9.]+)\s*pF/i]),
       qgNc: getNum('qgNc', [/Qg\s*=\s*([0-9.]+)\s*nC/i], 50),
       qgdNc: getNum('qgdNc', [/Qgd\s*=\s*([0-9.]+)\s*nC/i, /米勒电荷\s*([0-9.]+)\s*nC/i], 15),
       qrrNc: getNum('qrrNc', [/Qrr\s*=\s*([0-9.]+)\s*nC/i], 100),
       gateDriverPartNumber: 'Unknown_Driver',
-      rgOnOhm: getNum('rgOnOhm', [/Rg_on\s*([0-9.]+)\s*Ω/i], 10),
-      rgOffOhm: getNum('rgOffOhm', [/Rg_off\s*([0-9.]+)\s*Ω/i, /关断电阻\s*([0-9.]+)\s*Ω/i, /Rg\s*=\s*([0-9.]+)\s*Ω/i], 2.2),
-      cbusUf: getNum('cBusUf', [/Cbus\s*=\s*([0-9.]+)\s*uF/i, /母线电容\s*([0-9.]+)\s*uF/i], 1000),
+      rgOnOhm: getParam('rgOnOhm', [/Rg_on\s*([0-9.]+)\s*Ω/i], 10),
+      rgOffOhm: getParam('rgOffOhm', [/Rg_off\s*([0-9.]+)\s*Ω/i, /关断电阻\s*([0-9.]+)\s*Ω/i, /Rg\s*=\s*([0-9.]+)\s*Ω/i], 2.2),
+      cbusUf: getParam('cBusUf', [/Cbus\s*=\s*([0-9.]+)\s*uF/i, /母线电容\s*([0-9.]+)\s*uF/i], 1000),
       cbusEsrMilliOhm: getNum('cbusEsrMilliOhm', [/ESR\s*([0-9.]+)\s*mΩ/i], 10),
     },
     currentSense: {
@@ -127,7 +153,7 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
       measuredData: issue.actualMeasurement,
       requirement: issue.requirement,
       engineeringConcern: issue.engineeringConcern,
-      measuredValues: issue.measuredValues,
+      measuredValues: issue.measuredValues as unknown as Record<string, string | number>,
     }
   };
 }

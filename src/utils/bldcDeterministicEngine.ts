@@ -1,5 +1,5 @@
 import { IssueInput, MeasurementSource, ProjectContext } from '../types';
-import { UnifiedEngineeringModel } from '../types/v4Models';
+import { UnifiedEngineeringModel, ConfidenceLevel } from '../types/v4Models';
 import { calculateBusPumping, checkMillerRisk } from './motorPhysicsEngine';
 import { extractUnifiedEngineeringModel } from './unifiedStateExtractor';
 
@@ -21,6 +21,8 @@ export interface BldcCalculationEvidence {
   specThreshold?: number;
   safetyMargin?: number;
   complianceVerdict?: 'PASS' | 'MARGINAL' | 'FAIL' | 'CRITICAL';
+  confidence?: ConfidenceLevel;
+  confidenceReason?: string;
   directiveForAi: string;
 }
 
@@ -36,11 +38,12 @@ function buildBusPumping(issue: IssueInput, state: UnifiedEngineeringModel): Bld
   const inputs = ['busVoltageNominalV', 'cBusUf', 'rotorInertiaKgm2', 'rpm', 'vdsRatingV'];
   
   const values: Record<string, number | undefined> = {
-    busVoltageNominalV: state.electrical.vbusNominal || undefined,
-    cBusUf: state.powerStage.cbusUf || undefined,
-    rotorInertiaKgm2: state.motor.j || undefined,
-    rpm: state.motor.maxRpm || undefined,
-    vdsRatingV: state.powerStage.vdsRating || undefined,
+    dvdtVns: state.powerStage.dvdtVns,
+    cgdPf: state.powerStage.cgdPf?.value || (state.powerStage.qgdNc ? state.powerStage.qgdNc * 1000 / 12 : undefined),
+    cissPf: state.powerStage.cissPf?.value || (state.powerStage.qgNc ? state.powerStage.qgNc * 1000 / 12 : undefined),
+    rgOffOhm: state.powerStage.rgOffOhm?.value,
+    lsNh: state.powerStage.lsNh?.value || 5, // default 5nH
+    vthMinV: state.powerStage.vthMinV,
   };
 
   const missingInputs = inputs.filter((key) => values[key] === undefined);
@@ -93,12 +96,12 @@ function buildBusPumping(issue: IssueInput, state: UnifiedEngineeringModel): Bld
 }
 
 function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel): BldcCalculationEvidence {
-  const inputs = ['dvdtVns', 'cgdPf', 'rgOffOhm', 'vthMinV'];
+  const inputs = ['dvdtVns', 'cgdPf', 'cissPf', 'rgOffOhm', 'lsNh', 'vthMinV'];
   
   const values: Record<string, number | undefined> = {
     dvdtVns: state.powerStage.dvdtVns,
-    cgdPf: state.powerStage.cgdPf || (state.powerStage.qgdNc ? state.powerStage.qgdNc * 1000 / 12 : undefined),
-    rgOffOhm: state.powerStage.rgOffOhm,
+    cgdPf: state.powerStage.cgdPf?.value || (state.powerStage.qgdNc ? state.powerStage.qgdNc * 1000 / 12 : undefined),
+    rgOffOhm: state.powerStage.rgOffOhm?.value,
     vthMinV: state.powerStage.vthMinV,
   };
 
@@ -114,7 +117,7 @@ function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel): BldcCal
       unit: 'V',
       engine: 'motorPhysicsEngine',
       calculation: 'millerRisk',
-      formula: 'Vgs_induced ≈ Cgd·dv/dt·Rg',
+      formula: '二阶 RK4 微分: Cgs·dv/dt + i_R = Cgd·dv/dt, Lg·di_R/dt + Rg·i_R = v',
       inputs: inputs.map((key) => `state.${key}`),
       inputSources,
       missingInputs: missingInputs.map((key) => `state.${key}`),
@@ -122,12 +125,34 @@ function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel): BldcCal
     };
   }
 
+  
+  let confidence: ConfidenceLevel = 'HIGH';
+  let confidenceReason = '';
+
+  const cgdOrigin = state.powerStage.cgdPf?.origin;
+  const rgOffOrigin = state.powerStage.rgOffOhm?.origin;
+
+  if (cgdOrigin === 'DEFAULT' || rgOffOrigin === 'DEFAULT') {
+    confidence = 'LOW';
+    confidenceReason = 'Miller计算使用了兜底默认参数，计算置信度降级为估算 (ESTIMATED/INDICATIVE)。';
+  } else if (cgdOrigin === 'DATASHEET' || rgOffOrigin === 'DATASHEET') {
+    confidence = 'MEDIUM';
+    confidenceReason = 'Miller计算基于数据手册参数。';
+  } else {
+    confidence = 'HIGH';
+    confidenceReason = 'Miller计算基于实测参数。';
+  }
+
   const miller = checkMillerRisk({
     V_th_min: values.vthMinV!,
     C_gd_pF: values.cgdPf!,
+    C_iss_pF: values.cissPf!,
     R_g_pulldown_ohm: values.rgOffOhm!,
+    L_g_nH: values.lsNh!,
     dv_dt_V_per_ns: values.dvdtVns!,
+    vbus: state.electrical.vbusNominal || 12,
   });
+
 
   return {
     id: 'BLDC_MILLER_RISK',

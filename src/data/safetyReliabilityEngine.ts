@@ -72,6 +72,58 @@ export const SAMPLE_SAFETY_TRACEABILITY_CHAIN: SafetyTraceabilityNode[] = [
   },
 ];
 
+export function computeFmedaRow(params: {
+  component: string;
+  failureMode: string;
+  lambdaTotalFit: number;
+  fractionSafePct: number;
+  dcPct: number; // Single-point diagnostic coverage
+  dcLatentPct?: number; // Latent fault diagnostic coverage
+  evidence: any;
+  evidenceSource: string;
+}): FmedaRow {
+  const { component, failureMode, lambdaTotalFit, fractionSafePct, dcPct, dcLatentPct = 0, evidence, evidenceSource } = params;
+  
+  const fractionDangerousPct = 100 - fractionSafePct;
+  const lambdaSafeFit = lambdaTotalFit * (fractionSafePct / 100);
+  const lambdaDangerous = lambdaTotalFit * (fractionDangerousPct / 100);
+  
+  // If there is no safety mechanism, DC is 0, so it's a single point failure.
+  // If there is a safety mechanism, the uncovered part is residual failure (RF), and the covered part goes to latent failure evaluation.
+  // For simplicity based on common practice: we assume all dangerous faults are evaluated against DC.
+  // If DC > 0, it means there's a safety mechanism. The uncovered portion is RF.
+  // If DC == 0, it's SPF.
+  let lambdaSpfFit = 0;
+  let lambdaRfFit = 0;
+  
+  if (dcPct > 0) {
+    lambdaRfFit = lambdaDangerous * (1 - dcPct / 100);
+  } else {
+    lambdaSpfFit = lambdaDangerous;
+  }
+  
+  // Latent failures = covered dangerous faults * (1 - DC_latent)
+  // Usually, if a fault is detected, it's safe (prevented). If the safety mechanism itself fails, it might be latent.
+  // Here we use a simplified model for the covered faults that might become latent if not tested by a secondary mechanism.
+  const lambdaCovered = lambdaDangerous * (dcPct / 100);
+  const lambdaLfFit = lambdaCovered * (1 - dcLatentPct / 100);
+
+  return {
+    component,
+    failureMode,
+    lambdaTotalFit,
+    fractionSafePct,
+    fractionDangerousPct,
+    dcPct,
+    lambdaSafeFit: Number(lambdaSafeFit.toFixed(2)),
+    lambdaSpfFit: Number(lambdaSpfFit.toFixed(2)),
+    lambdaRfFit: Number(lambdaRfFit.toFixed(2)),
+    lambdaLfFit: Number(lambdaLfFit.toFixed(2)),
+    evidence,
+    evidenceSource,
+  };
+}
+
 export function calculateFmedaMetrics(rows: FmedaRow[], asilLevel: 'QM' | 'ASIL A' | 'ASIL B' | 'ASIL C' | 'ASIL D' = 'ASIL C'): FmedaSummary {
   let totalLambda = 0;
   let totalSafe = 0;
@@ -87,14 +139,12 @@ export function calculateFmedaMetrics(rows: FmedaRow[], asilLevel: 'QM' | 'ASIL 
     totalLf += r.lambdaLfFit;
   }
 
-  // ISO 26262-5 SPFM = 1 - (lambda_SPF + lambda_RF) / (totalLambda)
-  // 或 (totalSafe + detected) / totalLambda
   const dangerousLambda = totalLambda - totalSafe;
+  
   const spfmPct = dangerousLambda > 0
     ? Math.max(0, Math.min(100, Number(((1 - (totalSpf + totalRf) / dangerousLambda) * 100).toFixed(2))))
     : 100;
 
-  // LFM = 1 - (lambda_LF) / (totalLambda - totalSpf - totalRf)
   const lfmDenominator = totalLambda - totalSpf - totalRf;
   const lfmPct = lfmDenominator > 0
     ? Math.max(0, Math.min(100, Number(((1 - totalLf / lfmDenominator) * 100).toFixed(2))))
@@ -103,12 +153,16 @@ export function calculateFmedaMetrics(rows: FmedaRow[], asilLevel: 'QM' | 'ASIL 
   const spfmTargetPct = asilLevel === 'ASIL D' ? 99.0 : asilLevel === 'ASIL C' ? 97.0 : asilLevel === 'ASIL B' ? 90.0 : asilLevel === 'ASIL A' ? 90.0 : 0.0;
   const lfmTargetPct = asilLevel === 'ASIL D' ? 90.0 : asilLevel === 'ASIL C' ? 80.0 : asilLevel === 'ASIL B' ? 60.0 : asilLevel === 'ASIL A' ? 60.0 : 0.0;
 
+  const currentPmhfFit = totalSpf + totalRf; 
+  const pmhfTargetFit = asilLevel === 'ASIL D' ? 10 : 100;
+  const passPmhf = asilLevel === 'QM' || currentPmhfFit <= pmhfTargetFit;
+
   return {
     spfmPct,
     lfmPct,
     spfmTargetPct,
     lfmTargetPct,
-    isCompliant: spfmPct >= spfmTargetPct && lfmPct >= lfmTargetPct,
+    isCompliant: spfmPct >= spfmTargetPct && lfmPct >= lfmTargetPct && passPmhf,
     contributions: {
       safeFailurePct: Number(((totalSafe / (totalLambda || 1)) * 100).toFixed(1)),
       detectedFailurePct: Number((((totalLambda - totalSafe - totalSpf - totalRf) / (totalLambda || 1)) * 100).toFixed(1)),
@@ -119,20 +173,16 @@ export function calculateFmedaMetrics(rows: FmedaRow[], asilLevel: 'QM' | 'ASIL 
 }
 
 export const SAMPLE_FMEDA_ROWS: FmedaRow[] = [
-  {
+  computeFmedaRow({
     component: 'MOSFET (High-Side x 3)',
     failureMode: '漏源极短路 (D-S Short)',
     lambdaTotalFit: 45.0,
     fractionSafePct: 0,
-    fractionDangerousPct: 100,
     dcPct: 98.0,
-    lambdaSafeFit: 0,
-    lambdaSpfFit: 0.9,
-    lambdaRfFit: 0.9,
-    lambdaLfFit: 3.2,
+    dcLatentPct: 90.0,
     evidence: 'DATASHEET',
     evidenceSource: 'SN 29500-2 功率半导体失效率标准 & 晶圆厂 IEC 62380 认证报告',
-  },
+  }),
   {
     component: 'MOSFET (Low-Side x 3)',
     failureMode: '漏源极击穿短路 (D-S Short)',

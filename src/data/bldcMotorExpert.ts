@@ -60,7 +60,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       failureConsequence: '若实测下桥制动发热偏大，可切换为分段斩波 PWM 能耗制动，技术路径平滑。',
       preconditions: 'MCU 驱动固件支持底层刹车中断，MOSFET 脉冲电流 SOA 满足 >= 50A。',
       verificationMethod: '在电机台架以 3800rpm 转速触发急停，高阻差分探头捕捉母线电压与 Vgs/Vds 瞬态波形。',
-      planB: '若整车超长线束反射仍偶发尖峰，在输入端预留贴装一颗 SMCJ24CA 600W TVS 作为二级兜底。',
+      planB: '', citedFields: [],
     },
     {
       id: 'Option B',
@@ -99,7 +99,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       failureConsequence: '项目 DV 准入延期 1 个月，客户启动商务考核。',
       preconditions: '结构空间允许增大外壳尺寸，PM 批准超支与延期。',
       verificationMethod: '新样板打样后进暗室与台架重测。',
-      planB: '无',
+      planB: '', citedFields: [],
     },
     {
       id: 'Option C',
@@ -138,12 +138,13 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       failureConsequence: '整车下线测试不合格，被主机厂责令停线整改。',
       preconditions: '无',
       verificationMethod: '无',
-      planB: '无',
+      planB: '', citedFields: [],
     },
   ];
 
   return {
     source: 'deterministic-expert',
+    citedFields: [],
     analysisBasis: {
       ruleInputs: [],
       measuredInputs: Object.keys(issue.measuredValues || {}),
@@ -329,7 +330,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       reEvaluationTriggers: [
         '完成 1500 次急停耐久与示波器波形确认归档之日。',
       ],
-      planB: '若整车长线束在某些极端工况仍有感应反射，在母线电源入口临时追加一颗 600W 车规双向 TVS (SMC 封装) 辅助削峰。',
+      planB: '',
     },
     raciMatrix: [
       { role: 'HW', raciType: 'R', owner: 'HW Motor Lead', action: '完成 RC Snubber 选型、门极米勒钳位电路验证及示波器波形抓取', output: 'BLDC 驱动电气尖峰整改与实测报告', dueDate: 'Day 4', decisionGate: '硬件门禁' },

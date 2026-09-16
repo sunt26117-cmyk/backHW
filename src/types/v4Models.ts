@@ -5,6 +5,44 @@
 
 import { AsilLevel, ProjectPhase, RiskLevel } from '../types';
 
+import { z } from 'zod';
+
+// ==========================================
+// 1. Zod Branded Types & ParamOrigin (Stage 1 Refactoring)
+// ==========================================
+
+export const MilliOhmSchema = z.number().brand<'MilliOhm'>();
+export type MilliOhm = z.infer<typeof MilliOhmSchema>;
+
+export const MicrofaradSchema = z.number().brand<'Microfarad'>();
+export type Microfarad = z.infer<typeof MicrofaradSchema>;
+
+export const PicofaradSchema = z.number().brand<'Picofarad'>();
+export type Picofarad = z.infer<typeof PicofaradSchema>;
+
+export const OhmSchema = z.number().brand<'Ohm'>();
+export type Ohm = z.infer<typeof OhmSchema>;
+
+export const NanoHenrySchema = z.number().brand<'NanoHenry'>();
+export type NanoHenry = z.infer<typeof NanoHenrySchema>;
+
+export const KelvinPerWattSchema = z.number().brand<'KelvinPerWatt'>();
+export type KelvinPerWatt = z.infer<typeof KelvinPerWattSchema>;
+
+export type OriginTier = 'MEASURED' | 'DATASHEET' | 'DEFAULT';
+
+export interface ParamOrigin<T> {
+  value: T;
+  origin: OriginTier;
+  tolerance: number; // e.g., 0.1 for 10%
+  source: string;
+}
+
+export const createParam = <T>(value: number, origin: OriginTier, source: string, tolerance = 0): ParamOrigin<T> => {
+  return { value: value as unknown as T, origin, tolerance, source };
+};
+
+
 // ==========================================
 // 2. Evidence & Confidence 模型 (Section 2)
 // ==========================================
@@ -84,18 +122,21 @@ export interface MotorModel {
 
 export interface PowerStageModel {
   mosfetPartNumber: string;
+  rthJc?: ParamOrigin<KelvinPerWatt>;
   vdsRating: number;   // V (额定击穿电压)
-  rdsOnMilliOhm: number; // mΩ
+  rdsOnMilliOhm: ParamOrigin<MilliOhm>; // mΩ
   vthMinV?: number;    // V (门极阈值电压下限)
   dvdtVns?: number;    // V/ns (最大开关瞬态斜率)
-  cgdPf?: number;      // pF (米勒电容，精确值)
+  cissPf?: ParamOrigin<Picofarad>;
+  cgdPf?: ParamOrigin<Picofarad>;      // pF (米勒电容，精确值)
   qgNc: number;        // nC
   qgdNc: number;       // nC
   qrrNc: number;       // nC
   gateDriverPartNumber: string;
-  rgOnOhm: number;
-  rgOffOhm: number;
-  cbusUf: number;      // μF
+  rgOnOhm: ParamOrigin<Ohm>;
+  rgOffOhm: ParamOrigin<Ohm>;
+  lsNh?: ParamOrigin<NanoHenry>;
+  cbusUf: ParamOrigin<Microfarad>;      // μF
   cbusEsrMilliOhm: number;
   tvsModel?: string;
   snubberR?: number;

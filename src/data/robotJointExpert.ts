@@ -38,7 +38,8 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
       failureConsequence: '若工期超期，将影响 DVT 整体封样节点。',
       preconditions: '结构组提供高精度研磨垫片，PCB Layout 工程师投入新版布线。',
       verificationMethod: '激光干涉仪全行程正反向扫点 + TÜV 认可机构双通道故障注入测试 + 满载往复 4 小时热稳态测试。',
-      planB: '若 PCB 打样进度不及预期，采用方案 B 的外部独立冗余模块过渡方案支撑节点评审。',
+      planB: '',
+      citedFields: [],
       riskDelta: '定位超差 5.2 arcmin + STO 共因失效 ➔ 硬件机械全面合规 (满足门禁放行)',
       crossDomainCouplingChecks: [
         { rule: '【ROBOT_JOINT ➔ THERMAL】泄放电阻外移紧贴外壳散热', addressed: true, note: '已增加导热衬垫与外壳接触热阻仿真，外表面温升低于 60℃ 人体触碰限制' },
@@ -76,7 +77,8 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
       failureConsequence: '若重载下机械弹性形变仍导致误差波动，启动第二编码器双码盘闭环测试。',
       preconditions: '关节安装刚性基座，驱动固件具备可标定的高分辨率反向间隙补偿表接口。',
       verificationMethod: '激光干涉仪在 0%、50%、100% 额定负载下正反向反复打点测试定位精度，TÜV 机构现场审查双通道切断波形。',
-      planB: '量产版本同步启动 PCB 双通道 STO 改版（方案 A），本方案保障 DVT 评审按期通过。',
+      planB: '',
+      citedFields: [],
       riskDelta: '定位超差 5.2 arcmin + STO 预警 ➔ 精度 2.3 arcmin + 机构通过 (受控中风险)',
       crossDomainCouplingChecks: [
         { rule: '【ROBOT_JOINT ➔ THERMAL】加减速 S 曲线优化削减减速再生热', addressed: true, note: '实测连续运行 2 小时，泄放电阻表面温升稳定在 82℃，未触发降额停机' },
@@ -121,7 +123,8 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
       failureConsequence: '人机协作碰撞时无法紧急停机，造成严重人身伤害或设备损毁事故。',
       preconditions: '无。',
       verificationMethod: '无法通过任何车规或工业安规测试。',
-      planB: '立即废止该方案，切换为方案 B 实施闭环。',
+      planB: '',
+      citedFields: [],
       riskDelta: '定位超差与安规隐患 ➔ 违约与重大失控风险 (触发一票否决)',
       crossDomainCouplingChecks: [
         { rule: '【ROBOT_JOINT ➔ THERMAL】强行调高温度报警阈值', addressed: false, note: '方案被一票否决：可能导致泄放电阻表面突破 160℃ 烧穿外壳' },
@@ -132,6 +135,7 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
 
   return {
     source: 'deterministic-expert',
+    citedFields: [],
     coreConclusion: {
       problemSummary: '【ROBOT_JOINT / DVT / 剩余20天】协作机器人一体化关节末端重复定位超差 (实测 5.2 arcmin > 3.0 arcmin 限额)，STO 安全通道因共用光耦与电源被第三方机构认定不满足 PLd 独立性要求，连续重载往复 40 分钟因泄放电阻过热停机。',
       recommendedMeasure: '实施方案 B：激光干涉仪正反向滞环实测标定 + 软件反向间隙动态补偿 + 外置冗余安全继电器盒过渡 (双轨推进量产 PCB 双通道改版)',
@@ -238,7 +242,7 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
         '若连续运行 2 小时泄放电阻温度突破 100℃，必须进一步增加加减速 S 曲线滤波时间。',
       ],
       reEvaluationTriggers: ['完成 4 天标定与第三方安规机构出具预审合格备忘录之日。'],
-      planB: '量产版本同步开展方案 A 的 PCB 硬件级 STO 物理双通道重新走线与制板，本方案仅作为 DVT 门禁放行依据。',
+    planB: '',
     },
     dualTimeline: {
       containmentPhase: {

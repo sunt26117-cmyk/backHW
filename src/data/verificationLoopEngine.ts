@@ -1,3 +1,5 @@
+import { UnifiedEngineeringModel } from "../types/v4Models";
+import { extractUnifiedEngineeringModel } from "../utils/unifiedStateExtractor";
 /**
  * Next Best Action + 验证闭环 + Value of Information (VOI) 引擎 (Section 8)
  * 严格遵照 V4 升级任务书：NOW/WHY/EXPECTED/PASS/FAIL/OWNER/DUE，VOI 性价比排序，闭环驱动风险与置信度重算

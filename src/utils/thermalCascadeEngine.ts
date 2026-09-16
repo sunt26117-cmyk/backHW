@@ -1,4 +1,5 @@
-import { UnifiedEngineeringModel } from '../types/v4Models';
+
+import { UnifiedEngineeringModel, ConfidenceLevel } from '../types/v4Models';
 import { PrecomputedFact } from './deterministicPrecomputation';
 
 export interface ThermalCascadeResult {
@@ -14,20 +15,40 @@ export function calculateThermalCascade(state: UnifiedEngineeringModel): Thermal
   const tPad = state.environment.tCaseC;
   const currentA = state.electrical.currentNominal;
   
-  // Need sufficient inputs to calculate Thermal Pipeline
   if (tPad === undefined && (tAmb === undefined || currentA === undefined)) {
     return null;
   }
   
   try {
-    const rthJc = 1.2; // ℃/W - typical TO-252/D2PAK
+    // 建立 confidence 置信度降级机制
+    let rthJcOrigin = state.powerStage.rthJc?.origin;
+    let rthJc = Number(state.powerStage.rthJc?.value || 0);
+    let confidence: ConfidenceLevel = 'HIGH';
+    let confidenceReason = '';
+
+    if (!rthJc) {
+      rthJcOrigin = 'DEFAULT';
+      rthJc = 1.2; // ℃/W - typical TO-252/D2PAK
+    }
+
+    if (rthJcOrigin === 'DEFAULT') {
+      confidence = 'LOW';
+      confidenceReason = '使用了兜底默认值 (如 Rth_jc = 1.2)，热计算置信度降级为估算 (ESTIMATED/INDICATIVE)。请实测或参考数据手册以提升置信度。';
+    } else if (rthJcOrigin === 'DATASHEET') {
+      confidence = 'MEDIUM';
+      confidenceReason = '基于数据手册参数计算。';
+    } else if (rthJcOrigin === 'MEASURED') {
+      confidence = 'HIGH';
+      confidenceReason = '基于实测热阻计算。';
+    }
+
     const vbus = state.electrical.vbusNominal || 12;
     const fswKhz = state.electrical.pwmFrequencyKhz || 20;
-    const rdsOnNominal = state.powerStage.rdsOnMilliOhm; // at 25C
+    const rdsOnNominal = Number(state.powerStage.rdsOnMilliOhm?.value || 0); // at 25C
     
     // Iterative thermal calculation
     let tjEst = tPad !== undefined ? tPad : (tAmb || 85) + 5; // Initial guess
-    let rdsOnHot = rdsOnNominal;
+    let rdsOnHot = Number(rdsOnNominal);
     let powerLoss = 0;
     
     // 3 iterations to converge Tj and Rds(on)
@@ -74,8 +95,10 @@ export function calculateThermalCascade(state: UnifiedEngineeringModel): Thermal
         specThreshold: `${tjMax.toFixed(1)} ℃ (车规降额安全上限)`,
         safetyMargin: `${deratingMargin.toFixed(1)} ℃`,
         complianceVerdict: deratingMargin < 0 ? 'CRITICAL' : deratingMargin < 15 ? 'MARGINAL' : 'PASS',
-        directiveForAi: `【重要】此为电气-热力跨域级联计算结果。当前稳态结温已收敛至 ${tjEst.toFixed(1)}℃，降额安全裕量 ${deratingMargin.toFixed(1)}℃。高温导致导通内阻恶化至 ${rdsOnHot.toFixed(1)}mΩ (25℃标称 ${rdsOnNominal}mΩ)，Vth 下降至 ${vthHot.toFixed(2)}V。模型需依据这些恶化后参数进行推演。`,
+        directiveForAi: `【重要】${confidence === 'LOW' ? '[估算前提]' : '[事实]'}此为电气-热力跨域级联计算结果。当前稳态结温已收敛至 ${tjEst.toFixed(1)}℃，降额安全裕量 ${deratingMargin.toFixed(1)}℃。高温导致导通内阻恶化至 ${rdsOnHot.toFixed(1)}mΩ (25℃标称 ${rdsOnNominal?.toFixed(1)}mΩ)，Vth 下降至 ${vthHot.toFixed(2)}V。模型需依据这些恶化后参数进行推演。`,
         status: 'CALCULATED',
+        confidence,
+        confidenceReason,
       }
     };
   } catch {

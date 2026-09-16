@@ -46,7 +46,7 @@ function dimensionForKey(key: string): PhysicalDimension | undefined {
   return undefined;
 }
 
-function collectPhysicalInputs(values: Record<string, number | string> | undefined): Map<PhysicalDimension, number[]> {
+function collectPhysicalInputs(values: Record<string, number | string | boolean> | undefined): Map<PhysicalDimension, number[]> {
   const out = new Map<PhysicalDimension, number[]>();
   for (const [key, raw] of Object.entries(values || {})) {
     const value = Number(raw);

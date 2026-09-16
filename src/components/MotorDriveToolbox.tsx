@@ -52,10 +52,12 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
   // 2. 米勒感应直通风险核算状态
   const [millerParams, setMillerParams] = useState({
     V_th_min: 2.0,
-    C_gd_pF: 45,
-    C_gs_pF: 1800,
-    R_g_pulldown_ohm: 4.5,
-    dv_dt_V_per_ns: 8.5,
+    C_gd_pF: 35,
+    C_iss_pF: 1500,
+    R_g_pulldown_ohm: 3.3,
+    L_g_nH: 5,
+    dv_dt_V_per_ns: 10,
+    vbus: 12,
     hasActiveMillerClamp: false,
   });
   const [millerResult, setMillerResult] = useState<MillerRiskResult | null>(null);
@@ -291,8 +293,11 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
     const mRes = checkMillerRisk({
       V_th_min: p.V_th_min,
       C_gd_pF: p.C_gd_pF,
+      C_iss_pF: p.C_iss_pF,
       R_g_pulldown_ohm: p.R_g_pulldown_ohm,
+      L_g_nH: p.L_g_nH,
       dv_dt_V_per_ns: p.dv_dt_V_per_ns,
+      vbus: p.vbus,
       hasActiveMillerClamp: p.hasActiveMillerClamp,
     });
     setMillerResult(mRes);
