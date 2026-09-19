@@ -860,7 +860,7 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
                           <input
                             type="number"
                             step="any"
-                            value={typeof issue.measuredValues?.[key] === 'boolean' ? (issue.measuredValues?.[key] ? 1 : 0) : (issue.measuredValues?.[key] ?? '')}
+                            value={issue.measuredValues?.[key] ?? ''}
                             disabled={field.tag === 'CALCULATED'}
                             onChange={(e) => setIssue({
                               ...issue,

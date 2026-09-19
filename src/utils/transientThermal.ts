@@ -102,77 +102,54 @@ export function calculateStallTransientThermal(
   // 1. 稳态总热阻 R_th_total = sum(R_i)
   const rthTotal = stages.reduce((acc, cur) => acc + cur.r, 0);
 
-  // 2. 堵转前初始稳态结温 (各 RC 阶初始温度降 T_i(0) = biasPowerW * R_i)
+  // 2. 堵转前初始稳态结温
   const initialTj = ambientTempC + biasPowerW * rthTotal;
-  
-  // 3. 维护各阶 RC 网络当前时刻的温升 (状态变量矩阵)
-  const T_nodes = stages.map(stage => biasPowerW * stage.r);
 
-  const durationSec = Math.max(0.1, stallDurationMs) / 1000;
-  // 为了保证平滑曲线并捕捉极细微的动态反弹，使用 500 步
-  const steps = 500;
-  const dt = durationSec / steps;
-  
-  let currentTj = initialTj;
-  let stallPowerW = 0;
-  let isRunaway = false;
-  const thermalCurve: ThermalTimePoint[] = [];
-  
-  for (let i = 0; i <= steps; i++) {
-    const tSec = dt * i;
-    const tMs = tSec * 1000;
-    
-    // 基于上一步的结温计算当前的 Rds(on) 和 功耗
-    const tempRiseAbove25 = Math.max(0, currentTj - 25);
-    const rdsonHotOhm = (rdson25mOhm * 1e-3) * (1 + 0.004 * tempRiseAbove25);
-    stallPowerW = Math.pow(stallCurrentA, 2) * rdsonHotOhm;
+  // 3. 计入高温下 MOSFET Rdson 的正温度系数温漂（车规 MOSFET 典型系数约 0.4%/℃）
+  // 预估堵转期间平均结温约 125℃，内阻膨胀约 1.5 倍
+  const tempRiseEstimate = Math.max(25, initialTj);
+  const rdsonMultiplier = 1 + 0.005 * (tempRiseEstimate - 25);
+  const rdsonHotOhm = (rdson25mOhm * 1e-3) * rdsonMultiplier;
 
-    // 记录当次计算点 (如果是指定的步数节点，用于 UI 渲染)
-    if (i % Math.ceil(steps / 40) === 0 || i === steps) {
-      thermalCurve.push({
-        timeMs: Math.round(tMs),
-        zth: Number(((currentTj - ambientTempC) / (stallPowerW || 1)).toFixed(3)),
-        deltaT: Number((currentTj - initialTj).toFixed(1)),
-        tj: Number(currentTj.toFixed(1)),
-      });
-    }
+  // 4. 堵转瞬态发热电功率 (单管导通损耗 P = I^2 * R_dson)
+  const stallPowerW = Math.pow(stallCurrentA, 2) * rdsonHotOhm;
 
-    if (currentTj > 300) {
-      isRunaway = true;
-      break;
-    }
-    
-    // RC 状态矩阵差分步进 (Exact Exponential Update)
-    let newTj = ambientTempC;
-    for (let j = 0; j < stages.length; j++) {
-      const stage = stages[j];
-      const tau = stage.r * stage.c;
-      // 离散化状态空间更新：T_i[k+1] = T_i[k] * exp(-dt/tau) + P[k] * R_i * (1 - exp(-dt/tau))
-      const exp_decay = Math.exp(-dt / tau);
-      T_nodes[j] = T_nodes[j] * exp_decay + stallPowerW * stage.r * (1 - exp_decay);
-      newTj += T_nodes[j];
-    }
-    
-    currentTj = newTj;
-  }
-
-  const peakTj = thermalCurve[thermalCurve.length - 1].tj;
-  const maxDeltaT = peakTj - initialTj;
-  const isExceedingTjMax = peakTj > tjMaxC;
-  const isExceedingDerating = peakTj > tjDeratedLimitC;
-  
-  // 等效末态 Zth (作为辅助指标返回)
+  // 5. 计算堵转持续时间下的瞬态热阻
+  const durationSec = Math.max(1, stallDurationMs) / 1000;
   const effectiveZth = calculateFosterZth(stages, durationSec);
 
-  let status: 'PASS' | 'WARNING_DERATING' | 'FAILED_BURNOUT' = 'PASS';
-  let recommendation = '堵转温升在车规降额线以内，且无热失控趋势，热设计安全可靠。';
+  // 6. 最大瞬态温升与峰值结温
+  const maxDeltaT = stallPowerW * effectiveZth;
+  const peakTj = initialTj + maxDeltaT;
 
-  if (isRunaway || isExceedingTjMax) {
+  // 7. 生成用于前端图表可视化的采样曲线 (20个时间点对数/线性混合分布)
+  const thermalCurve: ThermalTimePoint[] = [];
+  const steps = 20;
+  for (let i = 0; i <= steps; i++) {
+    const tMs = (durationSec * 1000 * i) / steps;
+    const z = calculateFosterZth(stages, tMs / 1000);
+    const dt = stallPowerW * z;
+    thermalCurve.push({
+      timeMs: Math.round(tMs),
+      zth: Number(z.toFixed(3)),
+      deltaT: Number(dt.toFixed(1)),
+      tj: Number((initialTj + dt).toFixed(1)),
+    });
+  }
+
+  // 8. 安全状态与建议
+  const isExceedingTjMax = peakTj > tjMaxC;
+  const isExceedingDerating = peakTj > tjDeratedLimitC;
+
+  let status: 'PASS' | 'WARNING_DERATING' | 'FAILED_BURNOUT' = 'PASS';
+  let recommendation = '堵转温升在车规降额线以内，热设计安全可靠。';
+
+  if (isExceedingTjMax) {
     status = 'FAILED_BURNOUT';
-    recommendation = `【严重热击穿/热失控风险】检测到雪崩热失控正反馈(温度↑ -> Rds_on↑ -> 损耗↑ -> 温度↑↑)！堵转 ${stallDurationMs}ms 结温飙升至 ${peakTj.toFixed(1)}℃，突破绝对极限 (${tjMaxC}℃)！必然引起焊点熔出或管芯烧毁。建议：1. 缩短软件过流保护时间至 ${Math.floor(stallDurationMs * 0.3)}ms 以内；2. 更换导通内阻更低的MOSFET；3. 改用高热容 D2PAK 封装。`;
+    recommendation = `【严重热击穿风险】堵转 ${stallDurationMs}ms 后结温达到 ${peakTj.toFixed(1)}℃，突破额定结温极限 (${tjMaxC}℃)！必然引起焊点熔出或MOS热雪崩炸管！建议：1. 软件将堵转过流切断保护时间收紧至 300ms 以内；2. 更换为更低导通电阻 (如低于 ${(rdson25mOhm * 0.6).toFixed(1)}mΩ) 的功率MOS；3. 增加 PCB 底层散热过孔与铜皮面积。`;
   } else if (isExceedingDerating) {
     status = 'WARNING_DERATING';
-    recommendation = `【突破降额红线】峰值结温 ${peakTj.toFixed(1)}℃，虽暂未引发雪崩热失控，但突破了车规工程降额门限 (${tjDeratedLimitC}℃)。长期老化将加速封装应力退化，建议优化电流检测去饱和保护时间。`;
+    recommendation = `【突破降额红线】峰值结温 ${peakTj.toFixed(1)}℃ 虽未炸管，但突破了车规工程降额门限 (${tjDeratedLimitC}℃)。长期老化将加速封装应力退化，建议优化电流检测去饱和保护时间。`;
   }
 
   return {

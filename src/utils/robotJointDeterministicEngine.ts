@@ -2,7 +2,7 @@ import { IssueInput, MeasurementSource } from '../types';
 import { UnifiedEngineeringModel } from '../types/v4Models';
 import { calculateTwoMassResonance } from './robotJointResonance';
 import { DeterministicCalculationStatus } from './bldcDeterministicEngine';
-import { extractUnifiedEngineeringModel } from './unifiedStateExtractor';
+import { extractUnifiedEngineeringModel, isMeasuredValuePresent } from './unifiedStateExtractor';
 
 export interface RobotJointCalculationEvidence {
   id: string;
@@ -23,14 +23,22 @@ export interface RobotJointCalculationEvidence {
   directiveForAi: string;
 }
 
-function sourceFor(issue: IssueInput, key: string, value: any): MeasurementSource | 'MISSING' {
-  if (value === undefined || value === null) return 'MISSING';
-  // Check if it exists in measuredValues first
-  if (issue.measuredValues && issue.measuredValues[key] !== undefined && issue.measuredValues[key] !== '') {
-    return issue.measurementProvenance?.[key]?.source || issue.measuredValueSource || 'USER_MEASURED';
-  }
-  // Otherwise, it was extracted from text
-  return 'TEXT_INFERRED' as any; // Using type cast since TEXT_INFERRED might not be in MeasurementSource enum yet
+// 少数字段在这个文件里用的"语义名"跟 issue.measuredValues / unifiedStateExtractor 里的
+// 原始表单字段名不一致（outputTorqueNm 实际对应表单的 peakTorqueNm，motorInertiaKgm2 实际
+// 对应表单的 rotorInertiaKgm2），核对是否有真实输入时必须换算成原始字段名去查，否则即使工程师
+// 已经真实填写了数据，也会被误判为缺失。
+const RAW_MEASURED_KEY: Record<string, string> = {
+  outputTorqueNm: 'peakTorqueNm',
+  motorInertiaKgm2: 'rotorInertiaKgm2',
+};
+const rawKeyOf = (key: string) => RAW_MEASURED_KEY[key] || key;
+
+function sourceFor(issue: IssueInput, key: string): MeasurementSource | 'MISSING' {
+  // 同 bldcDeterministicEngine.ts：必须核对 issue.measuredValues 原始输入，不能看 state 派生值，
+  // 因为 state 在结构化输入缺失时会被 unifiedStateExtractor.getNum() 用写死的默认值兜底。
+  const rawKey = rawKeyOf(key);
+  if (!isMeasuredValuePresent(issue, rawKey)) return 'MISSING';
+  return issue.measurementProvenance?.[rawKey]?.source || issue.measuredValueSource || 'USER_MEASURED';
 }
 
 function buildKinematicError(issue: IssueInput, state: UnifiedEngineeringModel): RobotJointCalculationEvidence {
@@ -44,8 +52,10 @@ function buildKinematicError(issue: IssueInput, state: UnifiedEngineeringModel):
     requiredPositionAccuracyArcmin: state.mechanical.requiredPositionAccuracyArcmin,
   };
 
-  const missingInputs = ['backlashArcmin', 'torsionalStiffnessNmPerRad', 'outputTorqueNm'].filter((key) => values[key] === undefined);
-  const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key, values[key])])) as RobotJointCalculationEvidence['inputSources'];
+  const missingInputs = ['backlashArcmin', 'torsionalStiffnessNmPerRad', 'outputTorqueNm'].filter(
+    (key) => !isMeasuredValuePresent(issue, rawKeyOf(key))
+  );
+  const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key)])) as RobotJointCalculationEvidence['inputSources'];
 
   if (missingInputs.length > 0) {
     return {
@@ -107,8 +117,10 @@ function buildResonance(issue: IssueInput, state: UnifiedEngineeringModel): Robo
     velocityLoopBandwidthHz: state.mechanical.velocityLoopBandwidthHz,
   };
 
-  const missingInputs = ['torsionalStiffnessNmPerRad', 'motorInertiaKgm2', 'loadInertiaKgm2', 'gearRatio'].filter((key) => values[key] === undefined);
-  const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key, values[key])])) as RobotJointCalculationEvidence['inputSources'];
+  const missingInputs = ['torsionalStiffnessNmPerRad', 'motorInertiaKgm2', 'loadInertiaKgm2', 'gearRatio'].filter(
+    (key) => !isMeasuredValuePresent(issue, rawKeyOf(key))
+  );
+  const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key)])) as RobotJointCalculationEvidence['inputSources'];
 
   if (missingInputs.length > 0) {
     return {

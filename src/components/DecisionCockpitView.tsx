@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { CopilotAnalysisResult, CandidateAction, HwLeadStyle } from '../types';
 import { evaluateLeadershipFit, applyRecurrencePenaltyToQ } from '../utils/leadershipEngine';
 import { evaluateLeadershipEconomicRisk } from '../data/safetyReliabilityEngine';
+import { STANDARD_TSCQL_WEIGHTS } from '../utils/scoringWeights';
 import { ResultProvenanceBanner } from './ResultProvenanceBanner';
 import {
   Sliders,
@@ -49,14 +50,9 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
   recurrenceCount = 0,
   daysRemaining = 14,
 }) => {
-  // C-T-S-Q-L 标准权重: T: 25%, S: 25%, C: 15%, Q: 20%, L: 15%
-  const [weights, setWeights] = useState({
-    T: 25,
-    S: 25,
-    C: 15,
-    Q: 20,
-    L: 15,
-  });
+  // C-T-S-Q-L 标准权重定义已统一到 scoringWeights.ts（跟 aiResultAuditor.ts 核对AI总分用的是同一份），
+  // 这里的 useState 只是把它当作交互滑块的初始值——用户仍然可以拖动调整做 what-if 探索。
+  const [weights, setWeights] = useState({ ...STANDARD_TSCQL_WEIGHTS });
 
   // 直属领导态度风格状态
   const [currentLeadStyle, setCurrentLeadStyle] = useState<HwLeadStyle>(hwLeadStyle);
@@ -96,13 +92,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
   };
 
   const resetWeights = () => {
-    setWeights({
-      T: 25,
-      S: 25,
-      C: 15,
-      Q: 20,
-      L: 15,
-    });
+    setWeights({ ...STANDARD_TSCQL_WEIGHTS });
   };
 
   const totalWeight = weights.T + weights.S + weights.C + weights.Q + weights.L;

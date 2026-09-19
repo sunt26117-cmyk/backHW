@@ -3,7 +3,20 @@
  * 严格遵照 V4 升级任务书第 13 节规范，形成自动化基准测试与验证集
  */
 
-import { GoldStandardCase } from '../types';
+import { GoldStandardCase, IssueInput, ProjectContext } from '../types';
+import { evaluateAllBldcPatterns } from './bldcPatternEngine';
+import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput } from './robotJointPatternEngine';
+import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
+
+const STUB_CONTEXT: ProjectContext = {
+  projectName: '回归测试占位项目', projectPhase: 'DVT', customer: '内部', ecuType: '通用',
+  asilLevel: 'QM', sopDate: '', nextMilestone: '',
+} as ProjectContext;
+
+const STUB_ISSUE: IssueInput = {
+  issueCategories: [], failurePhenomenon: '', requirement: '', testCondition: '',
+  actualMeasurement: '', engineeringConcern: '', notes: '', measuredValues: {},
+} as unknown as IssueInput;
 
 export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
   {
@@ -244,11 +257,45 @@ export function runGoldStandardCaseRegression(caseId: string): {
   summary: string;
 } {
   const c = GOLD_STANDARD_CASES.find((item) => item.caseId === caseId) || GOLD_STANDARD_CASES[1];
+
+  // 之前这个函数完全没有真的跑模式引擎——不管传进来什么caseId，永远把case自己的
+  // expectedPattern原样抄回来当"匹配结果"，isPatternMatch/status也是硬编码true/PASS，
+  // 等于这16个"回归测试用例"从来没有真正验证过任何东西，DesignReviewRegressionView.tsx
+  // 展示的"16/16通过"是假的。这里改成真正调用 bldcPatternEngine / robotJointPatternEngine，
+  // 用引擎的真实触发结果去跟 expectedPattern 比对。
+  const issue: IssueInput = { ...STUB_ISSUE, ...(c.input.issue as Partial<IssueInput>) };
+  const context: ProjectContext = { ...STUB_CONTEXT, ...(c.input.context as Partial<ProjectContext>) };
+  const isRobotJointCase = c.expectedPattern.startsWith('J');
+
+  let triggeredIds: string[] = [];
+  try {
+    if (isRobotJointCase) {
+      const evalInput = deriveRobotJointEvaluationInput(issue);
+      triggeredIds = evaluateAllRobotJointPatterns(evalInput).filter((p) => p.triggered).map((p) => p.id);
+    } else {
+      const evalInput = deriveBldcEvaluationInput(context, issue);
+      triggeredIds = evaluateAllBldcPatterns(evalInput).filter((p) => p.triggered).map((p) => p.id);
+    }
+  } catch (err) {
+    return {
+      caseInfo: c,
+      matchedPattern: '(引擎调用异常)',
+      isPatternMatch: false,
+      status: 'FAIL',
+      summary: `自动化用例 ${c.caseId} [${c.title}] 校验失败：调用模式引擎时抛出异常 - ${(err as Error).message}`,
+    };
+  }
+
+  const isPatternMatch = triggeredIds.includes(c.expectedPattern);
+  const matchedPattern = triggeredIds.length > 0 ? triggeredIds.join('、') : '(未触发任何判据)';
+
   return {
     caseInfo: c,
-    matchedPattern: c.expectedPattern,
-    isPatternMatch: true,
-    status: 'PASS',
-    summary: `自动化用例 ${c.caseId} [${c.title}] 校验通过：预期 Pattern (${c.expectedPattern}) 与确定性引擎物理输出 100% 吻合，VETO 与验证项已对齐。`,
+    matchedPattern,
+    isPatternMatch,
+    status: isPatternMatch ? 'PASS' : 'FAIL',
+    summary: isPatternMatch
+      ? `自动化用例 ${c.caseId} [${c.title}] 校验通过：模式引擎实际触发 ${matchedPattern}，包含预期的 ${c.expectedPattern}。`
+      : `自动化用例 ${c.caseId} [${c.title}] 校验失败：预期触发 ${c.expectedPattern}，模式引擎实际触发 ${matchedPattern}。`,
   };
 }

@@ -1,5 +1,24 @@
 import { IssueInput, ProjectContext } from '../types';
-import { UnifiedEngineeringModel, createParam, OriginTier } from '../types/v4Models';
+import { UnifiedEngineeringModel } from '../types/v4Models';
+
+/**
+ * 判断某个工程量是否有真实的结构化实测输入（issue.measuredValues 中的原始值）。
+ *
+ * 重要：这个函数只看 issue.measuredValues 原始数据，不看下面 extractUnifiedEngineeringModel()
+ * 产出的 state.xxx —— state 里的数值为了兼容大量老代码，在结构化输入缺失时会走正则文本提取、
+ * 再退化到写死的经验默认值（如 rotorInertiaKgm2 默认 0.0001），所以 state.xxx 永远不是
+ * undefined，不能用来判断"这个量到底有没有真实依据"。
+ *
+ * 任何要做"缺输入就必须返回 INSUFFICIENT_INPUT、禁止用默认值顶上"判定的调用方（目前是
+ * bldcDeterministicEngine.ts / robotJointDeterministicEngine.ts / thermalCascadeEngine.ts），
+ * 必须用这个函数做输入完整性检查，而不是检查 state 字段是否为空。
+ */
+export function isMeasuredValuePresent(issue: IssueInput, key: string): boolean {
+  const raw = issue.measuredValues?.[key];
+  if (raw === undefined || raw === null || raw === '') return false;
+  const num = Number(raw);
+  return !isNaN(num);
+}
 
 // 正则提取辅助函数
 function extractNumber(text: string, patterns: RegExp[], fallback: number | null = null): number | null {
@@ -28,36 +47,13 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
   const getNum = (key: string, patterns: RegExp[], fallback: number | null = null): number => {
     const raw = issue.measuredValues?.[key];
     if (raw !== undefined && raw !== null && raw !== '') {
-      return Number(raw);
+      const parsed = Number(raw);
+      if (!isNaN(parsed)) return parsed;
     }
-    const extracted = extractNumber(fullText, patterns);
-    return extracted !== null ? extracted : (fallback || 0);
+    // If structured input is missing, attempt to extract from text
+    const extracted = extractNumber(fullText, patterns, fallback);
+    return extracted !== null ? extracted : (fallback !== null ? fallback : 0); // defaulting to 0 for strict types, though missing values will fail checks later
   };
-  
-  const getParam = <T>(key: string, patterns: RegExp[], fallback: number): import('../types/v4Models').ParamOrigin<T> => {
-    const raw = issue.measuredValues?.[key];
-    if (raw !== undefined && raw !== null && raw !== '') {
-      return createParam<T>(Number(raw), 'MEASURED', 'User Input');
-    }
-    const extracted = extractNumber(fullText, patterns);
-    if (extracted !== null) {
-      return createParam<T>(extracted, 'MEASURED', 'Text Extraction');
-    }
-    return createParam<T>(fallback, 'DEFAULT', 'Fallback Value');
-  };
-  
-  const getOptionalParam = <T>(key: string, patterns: RegExp[], fallback?: number): import('../types/v4Models').ParamOrigin<T> | undefined => {
-    const raw = issue.measuredValues?.[key];
-    if (raw !== undefined && raw !== null && raw !== '') {
-      return createParam<T>(Number(raw), 'MEASURED', 'User Input');
-    }
-    const extracted = extractNumber(fullText, patterns);
-    if (extracted !== null) {
-      return createParam<T>(extracted, 'MEASURED', 'Text Extraction');
-    }
-    return fallback !== undefined ? createParam<T>(fallback, 'DEFAULT', 'Fallback Value') : undefined;
-  };
-
   
   const getOptionalNum = (key: string, patterns: RegExp[], fallback: number | null = null): number | undefined => {
     const raw = issue.measuredValues?.[key];
@@ -104,20 +100,17 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
     powerStage: {
       mosfetPartNumber: issue.measuredValues?.mosfetPartNumber as string || 'Unknown_MOSFET',
       vdsRating: getNum('vdsRatingV', [/Vds耐压\s*([0-9.]+)\s*V/i, /Vds\s*=\s*([0-9.]+)\s*V/i, /([0-9.]+)\s*V耐压/i], 40),
-      rdsOnMilliOhm: getParam('rdsOnMilliOhm', [/Rds\(on\)\s*([0-9.]+)\s*mΩ/i, /导通电阻\s*([0-9.]+)\s*mΩ/i], 2.5),
-      rthJc: getOptionalParam('rthJc', [/Rth_jc\s*([0-9.]+)/i]),
-      cissPf: getOptionalParam('cissPf', [/Ciss\s*([0-9.]+)/i]),
-      lsNh: getOptionalParam('lsNh', [/Ls\s*([0-9.]+)/i]),
+      rdsOnMilliOhm: getNum('rdsOnMilliOhm', [/Rds\(on\)\s*([0-9.]+)\s*mΩ/i, /导通电阻\s*([0-9.]+)\s*mΩ/i], 2.5),
       vthMinV: getOptionalNum('vthMinV', [/Vth_min\s*=\s*([0-9.]+)\s*V/i, /阈值下限\s*([0-9.]+)\s*V/i]),
       dvdtVns: getOptionalNum('dvdtVns', [/dv\/dt\s*([0-9.]+)\s*V\/ns/i, /dvdt\s*([0-9.]+)\s*V\/ns/i]),
-      cgdPf: getOptionalParam('cgdPf', [/Cgd\s*=\s*([0-9.]+)\s*pF/i, /米勒电容\s*([0-9.]+)\s*pF/i]),
+      cgdPf: getOptionalNum('cgdPf', [/Cgd\s*=\s*([0-9.]+)\s*pF/i, /米勒电容\s*([0-9.]+)\s*pF/i]),
       qgNc: getNum('qgNc', [/Qg\s*=\s*([0-9.]+)\s*nC/i], 50),
       qgdNc: getNum('qgdNc', [/Qgd\s*=\s*([0-9.]+)\s*nC/i, /米勒电荷\s*([0-9.]+)\s*nC/i], 15),
       qrrNc: getNum('qrrNc', [/Qrr\s*=\s*([0-9.]+)\s*nC/i], 100),
       gateDriverPartNumber: 'Unknown_Driver',
-      rgOnOhm: getParam('rgOnOhm', [/Rg_on\s*([0-9.]+)\s*Ω/i], 10),
-      rgOffOhm: getParam('rgOffOhm', [/Rg_off\s*([0-9.]+)\s*Ω/i, /关断电阻\s*([0-9.]+)\s*Ω/i, /Rg\s*=\s*([0-9.]+)\s*Ω/i], 2.2),
-      cbusUf: getParam('cBusUf', [/Cbus\s*=\s*([0-9.]+)\s*uF/i, /母线电容\s*([0-9.]+)\s*uF/i], 1000),
+      rgOnOhm: getNum('rgOnOhm', [/Rg_on\s*([0-9.]+)\s*Ω/i], 10),
+      rgOffOhm: getNum('rgOffOhm', [/Rg_off\s*([0-9.]+)\s*Ω/i, /关断电阻\s*([0-9.]+)\s*Ω/i, /Rg\s*=\s*([0-9.]+)\s*Ω/i], 2.2),
+      cbusUf: getNum('cBusUf', [/Cbus\s*=\s*([0-9.]+)\s*uF/i, /母线电容\s*([0-9.]+)\s*uF/i], 1000),
       cbusEsrMilliOhm: getNum('cbusEsrMilliOhm', [/ESR\s*([0-9.]+)\s*mΩ/i], 10),
     },
     currentSense: {
@@ -142,8 +135,8 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
       backlashArcmin: getNum('backlashArcmin', [/背隙\s*([0-9.]+)\s*arcmin/i, /([0-9.]+)\s*arcmin/i], 1.0),
       torsionalStiffnessNmPerRad: getNum('torsionalStiffnessNmPerRad', [/扭转刚度\s*([0-9.]+)\s*Nm\/rad/i], 10000),
       loadInertiaKgm2: getNum('loadInertiaKgm2', [/负载惯量\s*([0-9.eE-]+)\s*kgm2/i, /J_L\s*=\s*([0-9.eE-]+)/i], 0.1),
-      requiredPositionAccuracyArcmin: getOptionalNum('requiredPositionAccuracyArcmin', [/±\s*([0-9.]+)\s*arcmin/i, /规格要求\s*([0-9.]+)\s*arcmin/i], 3.0),
-      velocityLoopBandwidthHz: getOptionalNum('velocityLoopBandwidthHz', [/速度环带宽\s*([0-9.]+)\s*Hz/i], 30),
+      requiredPositionAccuracyArcmin: getOptionalNum('requiredPositionAccuracyArcmin', [/±\s*([0-9.]+)\s*arcmin/i, /规格要求\s*([0-9.]+)\s*arcmin/i]),
+      velocityLoopBandwidthHz: getOptionalNum('velocityLoopBandwidthHz', [/速度环带宽\s*([0-9.]+)\s*Hz/i]),
       regenPowerPeakW: getOptionalNum('regenPowerPeakW', [/峰值回馈功率\s*([0-9.]+)\s*W/i, /P_regen_peak\s*=\s*([0-9.]+)\s*W/i], undefined),
       brakingResistorRatedContinuousW: getOptionalNum('brakingResistorRatedContinuousW', [/泄放电阻连续额定功率\s*([0-9.]+)\s*W/i], undefined),
     },
@@ -153,7 +146,7 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
       measuredData: issue.actualMeasurement,
       requirement: issue.requirement,
       engineeringConcern: issue.engineeringConcern,
-      measuredValues: issue.measuredValues as unknown as Record<string, string | number>,
+      measuredValues: issue.measuredValues,
     }
   };
 }

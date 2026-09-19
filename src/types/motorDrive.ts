@@ -67,20 +67,6 @@ export interface BusPumpingResult {
 }
 
 export interface MillerRiskResult {
-  millerCurrentA: number;
-  vGateInducedV: number;
-  vGateInducedV_max?: number; // RK4 peak
-  vGateInducedV_min?: number; // RK4 trough
-  vThMinV: number;
-  safetyMarginV: number;
-  isRiskOfShootThrough: boolean;
-  riskLevel: 'SAFE' | 'WARNING' | 'CRITICAL_SHOOT_THROUGH';
-  recommendation: string;
-  isRk4Simulated?: boolean;
-}
-
-// Legacy
-export interface MillerRiskResultLegacy {
   millerCurrentA: number;        // 米勒感应耦合电荷电流 (A)
   vGateInducedV: number;         // 门极感应脉冲电压 (V)
   vThMinV: number;               // 门极最小阈值电压 (V)

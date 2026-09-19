@@ -1,14 +1,13 @@
-import { ConfidenceLevel } from "../types/v4Models";
 import { ProjectContext, IssueInput } from '../types';
 import { calculateBldcDeterministicCalculations } from './bldcDeterministicEngine';
 import { calculateRobotJointDeterministicCalculations } from './robotJointDeterministicEngine';
-import { resolveEngineeringDomains } from './scenarioDomainEngine';
+import { resolveEngineeringDomains, assessDomainClassificationAmbiguity, getEngineeringDomainLabel } from './scenarioDomainEngine';
 import { extractUnifiedEngineeringModel } from './unifiedStateExtractor';
 import { calculateThermalCascade } from './thermalCascadeEngine';
 
 export interface PrecomputedFact {
   id: string;
-  category: 'BUS_PUMPING' | 'MILLER_TRANSIENT' | 'THERMAL_TJ' | 'HARMONIC_BACKLASH' | 'SAFETY_STO' | 'WCCA_TOLERANCE';
+  category: 'BUS_PUMPING' | 'MILLER_TRANSIENT' | 'THERMAL_TJ' | 'HARMONIC_BACKLASH' | 'SAFETY_STO' | 'WCCA_TOLERANCE' | 'DOMAIN_AMBIGUITY';
   title: string;
   parameter: string;
   calculatedValue: number | string;
@@ -19,8 +18,6 @@ export interface PrecomputedFact {
   complianceVerdict: 'PASS' | 'MARGINAL' | 'FAIL' | 'CRITICAL';
   directiveForAi: string; // 对大模型的强制引用指令
   status?: 'CALCULATED' | 'INSUFFICIENT_INPUT';
-  confidence?: ConfidenceLevel;
-  confidenceReason?: string;
   inputs?: string[];
   inputSources?: Record<string, string>;
   missingInputs?: string[];
@@ -46,15 +43,35 @@ export function runDeterministicPrecomputations(
     issue.notes
   ].join(' ');
 
+  // Phase 0: 域分类歧义检测——只在工程师没有显式勾选分类、完全靠自由文本关键词兜底判定域
+  // 且文本同时命中多个域的关键词规则时触发，避免归类过程悄悄吞掉"这里其实有歧义"这个信号。
+  const ambiguity = assessDomainClassificationAmbiguity(issue);
+  if (ambiguity.isAmbiguous) {
+    facts.push({
+      id: 'PRE_DOMAIN_AMBIGUITY',
+      category: 'DOMAIN_AMBIGUITY',
+      title: '工程域分类歧义提示',
+      parameter: 'engineeringDomain',
+      calculatedValue: getEngineeringDomainLabel(ambiguity.resolvedDomain),
+      unit: '',
+      formulaOrBasis: '未提供显式工程分类，自由文本关键词同时命中多个候选域',
+      safetyMargin: `候选域：${ambiguity.competingDomains.map(getEngineeringDomainLabel).join('、')}`,
+      complianceVerdict: 'MARGINAL',
+      directiveForAi: `当前工况未由工程师显式勾选分类，系统按关键词兜底判定为"${getEngineeringDomainLabel(ambiguity.resolvedDomain)}"，但文本同时命中了${ambiguity.competingDomains.map(getEngineeringDomainLabel).join('、')}等多个候选域的关键词。模型分析前应先在回复中明确确认/复核当前工况的工程域归属，不得把这个兜底判定当成无歧义的既定事实。`,
+    });
+  }
+
   // Phase 1: 热力-电气 耦合预计算 (Thermal-Electrical Cascade)
   // 如果输入足够，算稳态结温，并且将恶化后的物理参数注回状态树，供下游安全验证。
-  const thermalResult = calculateThermalCascade(state);
+  const thermalResult = calculateThermalCascade(issue, state);
   if (thermalResult) {
     facts.push(thermalResult.fact);
-    // 注入恶化参数到状态树 (Pipeline DAG)
-    state.powerStage.vthMinV = thermalResult.vthHot;
-    // we shouldn't overwrite the original ParamOrigin, maybe just set the value
-      state.powerStage.rdsOnMilliOhm = { ...state.powerStage.rdsOnMilliOhm, value: thermalResult.rdsOnHot as any };
+    if (thermalResult.status === 'CALCULATED') {
+      // 只有结温级联本身是真实算出来的，才把恶化后的参数回写进状态树；
+      // INSUFFICIENT_INPUT 时绝不能用没算出来的 vthHot/rdsOnHot 污染下游 Miller 等计算。
+      if (thermalResult.vthHot !== undefined) state.powerStage.vthMinV = thermalResult.vthHot;
+      if (thermalResult.rdsOnHot !== undefined) state.powerStage.rdsOnMilliOhm = thermalResult.rdsOnHot;
+    }
     // 此高温甚至会导致关断更慢，如果后续有专门模型可以继续在此叠加大
   }
 

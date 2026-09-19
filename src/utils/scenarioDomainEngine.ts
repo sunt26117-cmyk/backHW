@@ -308,6 +308,34 @@ const P: Record<EngineeringDomain, DomainProfile> = {
   GENERAL: {key:'GENERAL',title:'当前工程问题 / 因果与证据闭环',question:'当前问题缺的事实是什么？哪一个实验最能减少不确定性？',chain:'Fact → mechanism → alternative → evidence → decision → closure',formulas:['未知量必须转成可测量验证项'],tests:['边界测量','最坏组合','模型/实测交叉验证'],outputs:['Unknown list','验证优先级','受控结论'],measurements:[],knownPitfalls:['未知不能用默认数字填掉']},
 };
 
+// 仅在没有显式分类时生效的关键词兜底规则，按优先级排列。
+// 之前这份规则直接写成一串 if/else，容易在别处（比如判断"是否存在歧义"）想复用时
+// 只能重新抄一遍、抄丢或抄出不一致的版本。现在提成数组，resolveEngineeringDomain()
+// 用 .find() 取第一个命中（跟原来的行为完全一样，只是换了写法），
+// assessDomainClassificationAmbiguity() 用 .filter() 数一共命中了几条规则。
+const KEYWORD_FALLBACK_RULES: Array<{ domain: EngineeringDomain; pattern: RegExp }> = [
+  { domain: 'EMC_BCI', pattern: /BCI|大电流注入|ISO\s*11452-4|注入电流|抗扰度/i },
+  { domain: 'EMC_ESD', pattern: /ESD|静电|ISO\s*10605|放电/i },
+  { domain: 'ROBOT_JOINT', pattern: /机器人关节|协作机器人|谐波减速|RV减速|背隙|回程间隙|力矩传感|EtherCAT|CANopen|STO|SS1|安全扭矩关断|关节模组/i },
+  { domain: 'BLDC', pattern: /BLDC|泵升|米勒|换相|堵转/i },
+  { domain: 'COMPONENT', pattern: /MOSFET|替代料|换料|停产|缺料|PPAP|PCN/i },
+  { domain: 'WCCA', pattern: /WCCA|最坏情况|公差链|误差预算|温漂|Cpk|Ppk/i },
+  { domain: 'THERMAL', pattern: /热设计|温升|结温|散热|功耗/i },
+  { domain: 'POWER_TRANSIENT', pattern: /ISO\s*7637|load dump|transient|脉冲1|脉冲2a|脉冲2b|脉冲3a|脉冲3b|反接|电源瞬态/i },
+  { domain: 'POWER', pattern: /电源完整性|负载突变|过冲|跌落|纹波|di\/dt/i },
+  { domain: 'SIGNAL', pattern: /CAN-FD|信号完整性|串扰|反射|眼图|阻抗/i },
+  { domain: 'EMC_RE_CE', pattern: /EMC|CISPR|辐射|传导/i },
+  { domain: 'SAFETY', pattern: /ASIL|功能安全|FTTI|安全目标/i },
+  { domain: 'RELIABILITY', pattern: /可靠性|寿命|Weibull|老化/i },
+  { domain: 'DFM', pattern: /DFM|制程|Cpk|Ppk/i },
+  { domain: 'CUSTOMER', pattern: /客户|需求|接口定义/i },
+  { domain: 'DEVIATION', pattern: /偏差|让步|ECR|设计变更/i },
+  { domain: 'PRODUCTION', pattern: /量产|EOL|ICT|AOI|批次/i },
+  { domain: 'COST', pattern: /降本|成本|BOM/i },
+  { domain: 'SCHEDULE', pattern: /节点|延期|倒计时|剩余.*天/i },
+  { domain: 'TEST', pattern: /测试失败|复现|再现/i },
+];
+
 export function resolveEngineeringDomain(issue: IssueInput): EngineeringDomain {
   const cats = issue.issueCategories || [];
   const text = `${cats.join(' ')} ${issue.requirement || ''} ${issue.actualMeasurement || ''} ${issue.failurePhenomenon || ''} ${issue.engineeringConcern || ''} ${issue.notes || ''}`;
@@ -339,26 +367,8 @@ export function resolveEngineeringDomain(issue: IssueInput): EngineeringDomain {
   if (has('Test Failure')) return 'TEST';
 
   // Keyword fallback only when no explicit category resolves the problem.
-  if (/BCI|大电流注入|ISO\s*11452-4|注入电流|抗扰度/i.test(text)) return 'EMC_BCI';
-  if (/ESD|静电|ISO\s*10605|放电/i.test(text)) return 'EMC_ESD';
-  if (/机器人关节|协作机器人|谐波减速|RV减速|背隙|回程间隙|力矩传感|EtherCAT|CANopen|STO|SS1|安全扭矩关断|关节模组/i.test(text)) return 'ROBOT_JOINT';
-  if (/BLDC|泵升|米勒|换相|堵转/i.test(text)) return 'BLDC';
-  if (/MOSFET|替代料|换料|停产|缺料|PPAP|PCN/i.test(text)) return 'COMPONENT';
-  if (/WCCA|最坏情况|公差链|误差预算|温漂|Cpk|Ppk/i.test(text)) return 'WCCA';
-  if (/热设计|温升|结温|散热|功耗/i.test(text)) return 'THERMAL';
-  if (/ISO\s*7637|load dump|transient|脉冲1|脉冲2a|脉冲2b|脉冲3a|脉冲3b|反接|电源瞬态/i.test(text)) return 'POWER_TRANSIENT';
-  if (/电源完整性|负载突变|过冲|跌落|纹波|di\/dt/i.test(text)) return 'POWER';
-  if (/CAN-FD|信号完整性|串扰|反射|眼图|阻抗/i.test(text)) return 'SIGNAL';
-  if (/EMC|CISPR|辐射|传导/i.test(text)) return 'EMC_RE_CE';
-  if (/ASIL|功能安全|FTTI|安全目标/i.test(text)) return 'SAFETY';
-  if (/可靠性|寿命|Weibull|老化/i.test(text)) return 'RELIABILITY';
-  if (/DFM|制程|Cpk|Ppk/i.test(text)) return 'DFM';
-  if (/客户|需求|接口定义/i.test(text)) return 'CUSTOMER';
-  if (/偏差|让步|ECR|设计变更/i.test(text)) return 'DEVIATION';
-  if (/量产|EOL|ICT|AOI|批次/i.test(text)) return 'PRODUCTION';
-  if (/降本|成本|BOM/i.test(text)) return 'COST';
-  if (/节点|延期|倒计时|剩余.*天/i.test(text)) return 'SCHEDULE';
-  if (/测试失败|复现|再现/i.test(text)) return 'TEST';
+  const fallbackMatch = KEYWORD_FALLBACK_RULES.find((rule) => rule.pattern.test(text));
+  if (fallbackMatch) return fallbackMatch.domain;
   return 'GENERAL';
 }
 
@@ -379,6 +389,36 @@ export function resolveEngineeringDomains(issue: IssueInput): EngineeringDomain[
   // 文本识别只作为没有显式分类时的兜底；显式多分类不再额外制造噪声域。
   if (domains.length === 0) add(resolveEngineeringDomain(issue));
   return domains;
+}
+
+/**
+ * 检测领域分类是否存在歧义——只在工程师没有显式勾选 issueCategories、完全靠自由文本
+ * 关键词兜底判定域的情况下才有意义（显式分类是权威判定，不存在"歧义"这个概念）。
+ *
+ * 不是重新发明一套打分式分类器，就是把 resolveEngineeringDomain() 兜底阶段本来就在跑的
+ * 那份规则表，从"只要第一个命中的"改成"看一共命中了几个"，如果命中多个域的关键词规则，
+ * 说明这段自由文本本身描述得不够聚焦，值得在 prompt 里提醒 AI 这里的域判定有歧义风险，
+ * 而不是让归类过程悄悄吞掉这个信号、直接给出一个看似确定的单一域。
+ */
+export function assessDomainClassificationAmbiguity(issue: IssueInput): {
+  isAmbiguous: boolean;
+  resolvedDomain: EngineeringDomain;
+  competingDomains: EngineeringDomain[];
+} {
+  const resolvedDomain = resolveEngineeringDomain(issue);
+  const hasExplicitCategory = (issue.issueCategories || []).length > 0;
+  if (hasExplicitCategory) {
+    return { isAmbiguous: false, resolvedDomain, competingDomains: [resolvedDomain] };
+  }
+
+  const text = `${issue.requirement || ''} ${issue.actualMeasurement || ''} ${issue.failurePhenomenon || ''} ${issue.engineeringConcern || ''} ${issue.notes || ''}`;
+  const matchedDomains = Array.from(new Set(KEYWORD_FALLBACK_RULES.filter((rule) => rule.pattern.test(text)).map((rule) => rule.domain)));
+
+  return {
+    isAmbiguous: matchedDomains.length > 1,
+    resolvedDomain,
+    competingDomains: matchedDomains.length > 0 ? matchedDomains : [resolvedDomain],
+  };
 }
 
 export function getEngineeringDomainLabel(domain: EngineeringDomain): string {

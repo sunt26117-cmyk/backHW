@@ -3,7 +3,7 @@ import { generateBldcMotorAnalysis } from './bldcMotorExpert';
 import { generateRobotJointAnalysis, getRobotJointPillars } from './robotJointExpert';
 import { applyScenarioDynamicLayer } from '../utils/scenarioDynamic';
 import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, getEngineeringDomainLabel, resolveEngineeringDomain, resolveEngineeringDomains } from '../utils/scenarioDomainEngine';
-import { ensureDualTimeline } from '../utils/dualTimelineEngine';
+import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 import { getCrossDomainCouplings } from '../utils/crossDomainCouplingMatrix';
 import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
 import { extractUnifiedEngineeringModel } from '../utils/unifiedStateExtractor';
@@ -118,7 +118,7 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   }
 
   // 补全升级2：双层工程时间轴 (T+24h 应急临时遏制 vs 下一阶段永久纠正)
-  result.dualTimeline = result.dualTimeline || ensureDualTimeline(result, context, issue);
+  result.dualTimeline = result.dualTimeline || buildDualTimelinePlan(result, context, issue);
 
   // 多域基线：保留原有“主导域”规则，同时为所有涉及领域生成独立证据就绪度、计算结果与域级结论，供后续页面和 AI 决策消费。
   const domainList = resolveEngineeringDomains(issue);
@@ -427,7 +427,7 @@ function generateEmcAnalysis(context: ProjectContext, issue: IssueInput): Copilo
       failureConsequence: '项目关键路径延期，整车级 DV 节点滑坡，产生商务延期索赔风险。',
       preconditions: '获得 PM 审批延期许可与整车客户节点推迟书面批准。',
       verificationMethod: '新 PCB 打样后进入电磁兼容暗室进行 RE 天线 1m 法实测。',
-      planB: '', citedFields: [],
+      planB: '如无法延期，退回局部飞线加贴滤波件应急摸底。',
     },
     {
       id: 'Option B',
@@ -455,7 +455,7 @@ function generateEmcAnalysis(context: ProjectContext, issue: IssueInput): Copilo
       failureConsequence: '若正式外壳依然超标，由于 Plan B 备用方案已同步准备好，可当场切换套磁环/贴片吸收，不会直接导致测试溃败。',
       preconditions: '结构团队提供至少 1 套完整正式压铸铝外壳与导电橡胶衬垫。',
       verificationMethod: '在 CISPR 25 标准暗室中安装正式外壳与 1m 标准线束复测 150MHz 频点。',
-      planB: '', citedFields: [],
+      planB: '若金属外壳装配后仍超标 > 0dB，立即在线束出口加装镍锌铁氧体磁环并在开关节点并联高频 RC (10Ω+100pF) 吸收电路。',
     },
     {
       id: 'Option C',
@@ -486,13 +486,12 @@ function generateEmcAnalysis(context: ProjectContext, issue: IssueInput): Copilo
       failureConsequence: '正式 DV 测试报告留下重大不符合项 (Fail)，客户质量门禁冻结。',
       preconditions: '无',
       verificationMethod: '无',
-      planB: '', citedFields: [],
+      planB: '无',
     },
   ];
 
   return {
     source: 'deterministic-expert',
-    citedFields: [],
     coreConclusion: {
       problemSummary: 'B 样件在临时塑料夹具下测试 CISPR 25 Class 5 辐射发射，150MHz 超标 +3.0dB；距离正式 DV 测试仅剩 14 天。',
       recommendedMeasure: '执行方案 B：双轨推进 (正式压铸金属外壳真实工况摸底 + 并行预留 Plan B 磁环与 RC 阻尼补丁)。',
@@ -578,7 +577,7 @@ function generateEmcAnalysis(context: ProjectContext, issue: IssueInput): Copilo
         '正式外壳实测数据出炉时刻。',
         '整车 OEM 要求更改天线极化方向或增加低频谐波要求时。',
       ],
-      planB: '',
+      planB: 'Plan B：在线束连接器根部套扣高导磁共模磁环 (150MHz 阻抗 > 180Ω)，并在 Gate Driver 供电输入端点焊 100nF 低 ESL 贴片电容与 2.2Ω 阻尼电阻，就地吸收共模浪涌。',
     },
     raciMatrix: [
       { role: 'HW', raciType: 'R', owner: 'HW Lead', action: '负责正式外壳装配、共模路径排查及 Plan B 元件试贴', output: 'EMC 路径排查报告与预检测试曲线', dueDate: 'Day 3', decisionGate: 'DV 入场前评审会' },
@@ -702,7 +701,7 @@ function generateComponentAnalysis(context: ProjectContext, issue: IssueInput): 
       failureConsequence: '若现货商断货，项目将在 PV 阶段直接面临断料停线风险。',
       preconditions: 'PM 批准急单溢价预算，SQE 完成现货商品质开盖认证。',
       verificationMethod: '三方实验室开盖解剖检测晶圆标识与 X-Ray 检查。',
-      planB: '', citedFields: [],
+      planB: '若现货无法交货，必须启动替代料专项降额验证。',
     },
     {
       id: 'Option B',
@@ -730,7 +729,7 @@ function generateComponentAnalysis(context: ProjectContext, issue: IssueInput): 
       failureConsequence: '若台架测试中途击穿，立即中止放行，触发采购备选渠道。',
       preconditions: '供应商书面签署参数承诺书，SQE 锁定批次抽检方案。',
       verificationMethod: '高低温箱 (-40℃ ~ 105℃) 下 400V 母线预充电阻短路与正常预充极限循环测试。',
-      planB: '', citedFields: [],
+      planB: '若温升依然超标，软件修改预充策略，增加两次预充重试间隔时间使器件自然冷却。',
     },
     {
       id: 'Option C',
@@ -761,13 +760,12 @@ function generateComponentAnalysis(context: ProjectContext, issue: IssueInput): 
       failureConsequence: '整车高压下电抛锚，客户直接签发 Level 1 严重质量不合格。',
       preconditions: '无',
       verificationMethod: '无',
-      planB: '', citedFields: [],
+      planB: '无',
     },
   ];
 
   return {
     source: 'deterministic-expert',
-    citedFields: [],
     coreConclusion: {
       problemSummary: '400V BMS 预充 MOSFET 原厂缺货，替代料虽然封装与静态耐压一致，但 Qgd 偏大 22%、高温温升增加 8.4℃ 且 SOA 裕量不足 15%，AEC-Q 报告未闭环。',
       recommendedMeasure: '执行方案 B：受控条件放行 (微调驱动阻抗抑制温升 + 开展 1000 次 400V 预充极限浪涌专项台架验证 + SQE 闭环 AEC-Q 报告)。',
@@ -854,7 +852,7 @@ function generateComponentAnalysis(context: ProjectContext, issue: IssueInput): 
         '1000 次极限应力台架数据出来后。',
         '客户下达针对预充回路软件重试次数的新控制逻辑时。',
       ],
-      planB: '',
+      planB: 'Plan B：若替代料在台架验证表现不稳定，立即采购批次现货原厂器件供 PV 样件使用；并在后续改板中增加第 2 颗 MOSFET 做并联分流设计。',
     },
     raciMatrix: [
       { role: 'HW', raciType: 'R', owner: 'HW Lead', action: '执行驱动优化仿真、降额计算、实测温升与 SOA 裕量评估', output: '器件替代工程计算与验证分析报告', dueDate: 'Day 4', decisionGate: '技术验证门禁' },
@@ -978,7 +976,7 @@ function generateWccaAnalysis(context: ProjectContext, issue: IssueInput): Copil
       failureConsequence: '项目利润不达标，财务门禁否决。',
       preconditions: '获得客户或 PM 对 BOM 增加 +$1.50 的正式书面吸收批准。',
       verificationMethod: '全温区精度台架扫描测试。',
-      planB: '', citedFields: [],
+      planB: '退回校准方案。',
     },
     {
       id: 'Option B',
@@ -1006,7 +1004,7 @@ function generateWccaAnalysis(context: ProjectContext, issue: IssueInput): Copil
       failureConsequence: '若产线标定失败，板卡进入重检工位，不产生报废。',
       preconditions: '生产工艺团队具备精密电流源标定环境，且 MCU 驱动具备参数自校准存储算法。',
       verificationMethod: '高低温箱 (-40℃ ~ 125℃) 验证标定后残余温漂与 1000h 加速老化漂移。',
-      planB: '', citedFields: [],
+      planB: '若个别批次温漂过大，在软件中增加基于 MCU 片上温度传感器的温度分段补偿算法。',
     },
     {
       id: 'Option C',
@@ -1037,13 +1035,12 @@ function generateWccaAnalysis(context: ProjectContext, issue: IssueInput): Copil
       failureConsequence: '客户审查 WCCA 时当场打回，冻结项目评审并通报批评。',
       preconditions: '无',
       verificationMethod: '无',
-      planB: '', citedFields: [],
+      planB: '无',
     },
   ];
 
   return {
     source: 'deterministic-expert',
-    citedFields: [],
     coreConclusion: {
       problemSummary: '客户要求电流采样精度全温区 <= ±1.0%，理论极端最坏情况 (Extreme Worst-Case) 分析为 ±3.21%；升级精密器件将增加 BOM +$1.50 击穿成本。',
       recommendedMeasure: '执行方案 B：硬件架构保持不变 + 产线 EOL 自动化校准 (消除初始偏置与公差，残余温漂与老化经 Monte Carlo 验证降至 ±0.88%)。',
@@ -1127,7 +1124,7 @@ function generateWccaAnalysis(context: ProjectContext, issue: IssueInput): Copil
       reEvaluationTriggers: [
         '产线 EOL 首批 100 台标定离散度 (Cpk) 统计完成时。',
       ],
-      planB: '',
+      planB: 'Plan B：在 MCU 固件中加入基于内部温度传感器的多项式分段温漂补偿算法，进一步压缩温漂影响。',
     },
     raciMatrix: [
       { role: 'HW', raciType: 'R', owner: 'HW Lead', action: '完成 WCCA 极端值、RSS 与 Monte Carlo 仿真，主导温箱精度验证', output: 'WCCA 完整工程分析报告与温箱实测数据', dueDate: 'Day 3', decisionGate: 'CDR 评审' },
@@ -1251,7 +1248,7 @@ function generateCustomerSilenceAnalysis(context: ProjectContext, issue: IssueIn
       failureConsequence: '整车 A 样节点违约，被客户高层通报项目管理失控。',
       preconditions: '获得客户采购与项目总监批准项目顺延。',
       verificationMethod: '等待书面文件。',
-      planB: '', citedFields: [],
+      planB: '无法推进。',
     },
     {
       id: 'Option B',
@@ -1279,7 +1276,7 @@ function generateCustomerSilenceAnalysis(context: ProjectContext, issue: IssueIn
       failureConsequence: '即便客户后期变更要求，只需更换贴片电阻阻值，无需 PCB 改版。',
       preconditions: 'PM 正式向客户签发《工程推进假设与变更截止期限正式通知函》。',
       verificationMethod: '投板前进行 DRC 检查与兼容焊盘走线审查。',
-      planB: '', citedFields: [],
+      planB: '若客户在投板后提出完全无法兼容的颠覆性需求，凭正式函件直接启动 ECR 索赔改板周期与费用。',
     },
     {
       id: 'Option C',
@@ -1310,13 +1307,12 @@ function generateCustomerSilenceAnalysis(context: ProjectContext, issue: IssueIn
       failureConsequence: 'A 样板全部废弃，硬件工程师承担全责。',
       preconditions: '无',
       verificationMethod: '无',
-      planB: '', citedFields: [],
+      planB: '无',
     },
   ];
 
   return {
     source: 'deterministic-expert',
-    citedFields: [],
     coreConclusion: {
       problemSummary: '客户对传感器接口阻抗未确认且长期不回复邮件，PCB 投板节点仅剩 3 天，面临违约或盲目投板的重大冲突。',
       recommendedMeasure: '执行方案 B：硬件实施兼容设计 (DNP 预留) + 依据工程假设按期投板 + 发出 48h 截止期正式函件 (明确后期变更触发 ECR 责任边界)。',
@@ -1394,7 +1390,7 @@ function generateCustomerSilenceAnalysis(context: ProjectContext, issue: IssueIn
       reEvaluationTriggers: [
         '客户正式书面回复接口定义时。',
       ],
-      planB: '',
+      planB: 'Plan B：若客户在样板贴片后才提出异议，利用 PCB 预留的兼容焊盘更换贴片阻容即可在 2 小时内完成改造。',
     },
     raciMatrix: [
       { role: 'HW', raciType: 'R', owner: 'HW Lead', action: '完成兼容原理图设计与 Gerber 归档', output: '兼容性原理图与 PCB 设计包', dueDate: 'Day 2', decisionGate: 'Gerber 锁定' },
@@ -1518,7 +1514,7 @@ function generateThermalAnalysis(context: ProjectContext, issue: IssueInput): Co
       failureConsequence: '若与下个节点冲突需短暂调整试验批次。',
       preconditions: '结构空间允许粘贴 1.5mm 导热硅胶垫，PM 批准成本。',
       verificationMethod: '热电偶与红外热像仪在 85℃ 烘箱连续 4 小时满载复测。',
-      planB: '', citedFields: [],
+      planB: '若导热垫成本超标，仅采用 2oz 铜皮 + 增加散热过孔。',
     },
     {
       id: 'Option B',
@@ -1546,7 +1542,7 @@ function generateThermalAnalysis(context: ProjectContext, issue: IssueInput): Co
       failureConsequence: '若仍有发热，结合 C 样改版合并优化。',
       preconditions: '固件主控具备动态调频与负载感知能力。',
       verificationMethod: '温箱满载热电偶实测 + 示波器纹波与瞬态响应测试。',
-      planB: '', citedFields: [],
+      planB: '若固件优化后裕量仍不充分，在 C 样正式投板时纳入方案 A 的 2oz 铜皮。',
     },
     {
       id: 'Option C',
@@ -1577,13 +1573,12 @@ function generateThermalAnalysis(context: ProjectContext, issue: IssueInput): Co
       failureConsequence: '整车控制器高温烧毁，质保索赔爆发。',
       preconditions: '无',
       verificationMethod: '无',
-      planB: '', citedFields: [],
+      planB: '无',
     },
   ];
 
   return {
     source: 'deterministic-expert',
-    citedFields: [],
     coreConclusion: {
       problemSummary: 'DC/DC 满载测试功率电感实测 108℃，同步整流 MOSFET 结温预估 122℃，裕量仅 3℃ (规范要求 >= 15℃ 降额裕量)，结构受限无法加装风扇。',
       recommendedMeasure: '执行方案 B (软件动态降频降耗与死区优化作为当前紧急受控措施) + 在 C 样正式改版中合并实施方案 A (升级 2oz 铜箔与散热过孔)。',
@@ -1663,7 +1658,7 @@ function generateThermalAnalysis(context: ProjectContext, issue: IssueInput): Co
       reEvaluationTriggers: [
         '热电偶 4 小时实测温升数据出炉时。',
       ],
-      planB: '',
+      planB: 'Plan B：在当前 B 样外壳内部粘贴 1.5mm 导热软垫将热量引出至安装支架。',
     },
     raciMatrix: [
       { role: 'HW', raciType: 'R', owner: 'HW Lead', action: '计算功率损耗分布、实测热电偶温升、编制 C 样改版设计', output: '热分析与温升改善报告', dueDate: 'Day 3', decisionGate: '热设计门禁' },

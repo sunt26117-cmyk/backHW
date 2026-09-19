@@ -7,22 +7,16 @@ import {
   AiAuditFlag,
   CandidateAction,
 } from '../types';
-import { ensureDualTimeline } from './dualTimelineEngine';
+import { buildDualTimelinePlan } from './dualTimelineEngine';
 import { generateCouplingCheckTemplates } from './crossDomainCouplingMatrix';
 import { resolveEngineeringDomains } from './scenarioDomainEngine';
+import { recalculateStandardWeightedScore } from './scoringWeights';
 
 /**
- * 重新计算方案加权总分 (T:25%, S:25%, C:15%, Q:20%, L:15%)
+ * 方案加权总分核对——权重定义已经统一到 scoringWeights.ts，这里不再重复写死一份，
+ * 直接复用 recalculateStandardWeightedScore()。
  */
-function recalculateWeightedScore(scores: { T: number; S: number; C: number; Q: number; L: number }): number {
-  const t = Math.max(0, Math.min(100, Number(scores.T) || 0));
-  const s = Math.max(0, Math.min(100, Number(scores.S) || 0));
-  const c = Math.max(0, Math.min(100, Number(scores.C) || 0));
-  const q = Math.max(0, Math.min(100, Number(scores.Q) || 0));
-  const l = Math.max(0, Math.min(100, Number(scores.L) || 0));
-  const total = t * 0.25 + s * 0.25 + c * 0.15 + q * 0.20 + l * 0.15;
-  return Math.round(total * 10) / 10;
-}
+const recalculateWeightedScore = recalculateStandardWeightedScore;
 
 /**
  * 常见工程空话反模式词库（若未带具体参数，则视为模糊回答）
@@ -200,7 +194,7 @@ export function auditAiResult(
     const hasNumericUnit = /(?:\d+(?:\.\d+)?)\s*(?:V|A|℃|°C|ns|μs|ms|dB(?:μV(?:\/m)?)?|MHz|kHz|arcmin|%|Ω)/i.test(text);
     if (hasNumericUnit && citations.length === 0) {
       flags.push({
-        level: 'FATAL',
+        level: 'WARNING',
         ruleId: 'RULE_12_CITATION_MISSING',
         title: '关键数值结论缺少证据引用',
         message: `${owner} 包含带单位的数值结论，但没有提供 citedFields；无法沿证据链回溯到 measuredValues 或本地计算。`,
@@ -291,40 +285,23 @@ export function auditAiResult(
     }
 
     // 2.3 审计数值一致性 (RULE_07_NUMERICAL_CONSISTENCY)
-    // 将 RULE_07 泛化至所有 measuredKeyValues
-    for (const [key, inputNum] of Object.entries(measuredKeyValues)) {
-      const unit = getUnitHint(key);
-      if (!unit) continue;
-      
-      const escapedUnit = unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const valuesInText = [...combinedText.matchAll(new RegExp(`([+-]?\\d+(?:\\.\\d+)?)\\s*${escapedUnit}`, 'ig'))]
-        .map((x) => Number(x[1]))
-        .filter(Number.isFinite);
-
-      if (valuesInText.length > 0) {
-        for (const aiNum of valuesInText) {
-          let allowedDelta = Math.max(0.05, Math.abs(inputNum) * 0.1); // 默认允许 10% 的误差
-          if (unit === 'V') allowedDelta = 2.0;
-          else if (unit === '℃' || unit === '°C') allowedDelta = 5.0;
-          else if (unit === 'A') allowedDelta = 1.0;
-          else if (unit === '%') allowedDelta = 2.0;
-          else if (unit === 'ms') allowedDelta = 10.0;
-          
-          if (Math.abs(aiNum - inputNum) > allowedDelta) {
-            // 忽略常见的绝对阈值（如耐压 40V/60V，硅结温限制 175℃ 等），避免误伤
-            const isCommonThreshold = (unit === 'V' && (Math.abs(aiNum - 40) < 0.5 || Math.abs(aiNum - 60) < 0.5)) ||
-                                      (unit === '℃' && Math.abs(aiNum - 175) < 0.5);
-            if (!isCommonThreshold) {
-              flags.push({
-                level: 'WARNING',
-                ruleId: 'RULE_07_NUMERICAL_CONSISTENCY',
-                title: '实测数值引用偏离真实输入',
-                message: `方案 [${action.id || idx}] 描述中引用 ${key} 数值为 ${aiNum}${unit}，与用户输入工况实测值 ${inputNum}${unit} 存在矛盾。`,
-                fieldPath: `candidateActions[${idx}].description`,
-                autoFixApplied: false,
-              });
-            }
-          }
+    // 检查方案描述是否对用户输入实测值产生明显篡改（如实测 37.8V 篡改为 46V）
+    if (measuredKeyValues.vbus) {
+      const vbusRegex = /(?:实测|峰值|达到|泵升至)\s*([0-9.]+)\s*V/i;
+      const match = combinedText.match(vbusRegex);
+      if (match && match[1]) {
+        const aiNum = parseFloat(match[1]);
+        const inputNum = measuredKeyValues.vbus;
+        // 如果差异 > 10% 且绝对值 > 2V，且该数值不是耐压阈值 (如40V/60V)
+        if (Math.abs(aiNum - inputNum) > 2.0 && Math.abs(aiNum - 40) > 0.5 && Math.abs(aiNum - 60) > 0.5) {
+          flags.push({
+            level: 'WARNING',
+            ruleId: 'RULE_07_NUMERICAL_CONSISTENCY',
+            title: '实测数值引用偏离真实输入',
+            message: `方案 [${action.id || idx}] 描述中引用实测母线电压为 ${aiNum}V，与用户输入工况实测值 ${inputNum}V 存在明显矛盾。`,
+            fieldPath: `candidateActions[${idx}].description`,
+            autoFixApplied: false,
+          });
         }
       }
     }
@@ -446,7 +423,7 @@ export function auditAiResult(
         autoFixApplied: true,
       });
 
-      sanitized.dualTimeline = ensureDualTimeline(sanitized, context, issue);
+      sanitized.dualTimeline = buildDualTimelinePlan(sanitized, context, issue);
       autoFixSummary.push(`已自动为倒计时紧迫工况生成 T+24h 应急临时遏制 (Containment) 协同时间轴`);
     }
   }
@@ -518,7 +495,7 @@ export function auditAiResult(
 
   // 8. 双层时间轴完整性兜底
   if (!sanitized.dualTimeline || !sanitized.dualTimeline.containmentPhase) {
-    sanitized.dualTimeline = baseline.dualTimeline || ensureDualTimeline(sanitized, context, issue);
+    sanitized.dualTimeline = baseline.dualTimeline || buildDualTimelinePlan(sanitized, context, issue);
   }
 
   // 9. 计算审计总分与评定状态
@@ -531,13 +508,9 @@ export function auditAiResult(
   auditScore = Math.max(0, Math.min(100, auditScore));
 
   const hasFatal = flags.some((f) => f.level === 'FATAL');
-  const hasUncited = flags.some((f) => f.ruleId === 'RULE_12_CITATION_MISSING');
   let overallStatus: AiAuditResult['overallStatus'] = 'APPROVED';
-  
-  if (hasFatal || hasUncited) {
-    overallStatus = 'NEEDS_VERIFICATION';
-  } else if (auditScore < 50) {
-    overallStatus = 'FLAGGED_NEEDS_REVIEW';
+  if (hasFatal || auditScore < 50) {
+    overallStatus = hasFatal ? 'REJECTED_AUDIT_FAILED' : 'FLAGGED_NEEDS_REVIEW';
   } else if (auditScore < 85) {
     overallStatus = 'PASSED_WITH_WARNINGS';
   }

@@ -41,7 +41,7 @@ import {
   Milestone,
   ExternalLink,
 } from 'lucide-react';
-import { ensureDualTimeline } from '../utils/dualTimelineEngine';
+import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 
 interface RecommendationRaciViewProps {
   result: CopilotAnalysisResult | null;
@@ -84,6 +84,11 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
   }
 
   const { finalRecommendation, raciMatrix, containment, capa, riskRatings } = result;
+  const calculatedEvidence = result.analysisBasis?.calculatedOutputEvidence || [];
+  const unknownsBlockingDecision = result.decisionFrame?.unknownsBlockingDecision || [];
+  const domainAssessments = result.multiDomainAnalysis?.domainAssessments || [];
+  const insufficientEvidenceCount = calculatedEvidence.filter((e) => e.status === 'INSUFFICIENT_INPUT').length;
+  const lowEvidenceDomains = domainAssessments.filter((d) => /LOW|低|不足/i.test(d.evidenceLevel || ''));
   const safeWhyReason = Array.isArray(finalRecommendation?.whyReason) ? finalRecommendation.whyReason : finalRecommendation?.whyReason ? [String(finalRecommendation.whyReason)] : [];
   const safeImmediateSteps = Array.isArray(finalRecommendation?.immediateSteps) ? finalRecommendation.immediateSteps : [];
   const safeUnacceptableActions = Array.isArray(finalRecommendation?.unacceptableActions) ? finalRecommendation.unacceptableActions : [];
@@ -154,6 +159,74 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* 0. 证据基础与未闭合缺口 —— 让最终推荐带着"这个结论建立在哪些真实计算/哪些还没闭合"一起给出，
+          不额外发明新的置信度算法，只是把 analysisBasis.calculatedOutputEvidence / decisionFrame.unknownsBlockingDecision /
+          multiDomainAnalysis.domainAssessments 这几个已经算好、但之前这个视图从未读取过的字段展示出来。 */}
+      {(calculatedEvidence.length > 0 || unknownsBlockingDecision.length > 0 || lowEvidenceDomains.length > 0) && (
+        <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
+          <div className="flex items-center space-x-2 mb-3">
+            <Microscope className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs font-bold text-slate-200 uppercase tracking-wide">证据基础与未闭合缺口</span>
+            {insufficientEvidenceCount > 0 && (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-600/40">
+                {insufficientEvidenceCount} 项计算因输入不足未闭合
+              </span>
+            )}
+          </div>
+
+          {calculatedEvidence.length > 0 && (
+            <div className="grid sm:grid-cols-2 gap-2 mb-3">
+              {calculatedEvidence.map((ev) => (
+                <div
+                  key={ev.id}
+                  className={`p-2.5 rounded-lg border text-[11px] ${
+                    ev.status === 'INSUFFICIENT_INPUT'
+                      ? 'bg-amber-950/30 border-amber-700/40'
+                      : ev.complianceVerdict === 'CRITICAL' || ev.complianceVerdict === 'FAIL'
+                      ? 'bg-red-950/30 border-red-700/40'
+                      : 'bg-slate-800/60 border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-200">{ev.title}</span>
+                    <span
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                        ev.status === 'INSUFFICIENT_INPUT' ? 'bg-amber-800/60 text-amber-200' : 'bg-emerald-900/60 text-emerald-300'
+                      }`}
+                    >
+                      {ev.status === 'INSUFFICIENT_INPUT' ? '输入不足' : `已核算 · ${ev.complianceVerdict || '—'}`}
+                    </span>
+                  </div>
+                  {ev.status === 'INSUFFICIENT_INPUT' ? (
+                    <div className="text-amber-300/90 mt-1">缺失：{ev.missingInputs?.join('、') || '—'}</div>
+                  ) : (
+                    <div className="text-slate-400 mt-1">
+                      {ev.value !== undefined ? `${ev.value}${ev.unit || ''}` : '—'}
+                      {ev.safetyMargin !== undefined ? ` · 裕量 ${ev.safetyMargin}${ev.unit || ''}` : ''}
+                      {' · '}引擎：{ev.engine}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {lowEvidenceDomains.length > 0 && (
+            <div className="mb-2 text-[11px] text-slate-400">
+              <span className="text-slate-300 font-semibold">证据浓度偏低的领域：</span>
+              {lowEvidenceDomains.map((d) => `${d.domain}（${d.evidenceLevel}）`).join('、')}
+            </div>
+          )}
+
+          {unknownsBlockingDecision.length > 0 && (
+            <div className="text-[11px] text-slate-400">
+              <span className="text-slate-300 font-semibold">阻塞决策的未闭合项：</span>
+              {unknownsBlockingDecision.join('；')}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 1. Final Recommendation Hero Header */}
       <div className="bg-slate-900 border border-blue-500/40 rounded-xl p-6 shadow-md">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
@@ -1282,7 +1355,7 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
           attachments: [],
         };
 
-        const dualTimeline = result.dualTimeline || ensureDualTimeline(result, effectiveContext, effectiveIssue);
+        const dualTimeline = result.dualTimeline || buildDualTimelinePlan(result, effectiveContext, effectiveIssue);
 
         const handleCopyTimeline = () => {
           if (!dualTimeline) return;
