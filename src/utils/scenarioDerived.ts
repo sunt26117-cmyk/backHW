@@ -38,6 +38,11 @@ function preferMeasured(issue: IssueInput, key: string, parsed: number): number 
   return Number.isFinite(direct) ? direct : parsed;
 }
 
+function optMeas(issue: IssueInput, key: string): number | undefined {
+  const v = measuredNumber(issue, key);
+  return Number.isFinite(v) ? v : undefined;
+}
+
 export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueInput): BldcEvaluationInput {
   const text = allText(issue);
   const isEmc = issue.issueCategories?.includes('EMC');
@@ -160,9 +165,16 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     cgdPf,
     dvDtVns,
     vthMinV,
-    keVkrpm,
-    rthJc,
-    rdsOnMilliOhm,
+    keVkrpm: Number.isFinite(keVkrpm) ? keVkrpm : undefined,
+    rthJc: Number.isFinite(rthJc) ? rthJc : undefined,
+    rdsOnMilliOhm: Number.isFinite(rdsOnMilliOhm) ? rdsOnMilliOhm : undefined,
+    senseDelayNsOverride: optMeas(issue, 'senseDelayNs'),
+    compDelayNsOverride: optMeas(issue, 'compDelayNs'),
+    digitalFilterDelayNsOverride: optMeas(issue, 'digitalFilterDelayNs'),
+    driverPropDelayNsOverride: optMeas(issue, 'driverPropDelayNs'),
+    gateTurnOffDelayNsOverride: optMeas(issue, 'gateTurnOffDelayNs'),
+    currentFallDelayNsOverride: optMeas(issue, 'currentFallDelayNs'),
+    soaShortCircuitTimeUsOverride: optMeas(issue, 'soaShortCircuitTimeUs'),
   };
 }
 

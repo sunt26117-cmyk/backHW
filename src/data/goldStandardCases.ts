@@ -25,7 +25,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     category: 'Thermal & Stress',
     input: {
       context: { projectName: '车载 48V-12V DCDC 控制器', projectPhase: 'DVT' },
-      issue: { failurePhenomenon: '满载 120A 持续输出 15 分钟后，MOSFET 焊盘温度达 138℃' },
+      issue: { failurePhenomenon: '满载 120A 持续输出 15 分钟后，MOSFET 焊盘温度达 138℃', measuredValues: { ambientTempC: 105, currentPeakA: 120, rdsOnMilliOhm: 4 } },
     },
     expectedPattern: 'P006',
     expectedCalculation: { '稳态结温 Tj (℃)': 145.2, '车规降额裕量 (℃)': -20.2 },
@@ -96,7 +96,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '短路保护响应时序 vs MOSFET SOA 窗口 (P016 重点)',
     category: 'Power & Protection Timing',
     input: {
-      issue: { failurePhenomenon: '相间短路发生时，从电流上升到门极完全关断总耗时 2.8μs，MOSFET 短路耐受仅 2.5μs' },
+      issue: { failurePhenomenon: '相间短路发生时，从电流上升到门极完全关断总耗时 2.8μs，MOSFET 短路耐受仅 2.5μs', measuredValues: { senseDelayNs: 500, compDelayNs: 500, digitalFilterDelayNs: 500, driverPropDelayNs: 300, gateTurnOffDelayNs: 300, currentFallDelayNs: 400, soaShortCircuitTimeUs: 2.0 } },
     },
     expectedPattern: 'P016',
     expectedCalculation: { '全关闭时间 Fault-to-Off (μs)': 0.85, 'SOA耐受时间 (μs)': 2.5, '时序裕量 (μs)': 1.65 },
@@ -194,7 +194,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '供应商跨晶圆厂 PCN / 二次源多维等价性核验',
     category: 'Supply Chain & PCN',
     input: {
-      issue: { failurePhenomenon: '供应商将功率 MOSFET 晶圆制造厂由欧洲 Fab 1 转至亚洲 Fab 2' },
+      issue: { failurePhenomenon: '急停后母线实测峰值 48V，而功率 MOSFET 额定耐压仅 40V，动态尖峰逼近击穿', measuredValues: { busVoltagePeakV: 48, vdsRatingV: 40 } },
     },
     expectedPattern: 'P014',
     expectedCalculation: { 'Qrr体二极管电荷差异 (%)': '+18.0%', '结论': 'Regression Required' },

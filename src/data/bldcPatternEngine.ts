@@ -509,7 +509,7 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   }
   const tjEstimated = tjIter;
   const pTotal = pCondFinal + pSwFinal;
-  const p006ThermalRunaway = !converged || tjEstimated > 400;
+  const p006ThermalRunaway = Number.isFinite(tjEstimated) && (!converged || tjEstimated > 400);
   const p006Overheat = tjEstimated >= 140;
   const p006CriticalAssumption = !hasRthCa; // rthCaOrJa 是否为假设值，决定能否触发一票否决
 
@@ -592,7 +592,7 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   patterns.push({
     id: 'P007',
     name: '高温→多工况热安全综合裕量 (Multi-Domain Thermal Safety Margins)',
-    triggered: true,
+    triggered: Number.isFinite(tjEstimated) && tjEstimated >= 90,
     corePhysicalChain: '不能仅判断 Tj < TjMax 绝对值，必须综合评估稳态、脉冲瞬态、SOA与车规长期降额裕量',
     calculatedValues: p007CalculatedValues,
     riskLevel: deratingMargin < 0 ? 'Medium-High' : 'Low',
@@ -784,7 +784,7 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   patterns.push({
     id: 'P012',
     name: '高边自举电路充电动能不足 (Bootstrap Voltage Margin & Refresh Strategy)',
-    triggered: true,
+    triggered: p012RefreshInsufficient,
     corePhysicalChain: 'PWM 占空比逼近 100% → 下桥导通时间极短 → 自举电容无法充满电 → 高边门极浮动电压缓慢跌落 → 上桥 MOSFET 进入线性放大区发热烧毁。泄放电流除静态漏电流外，每次开关从自举电容抽走的栅极电荷 (Qg×fsw) 往往是主导项',
     calculatedValues: p012CalculatedValues,
     riskLevel: p012RefreshInsufficient ? 'Medium-High' : 'Medium',
@@ -902,7 +902,7 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   patterns.push({
     id: 'P014',
     name: 'MOSFET VDS多层级电压裕量核查 (VDS Stress vs Rating Hierarchy)',
-    triggered: true,
+    triggered: Number.isFinite(peakVds) && peakVds >= input.vdsRating * 0.75,
     corePhysicalChain: '区分：Vds_nominal / Vds_peak / Vds_repetitive_peak / Vds_absolute_maximum；若瞬态尖峰突破额定击穿电压，直接触发一票否决！',
     calculatedValues: p014CalculatedValues,
     riskLevel: p014Veto ? 'High' : (vdsMargin < input.vdsRating * 0.1 || peakVds > input.vdsRating * 0.8 ? 'Medium-High' : 'Low'),
@@ -987,7 +987,7 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   patterns.push({
     id: 'P016',
     name: '过流/短路保护响应时间时序 ↔ MOSFET SOA 安全区匹配 (Fault-to-Off Timing vs SOA)',
-    triggered: true,
+    triggered: timingMarginUs < 1.0 || p016Veto,
     corePhysicalChain: 'Fault occurs → Current rises → Sense delay → Comparator/ADC delay → Digital delay → Driver propagation delay → Gate turn-off → 电流衰减。低压MOSFET更严谨的判据是SOA曲线上的能量积分而非固定的"短路耐受时间"',
     calculatedValues: p016CalculatedValues,
     riskLevel: p016Veto ? 'High' : (timingMarginUs < 0.5 ? 'Medium-High' : 'Low'),
