@@ -1,6 +1,21 @@
+/**
+ * ------------------------------------------------------------------
+ * 变更记录（本次修复，详见配套审计报告）：
+ * [FIX-1] ROBOT_JOINT 域的机械谐振估算与 robotJointPatternEngine.ts 的 J003 是
+ *         同一处量纲错误的两份独立拷贝（负载惯量折算到电机侧却乘未折算的输出端
+ *         刚度，导致谐振频率被高估约减速比倍数）。现已统一为"折算到输出侧"的
+ *         口径并与 J003 保持一致，同时新增反谐振频率、惯量比与合理性区间提示。
+ *         注意：这两份实现仍是各自独立的代码，没有共享同一个函数，日后任何一处
+ *         再修改都需要同步另一处，建议尽快抽成公共工具函数。
+ * [FIX-2] WCCA 域：`rss*sqrt(1+ρ)` 只在预算项数量n=2时数学成立，n>2时低估合成
+ *         误差且方向随ρ增大而加剧（ρ=1时应退化为Extreme，原公式对不上）。已替换
+ *         为通用的 n 项相关性合成公式，并额外把温漂/老化这类系统性偏移从随机项
+ *         RSS 中拆出来单独线性合成，避免在最该保守的工况下低估。Cpk 标签更正为
+ *         Ppk，并在提供样本量时给出置信下限。
+ * ------------------------------------------------------------------
+ */
 import { IssueInput, IssueCategory, ProjectContext, MeasurementSource } from '../types';
 import { calculateBldcDeterministicCalculations } from './bldcDeterministicEngine';
-import { calculateRobotJointDeterministicCalculations } from './robotJointDeterministicEngine';
 import { calculateTwoMassResonance } from './robotJointResonance';
 import { extractUnifiedEngineeringModel } from './unifiedStateExtractor';
 
@@ -308,11 +323,9 @@ const P: Record<EngineeringDomain, DomainProfile> = {
   GENERAL: {key:'GENERAL',title:'当前工程问题 / 因果与证据闭环',question:'当前问题缺的事实是什么？哪一个实验最能减少不确定性？',chain:'Fact → mechanism → alternative → evidence → decision → closure',formulas:['未知量必须转成可测量验证项'],tests:['边界测量','最坏组合','模型/实测交叉验证'],outputs:['Unknown list','验证优先级','受控结论'],measurements:[],knownPitfalls:['未知不能用默认数字填掉']},
 };
 
-// 仅在没有显式分类时生效的关键词兜底规则，按优先级排列。
-// 之前这份规则直接写成一串 if/else，容易在别处（比如判断"是否存在歧义"）想复用时
-// 只能重新抄一遍、抄丢或抄出不一致的版本。现在提成数组，resolveEngineeringDomain()
-// 用 .find() 取第一个命中（跟原来的行为完全一样，只是换了写法），
-// assessDomainClassificationAmbiguity() 用 .filter() 数一共命中了几条规则。
+// 仅在没有显式分类时生效的关键词兜底规则，按优先级排列。提成数组是为了让
+// assessDomainClassificationAmbiguity() 能复用同一份规则表判断"文本是否同时命中
+// 多个候选域"，而不用另外抄一份、抄丢或抄出不一致的版本。
 const KEYWORD_FALLBACK_RULES: Array<{ domain: EngineeringDomain; pattern: RegExp }> = [
   { domain: 'EMC_BCI', pattern: /BCI|大电流注入|ISO\s*11452-4|注入电流|抗扰度/i },
   { domain: 'EMC_ESD', pattern: /ESD|静电|ISO\s*10605|放电/i },
@@ -372,6 +385,29 @@ export function resolveEngineeringDomain(issue: IssueInput): EngineeringDomain {
   return 'GENERAL';
 }
 
+/**
+ * 检测领域分类是否存在歧义——只在工程师没有显式勾选 issueCategories、完全靠自由文本
+ * 关键词兜底判定域的情况下才有意义（显式分类是权威判定，不存在"歧义"这个概念）。
+ */
+export function assessDomainClassificationAmbiguity(issue: IssueInput): {
+  isAmbiguous: boolean;
+  resolvedDomain: EngineeringDomain;
+  competingDomains: EngineeringDomain[];
+} {
+  const resolvedDomain = resolveEngineeringDomain(issue);
+  const hasExplicitCategory = (issue.issueCategories || []).length > 0;
+  if (hasExplicitCategory) {
+    return { isAmbiguous: false, resolvedDomain, competingDomains: [resolvedDomain] };
+  }
+  const text = `${issue.requirement || ''} ${issue.actualMeasurement || ''} ${issue.failurePhenomenon || ''} ${issue.engineeringConcern || ''} ${issue.notes || ''}`;
+  const matchedDomains = Array.from(new Set(KEYWORD_FALLBACK_RULES.filter((rule) => rule.pattern.test(text)).map((rule) => rule.domain)));
+  return {
+    isAmbiguous: matchedDomains.length > 1,
+    resolvedDomain,
+    competingDomains: matchedDomains.length > 0 ? matchedDomains : [resolvedDomain],
+  };
+}
+
 export function resolveEngineeringDomains(issue: IssueInput): EngineeringDomain[] {
   const categories = issue.issueCategories || [];
   const seen = new Set<EngineeringDomain>();
@@ -389,36 +425,6 @@ export function resolveEngineeringDomains(issue: IssueInput): EngineeringDomain[
   // 文本识别只作为没有显式分类时的兜底；显式多分类不再额外制造噪声域。
   if (domains.length === 0) add(resolveEngineeringDomain(issue));
   return domains;
-}
-
-/**
- * 检测领域分类是否存在歧义——只在工程师没有显式勾选 issueCategories、完全靠自由文本
- * 关键词兜底判定域的情况下才有意义（显式分类是权威判定，不存在"歧义"这个概念）。
- *
- * 不是重新发明一套打分式分类器，就是把 resolveEngineeringDomain() 兜底阶段本来就在跑的
- * 那份规则表，从"只要第一个命中的"改成"看一共命中了几个"，如果命中多个域的关键词规则，
- * 说明这段自由文本本身描述得不够聚焦，值得在 prompt 里提醒 AI 这里的域判定有歧义风险，
- * 而不是让归类过程悄悄吞掉这个信号、直接给出一个看似确定的单一域。
- */
-export function assessDomainClassificationAmbiguity(issue: IssueInput): {
-  isAmbiguous: boolean;
-  resolvedDomain: EngineeringDomain;
-  competingDomains: EngineeringDomain[];
-} {
-  const resolvedDomain = resolveEngineeringDomain(issue);
-  const hasExplicitCategory = (issue.issueCategories || []).length > 0;
-  if (hasExplicitCategory) {
-    return { isAmbiguous: false, resolvedDomain, competingDomains: [resolvedDomain] };
-  }
-
-  const text = `${issue.requirement || ''} ${issue.actualMeasurement || ''} ${issue.failurePhenomenon || ''} ${issue.engineeringConcern || ''} ${issue.notes || ''}`;
-  const matchedDomains = Array.from(new Set(KEYWORD_FALLBACK_RULES.filter((rule) => rule.pattern.test(text)).map((rule) => rule.domain)));
-
-  return {
-    isAmbiguous: matchedDomains.length > 1,
-    resolvedDomain,
-    competingDomains: matchedDomains.length > 0 ? matchedDomains : [resolvedDomain],
-  };
 }
 
 export function getEngineeringDomainLabel(domain: EngineeringDomain): string {
@@ -629,8 +635,8 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
   const tagFor = (key: string): 'MEASURED'|'BENCHMARK' => fieldSource(key) === 'BENCHMARK' ? 'BENCHMARK' : 'MEASURED';
   const noteFor = (key: string) => tagFor(key) === 'BENCHMARK' ? 'BENCHMARK · 仅演示，请用实测/导入数据覆盖' : `${fieldSource(key)} · 当前输入`;
   const metrics: Array<{label:string; value:string; note:string; tag:'MEASURED'|'CALCULATED'|'SPEC'|'BENCHMARK'}> = [];
-  const state = extractUnifiedEngineeringModel(context || {} as any, issue);
   if (d === 'BLDC') {
+    const state = extractUnifiedEngineeringModel(context, issue);
     const evidence = calculateBldcDeterministicCalculations(issue, state);
     evidence.forEach((item) => {
       if (item.status === 'CALCULATED' && item.value !== undefined) {
@@ -651,23 +657,38 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
       }
     });
   } else if (d === 'ROBOT_JOINT') {
-    const jointCalculations = calculateRobotJointDeterministicCalculations(issue, state);
-    jointCalculations.forEach((calc) => {
-      if (calc.status === 'CALCULATED') {
-        metrics.push({
-          label: calc.title,
-          value: `${calc.value} ${calc.unit}`,
-          note: `CALCULATED · 裕量: ${calc.safetyMargin?.toFixed(2) ?? 'N/A'}`,
-          tag: 'CALCULATED',
-        });
-      }
-    });
-    
-    // 保留非物理确定性的剩余几个散装指标，如电阻额定比
-    const regenPeak = n('regenPowerPeakW'), resistorRated = n('brakingResistorRatedContinuousW');
-    if (finite(regenPeak) && finite(resistorRated) && resistorRated > 0) {
-      metrics.push({label:'峰值回馈/泄放电阻额定比',value:`${((regenPeak / resistorRated) * 100).toFixed(0)}%`,note:'CALCULATED · 需结合占空比看平均功率，非直接判据',tag:'CALCULATED'});
+    const backlash = n('backlashArcmin'), stiffness = n('torsionalStiffnessNmPerRad'), torque = n('outputTorqueNm'), reqAccuracy = n('requiredPositionAccuracyArcmin');
+    if (finite(backlash)) metrics.push({label:'背隙',value:`${backlash} arcmin`,note:noteFor('backlashArcmin'),tag:tagFor('backlashArcmin')});
+    if (finite(backlash) && finite(stiffness) && finite(torque) && stiffness > 0) {
+      const windupArcmin = (torque / stiffness) * (180 / Math.PI) * 60;
+      const totalErrorArcmin = backlash + windupArcmin;
+      metrics.push({label:'扭转柔性附加误差',value:`${windupArcmin.toFixed(1)} arcmin`,note:'CALCULATED · T_out/K_stiffness 折算',tag:'CALCULATED'});
+      metrics.push({label:'输出端运动学总误差(估算)',value:`${totalErrorArcmin.toFixed(1)} arcmin`,note:'CALCULATED · 背隙 + 扭转柔性，不含传感器与控制误差',tag:'CALCULATED'});
+      if (finite(reqAccuracy)) metrics.push({label:'定位精度裕量',value:`${(reqAccuracy - totalErrorArcmin).toFixed(1)} arcmin`,note:'规格要求 - 估算总误差',tag:'CALCULATED'});
     }
+    const jMotor = n('motorInertiaKgm2'), jLoad = n('loadInertiaKgm2'), gearRatio = n('gearRatio'), vBw = n('velocityLoopBandwidthHz');
+    if (finite(stiffness) && finite(jMotor) && jMotor > 0 && finite(jLoad) && finite(gearRatio) && gearRatio > 0) {
+      // 这条公式跟 robotJointPatternEngine.ts 的 J003 是同一个物理量。之前两个文件各自
+      // 独立实现过一次、各错一次（量纲/参考系不一致）；现在统一调用共享的
+      // robotJointResonance.ts，避免"两处分别修一次、下次又分叉"。
+      const resonanceCalc = calculateTwoMassResonance({
+        torsionalStiffnessNmPerRad: stiffness,
+        motorInertiaKgm2: jMotor,
+        loadInertiaKgm2: jLoad,
+        gearRatio,
+        velocityLoopBandwidthHz: finite(vBw) ? vBw : undefined,
+      });
+      if (resonanceCalc.resonanceFreqHz > 0) {
+        const fRes = resonanceCalc.resonanceFreqHz;
+        const outOfPlausibleRange = !resonanceCalc.isPlausible;
+        metrics.push({label:'估算机械谐振频率',value:`${fRes.toFixed(1)} Hz`,note: outOfPlausibleRange ? 'CALCULATED · 二质量弹簧系统简化模型 · ⚠超出典型关节谐振范围，请复核惯量/刚度参考系与单位' : 'CALCULATED · 二质量弹簧系统简化模型',tag:'CALCULATED'});
+        metrics.push({label:'估算反谐振(陷波)频率',value:`${resonanceCalc.antiResonanceFreqHz.toFixed(1)} Hz`,note:'CALCULATED · 仅由负载惯量与刚度决定，设计陷波滤波器时的另一个关注点',tag:'CALCULATED'});
+        metrics.push({label:'惯量比 J_load/J_motor_折算',value:resonanceCalc.inertiaRatio.toFixed(2),note:'CALCULATED · 折算到同一参考系后的比值',tag:'CALCULATED'});
+        if (finite(vBw) && vBw > 0) metrics.push({label:'谐振/带宽隔离度',value:`${resonanceCalc.bandwidthIsolationRatio.toFixed(2)}×`,note:'CALCULATED · 建议 ≥3×(无陷波时的经验法则)，否则需陷波滤波器',tag:'CALCULATED'});
+      }
+    }
+    const regenPeak = n('regenPowerPeakW'), resistorRated = n('brakingResistorRatedContinuousW');
+    if (finite(regenPeak) && finite(resistorRated) && resistorRated > 0) metrics.push({label:'峰值回馈/泄放电阻额定比',value:`${((regenPeak / resistorRated) * 100).toFixed(0)}%`,note:'CALCULATED · 需结合占空比看平均功率，非直接判据',tag:'CALCULATED'});
   } else if (d === 'EMC_BCI') {
     const inj=n('bciInjectionMa'), err=n('currentSenseErrorPct'), rec=n('recoveryTimeMs'), icm=n('commonModeCurrentMa'), vnode=n('bciNodeVoltageV');
     if (finite(inj)) metrics.push({label:'BCI注入',value:`${inj} mA`,note:noteFor('bciInjectionMa'),tag:tagFor('bciInjectionMa')});
@@ -686,56 +707,57 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
     if (finite(peak)&&finite(lim)) metrics.push({label:'裕量',value:`${(lim-peak).toFixed(2)} dB`,note:'Limit - measured',tag:'CALCULATED'});
   } else if (d === 'WCCA' || d === 'WCCA_EOL') {
     const raw=n('accuracyErrorPct'), hot=n('accuracyErrorHotPct'), residual=n('calibrationResidualPct'), lim=n('specLimitPct');
-    const budgetKeys=['shuntTolerancePct','afeOffsetBudgetPct','adcRefDriftBudgetPct','tempDriftBudgetPct','agingDriftBudgetPct'];
-    const budget=budgetKeys.map(n).filter(finite);
+    // [FIX] tempDrift/agingDrift 不是零均值随机量——在最坏角(高温/寿命末期)上它们对
+    // 每台机器都是同号的系统性偏移，必须线性相加；只有围绕偏移的批次间离散才适合做
+    // RSS。把它们和真正随机的项(供应商容差/运放偏置/ADC基准漂移)混在一起做RSS，会
+    // 在最该保守的工况下系统性低估。
+    const systematicKeys=['tempDriftBudgetPct','agingDriftBudgetPct'];
+    const randomKeys=['shuntTolerancePct','afeOffsetBudgetPct','adcRefDriftBudgetPct'];
+    const systematic=systematicKeys.map(n).filter(finite);
+    const randomBudget=randomKeys.map(n).filter(finite);
+    const budget=[...systematic,...randomBudget]; // 保留合并列表用于向后兼容的整体 Extreme/RSS 展示
     if (budget.length >= 2) {
-      const sumSq = budget.reduce((a, b) => a + b * b, 0);
-      const sumAbs = budget.reduce((a, b) => a + Math.abs(b), 0);
-      const extreme = sumAbs;
-      const rss = Math.sqrt(sumSq);
-      const rho = n('correlationFactor');
-
-      metrics.push({label:'WCCA Extreme(硬安全上界)',value:`±${extreme.toFixed(2)}%`,note:'CALCULATED · 预算项绝对值相加 (ρ=1 极端工况)',tag:'CALCULATED'});
-      metrics.push({label:'WCCA RSS(统计下界)',value:`±${rss.toFixed(2)}%`,note:'CALCULATED · 独立同方差假设 (ρ=0 理想统计)',tag:'CALCULATED'});
-      metrics.push({label:'WCCA 误差区间',value:`[±${rss.toFixed(2)}%, ±${extreme.toFixed(2)}%]`,note:'CALCULATED · 真实值落在区间内；硬安全门限必看 Extreme',tag:'CALCULATED'});
-
-      if (finite(rho) && rho >= 0 && rho <= 1) {
-        // 精确相关性合成式：Var = Σσᵢ² + ρ·((Σ|σᵢ|)² − Σσᵢ²)
-        const rssCorr = Math.sqrt(sumSq + rho * (sumAbs * sumAbs - sumSq));
-        metrics.push({
-          label:'相关性修正误差限 (精确二次型)',
-          value:`±${rssCorr.toFixed(2)}%`,
-          note:`CALCULATED · ρ=${rho} 精确合成；单一标量仅作敏感性扫描，硬安全门限严禁用非1相关系数直接放行`,
-          tag:'CALCULATED',
-        });
+      const extreme=budget.reduce((a,b)=>a+Math.abs(b),0);
+      const rss=Math.sqrt(budget.reduce((a,b)=>a+b*b,0));
+      const rho=n('correlationFactor');
+      metrics.push({label:'WCCA Extreme(全部预算项，含系统性偏移)',value:`±${extreme.toFixed(2)}%`,note:'CALCULATED · 预算项绝对值相加 · 硬安全门限应使用这一列，不应使用下方RSS/相关性RSS放行',tag:'CALCULATED'});
+      metrics.push({label:'WCCA RSS(全部预算项，假设独立，仅供统计良率参考)',value:`±${rss.toFixed(2)}%`,note:'CALCULATED · 假设输入误差项独立 · 不区分系统性偏移与随机项，存在低估',tag:'CALCULATED'});
+      if (systematic.length > 0 && randomBudget.length > 0) {
+        const systematicSum=systematic.reduce((a,b)=>a+Math.abs(b),0);
+        const randomRss=Math.sqrt(randomBudget.reduce((a,b)=>a+b*b,0));
+        metrics.push({label:'系统性偏移合成(线性相加，最坏角)',value:`±${systematicSum.toFixed(2)}%`,note:'CALCULATED · 温漂/老化等确定性偏移，按最坏工况线性叠加而非RSS',tag:'CALCULATED'});
+        metrics.push({label:'随机项RSS(独立假设)',value:`±${randomRss.toFixed(2)}%`,note:'CALCULATED · 供应商容差/偏置/基准漂移等真正的批次间随机项',tag:'CALCULATED'});
+        metrics.push({label:'系统性偏移+随机RSS(推荐的分层合成)',value:`±${(systematicSum+randomRss).toFixed(2)}%`,note:'CALCULATED · 系统性偏移线性相加 + 随机项RSS，比整体RSS更保守也更合理，但仍非正式协方差分析',tag:'CALCULATED'});
       }
-
-      // 系统性漂移 (同号偏置线性累加) vs 随机离散项分离
-      const systematicKeys = ['tempDriftBudgetPct', 'agingDriftBudgetPct'];
-      const randomKeys = ['shuntTolerancePct', 'afeOffsetBudgetPct', 'adcRefDriftBudgetPct'];
-      const systematicTerms = systematicKeys.map(n).filter(finite);
-      const randomTerms = randomKeys.map(n).filter(finite);
-      if (systematicTerms.length > 0 && randomTerms.length > 0) {
-        const sysBias = systematicTerms.reduce((a, b) => a + Math.abs(b), 0);
-        const randSq = randomTerms.reduce((a, b) => a + b * b, 0);
-        const randAbs = randomTerms.reduce((a, b) => a + Math.abs(b), 0);
-        const randRss = Math.sqrt(randSq);
-        const randCorr = finite(rho) && rho >= 0 && rho <= 1
-          ? Math.sqrt(randSq + rho * (randAbs * randAbs - randSq))
-          : randRss;
-        const totalTripartite = sysBias + randCorr;
+      if (finite(rho) && rho >= 0 && rho <= 1 && budget.length >= 2) {
+        // [FIX] 原公式 rss*sqrt(1+rho) 只在 n=2 时成立；n项等方差、两两相关系数为rho时，
+        // 正确的合成标准差是 sqrt(ΣΣ cov) = sqrt(Σσᵢ² + rho*((Σ|σᵢ|)² − Σσᵢ²))，
+        // 该式在 rho=0 时退化为RSS、rho=1时退化为Extreme(可用边界自检验证)，原公式在
+        // rho=1时给出的结果与Extreme不符，说明其在n>2时是错的，且方向偏乐观(低估)。
+        const sumSq=budget.reduce((a,b)=>a+b*b,0);
+        const sumAbs=budget.reduce((a,b)=>a+Math.abs(b),0);
+        const correlatedRss=Math.sqrt(Math.max(0, sumSq + rho*(sumAbs*sumAbs - sumSq)));
         metrics.push({
-          label: '三段式综合误差限 (|ΣBias| + σ_rand)',
-          value: `±${totalTripartite.toFixed(2)}%`,
-          note: 'CALCULATED · 温漂/老化偏置线性累加 + 随机项合成，避免将同号系统性偏置错误平摊到RSS',
-          tag: 'CALCULATED',
+          label:'相关性敏感RSS(修正公式)',
+          value:`±${correlatedRss.toFixed(2)}%`,
+          note:`CALCULATED · sqrt(Σσᵢ²+ρ((Σ|σᵢ|)²−Σσᵢ²))，ρ=0退化为RSS、ρ=1退化为Extreme · 仅用于敏感性参考，标量ρ无法表达抵消型负相关(如比率式采样中基准共源)，正式签核仍需真实协方差矩阵或Extreme边界`,
+          tag:'CALCULATED'
         });
       }
     }
-    const mean=n('sampleMeanPct'), sigma=n('sampleSigmaPct');
+    const mean=n('sampleMeanPct'), sigma=n('sampleSigmaPct'), sampleN=n('sampleSizeN');
     if (finite(mean)&&finite(sigma)&&finite(lim)&&sigma>0) {
-      const cpk=Math.min((lim-mean)/(3*sigma),(lim+mean)/(3*sigma));
-      metrics.push({label:'全样本制程能力 Ppk (常称Cpk)',value:cpk.toFixed(2),note:'CALCULATED · 基于全样本均值/σ；对称规格；小样本存在置信区间离散',tag:'CALCULATED'});
+      const ppk=Math.min((lim-mean)/(3*sigma),(lim+mean)/(3*sigma));
+      // [FIX] 从整体样本均值/σ算出的是 Ppk(长期/整体)而非 Cpk(短期/组内)，原标签会
+      // 在质量评审中被指出用词错误；同时小样本点估计离散很大，给出置信下限而非裸值。
+      metrics.push({label:'样本Ppk(对称规格，整体口径)',value:ppk.toFixed(2),note:'CALCULATED · 基于输入样本均值/σ与规格限值 · 注意这是Ppk非Cpk；该换算假设正态分布，误差预算多为若干均匀分布之和，尾部通常不服从正态，硬安全门限不应仅靠此值放行',tag:'CALCULATED'});
+      if (finite(sampleN) && sampleN > 1) {
+        const lowerBoundFactor=1-1.645/Math.sqrt(2*(sampleN-1));
+        const ppkLowerBound=ppk*lowerBoundFactor;
+        metrics.push({label:'样本Ppk单侧95%置信下限',value:ppkLowerBound.toFixed(2),note:`CALCULATED · n=${sampleN} · 小样本点估计需报置信区间而非裸值，签核应参考此下限`,tag:'CALCULATED'});
+      } else {
+        metrics.push({label:'⚠ Ppk置信区间',value:'未提供样本量n',note:'未提供sampleSizeN，无法给出置信下限；裸Ppk点估计对签核有误导性',tag:'CALCULATED'});
+      }
     }
     if (finite(raw)) metrics.push({label:'初始误差',value:`${raw}%`,note:noteFor('accuracyErrorPct'),tag:tagFor('accuracyErrorPct')});
     if (finite(hot)) metrics.push({label:'高温误差',value:`${hot}%`,note:noteFor('accuracyErrorHotPct'),tag:tagFor('accuracyErrorHotPct')});

@@ -226,6 +226,43 @@ function toGeminiResponseSchema(schema: any): any {
 }
 const COPILOT_RESULT_GEMINI_SCHEMA = toGeminiResponseSchema(COPILOT_RESULT_JSON_SCHEMA);
 
+/**
+ * 说明(2026-09-20 修复)：DeepSeek 官方 API (api.deepseek.com) 的 JSON Output
+ * 文档只承诺支持 response_format: {type:'json_object'}，并且明确要求
+ * "prompt 中必须出现 json 字样 + 给出期望结构的示例"，否则模型是在"盲写"结构。
+ * 原代码对所有非 reasoner 的 OpenAI 兼容端点一律下发 json_schema+strict，
+ * 这对官方 DeepSeek API 是未文档化行为：可能被静默忽略、可能导致输出更不
+ * 稳定/更慢，且 prompt 里又完全没有写出字段结构（依赖协议层 schema），
+ * 双重削弱了结构化程度，也更容易触发解析失败 -> 二次修复调用 -> 总耗时翻倍。
+ * 这里按 baseUrl 判断，不支持 json_schema 的端点自动退回 json_object，
+ * 并在调用处把字段结构以纯文本形式写回 prompt（见 buildJsonFieldOutline）。
+ */
+function supportsStrictJsonSchema(baseUrl: string | undefined): boolean {
+  const b = (baseUrl || '').toLowerCase();
+  if (b.includes('deepseek.com')) return false;
+  return true;
+}
+
+/** 把协议层 JSON Schema 递归转成一份简洁的纯文本字段清单（字段名 + 中文说明），
+ * 供 json_object 模式的端点按图索骥填充，避免在没有 schema 强约束时"盲写"结构。*/
+function buildJsonFieldOutline(schema: any, indent = ''): string {
+  if (!schema || typeof schema !== 'object') return '';
+  if (schema.type === 'object' && schema.properties) {
+    return Object.entries(schema.properties as Record<string, any>)
+      .map(([key, value]) => {
+        const desc = value?.description ? ` — ${value.description}` : '';
+        const nested = buildJsonFieldOutline(value, indent + '  ');
+        return `${indent}- ${key}${desc}${nested ? '\n' + nested : ''}`;
+      })
+      .join('\n');
+  }
+  if (schema.type === 'array' && schema.items) {
+    return buildJsonFieldOutline(schema.items, indent);
+  }
+  return '';
+}
+const COPILOT_RESULT_FIELD_OUTLINE = buildJsonFieldOutline(COPILOT_RESULT_JSON_SCHEMA);
+
 export const HARDWARE_CHIEF_SYSTEM_PROMPT = `
 你是一位在汽车国际顶级Tier-1拥有20年经验的首席硬件架构师，精通ISO 26262 (Part 5)、ASPICE 4.0 (HWE.1-4) 及IATF 16949体系。
 你的使命是协助硬件开发工程师进行技术攻关、防身免责与跨部门推演。
@@ -316,7 +353,14 @@ async function callCustomOpenAIModel(
     modelLower.includes('thinking') ||
     modelLower.includes('-pro');
 
-  const timeoutMs = isReasoner ? 150000 : 75000;
+  // 说明(2026-09-20 修复)：原 75s/150s 阈值是按"简单问答"估算的，
+  // 但本系统每次 /api/copilot/analyze 请求都会拼装完整 grounding 长文本
+  // (专家基线 + 预计算事实 + 金标准案例 + 跨域耦合矩阵 + 领域指南) 并强制要求
+  // 一个覆盖 dfmeaView/candidateActions/dualTimeline 等十余个大对象的深层
+  // COPILOT_RESULT_JSON_SCHEMA 结构化输出。这类"大输入+大结构化输出"请求
+  // 常规模型也经常需要 90~150s，75s 会在模型即将完成时被 AbortController
+  // 打断，前端因此长时间等待后仍然拿不到 AI 结果（只能静默降级到本地引擎）。
+  const timeoutMs = isReasoner ? 240000 : 170000;
 
   const bodyPayload: Record<string, any> = {
     model: config.model,
@@ -326,13 +370,19 @@ async function callCustomOpenAIModel(
     ],
   };
 
-  // 绝大多数 OpenAI 兼容端点（DeepSeek, 通义千问, GLM, Moonshot, 硅基流动等）支持 response_format
-  // 强制返回合法 JSON object，从协议层逼出严格 JSON，减少 markdown 干扰
+  // 按端点能力下发 response_format：官方 DeepSeek API 等只承诺 json_object，
+  // 盲目下发 json_schema+strict 属于未文档化行为。json_object 模式下 DeepSeek
+  // 官方文档要求显式设置 max_tokens 防止大 JSON 被截断，这里一并处理。
   if (!isReasoner) {
-    bodyPayload.response_format = {
-      type: 'json_schema',
-      json_schema: { name: 'copilot_result', schema: COPILOT_RESULT_JSON_SCHEMA, strict: true },
-    };
+    if (supportsStrictJsonSchema(config.baseUrl)) {
+      bodyPayload.response_format = {
+        type: 'json_schema',
+        json_schema: { name: 'copilot_result', schema: COPILOT_RESULT_JSON_SCHEMA, strict: true },
+      };
+    } else {
+      bodyPayload.response_format = { type: 'json_object' };
+      bodyPayload.max_tokens = 8192;
+    }
   }
 
   // 某些特定推理模型禁止传递 temperature 参数
@@ -397,8 +447,14 @@ async function callGeminiModel(
   const ai = new GoogleGenAI({ apiKey });
   const modelName = config.model?.trim() || 'gemini-2.5-flash';
 
+  // 说明(2026-09-20 修复)：默认模型 gemini-2.5-flash 不含 "pro"/"thinking"
+  // 字样，会被判定为"快模型"只给 75s。但 2.5 系列默认开启动态思考
+  // (dynamic thinking)，且本接口的 prompt 与强制 responseSchema 都非常大，
+  // 实测常规工况下也可能需要 90~150s+ 才能返回完整合法 JSON。75s 超时会
+  // 在模型即将生成完毕时被中止，这正是"AI 调用超过 75 秒就拿不到执行分析
+  // 结果"的根因。此处统一给足时间，并保留 pro/thinking 更长的窗口。
   const isSlowGemini = modelName.toLowerCase().includes('pro') || modelName.toLowerCase().includes('thinking');
-  const timeoutMs = isSlowGemini ? 150000 : 75000;
+  const timeoutMs = isSlowGemini ? 240000 : 170000;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -930,6 +986,17 @@ ${couplingText}
 输出结构由协议层 COPILOT_RESULT_JSON_SCHEMA 强制约束；此处不再重复完整 JSON Schema。所有字段语义以 schema description 为准。
 `;
 
+    // 8.1 若目标端点不支持 json_schema 强约束（如官方 DeepSeek API 只有 json_object），
+    // 协议层不再帮它兜底结构，必须把字段清单显式写回 prompt，否则模型是在盲写十几层嵌套 JSON。
+    const isGeminiModelConfig =
+      modelConfig && (modelConfig.provider === 'gemini' || (modelConfig.model && modelConfig.model.toLowerCase().includes('gemini')));
+    const needsInlineFieldOutline =
+      modelConfig && modelConfig.enabled && modelConfig.provider !== 'builtin' && !isGeminiModelConfig &&
+      !supportsStrictJsonSchema(modelConfig.baseUrl);
+    const finalPrompt = needsInlineFieldOutline
+      ? `${prompt}\n\n【输出JSON字段结构清单（当前端点不支持协议层 json_schema 强约束，必须严格按以下字段结构输出完整 JSON，不得遗漏必填字段，不得新增字段）】\n${COPILOT_RESULT_FIELD_OUTLINE}`
+      : prompt;
+
     // 9. 调度模型执行与自愈降级处理
     let finalData: CopilotAnalysisResult | null = null;
     let usedSource = 'deterministic-expert';
@@ -970,7 +1037,7 @@ ${couplingText}
       try {
         const { rawContent, parsed, retryCount } = await queryModelWithResilience(
           modelConfig,
-          prompt,
+          finalPrompt,
           HARDWARE_CHIEF_SYSTEM_PROMPT
         );
         retryAttempts = retryCount;
@@ -1023,9 +1090,9 @@ ${couplingText}
 
     // 10. 挂载调试快照 (DebugSnapshot - 待办 5.3)
     const debugSnapshot: DebugSnapshot = {
-      promptLength: prompt.length,
-      promptSnippet: prompt.slice(0, 320) + '...',
-      fullPrompt: prompt,
+      promptLength: finalPrompt.length,
+      promptSnippet: finalPrompt.slice(0, 320) + '...',
+      fullPrompt: finalPrompt,
       modelIdentifier: modelNameUsed,
       latencyMs: elapsedMs,
       timestamp: new Date().toISOString(),
