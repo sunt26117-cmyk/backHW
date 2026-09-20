@@ -1,6 +1,7 @@
 import { CopilotAnalysisResult, IssueInput, ProjectContext } from '../types';
 import { buildScenarioPassFailCriteria, getDomainPhysics, resolveEngineeringDomain, resolveEngineeringDomains } from './scenarioDomainEngine';
 import { getCrossDomainCouplings } from './crossDomainCouplingMatrix';
+import { recalculateStandardWeightedScore } from './scoringWeights';
 
 const firstNum = (text: string, regs: RegExp[], fallback = NaN) => {
   for (const re of regs) {
@@ -41,7 +42,7 @@ function metric(issue: IssueInput, key: string, fallback = NaN): number {
 }
 
 function scoreTotal(T: number, S: number, C: number, Q: number, L: number): number {
-  return Number((T * 0.25 + S * 0.25 + C * 0.15 + Q * 0.20 + L * 0.15).toFixed(1));
+  return recalculateStandardWeightedScore({ T, S, C, Q, L });
 }
 
 function deriveScenarioRiskScore(issue: IssueInput, context: ProjectContext, domain: string): number {

@@ -8,6 +8,7 @@ import { getCrossDomainCouplings } from '../utils/crossDomainCouplingMatrix';
 import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
 import { extractUnifiedEngineeringModel } from '../utils/unifiedStateExtractor';
 import { runDeterministicPrecomputations } from '../utils/deterministicPrecomputation';
+import { recalculateStandardWeightedScore } from '../utils/scoringWeights';
 import {
   getEmcPillars,
   getComponentPillars,
@@ -18,18 +19,20 @@ import {
 } from './decisionPillars';
 
 export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue?: Partial<IssueInput>): CopilotAnalysisResult {
+  // 缺省上下文不得编造具体项目事实（客户/ECU型号/SOP日期/样品阶段等），
+  // 一律用明确的"未提供"占位，避免把空表单渲染成一个看似真实的 DV 项目。
   const context: ProjectContext = {
-    projectName: rawContext?.projectName || '车载域控制器 ECU 项目',
-    productType: rawContext?.productType || '车身与底盘域控',
-    ecuType: rawContext?.ecuType || 'BCM/VCU 域控制器',
+    projectName: rawContext?.projectName || '待输入：项目名称未提供',
+    productType: rawContext?.productType || '待输入：产品类型未提供',
+    ecuType: rawContext?.ecuType || '待输入：ECU 类型未提供',
     projectPhase: rawContext?.projectPhase || 'DV',
     asilLevel: rawContext?.asilLevel || 'ASIL B',
-    customer: rawContext?.customer || '国内头部新势力主机厂',
-    sopDate: rawContext?.sopDate || '2026-11-30',
-    nextMilestone: rawContext?.nextMilestone || 'DV 试验准入',
+    customer: rawContext?.customer || '未提供：客户信息缺失',
+    sopDate: rawContext?.sopDate || '未提供：SOP 日期缺失',
+    nextMilestone: rawContext?.nextMilestone || '待输入：下一里程碑未提供',
     daysRemaining: typeof rawContext?.daysRemaining === 'number' ? rawContext.daysRemaining : 14,
-    costConstraint: rawContext?.costConstraint || '中等敏感',
-    sampleStatus: rawContext?.sampleStatus || 'B 样试制件',
+    costConstraint: rawContext?.costConstraint || '未提供',
+    sampleStatus: rawContext?.sampleStatus || '待输入：样件状态未提供',
   };
 
   const measuredValues = rawIssue?.measuredValues && typeof rawIssue.measuredValues === 'object' ? rawIssue.measuredValues : {};
@@ -364,13 +367,13 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   result.source = 'deterministic-expert';
   result.provenance = result.provenance || {
     executionMode: 'PURE_OFFLINE_LOCAL',
-    engineName: '车规确定性专家推演引擎 (100% 纯本地离线运行)',
+    engineName: '车规离线专家推演引擎',
     isAiInferred: false,
     isDeterministicRule: true,
     generatedAt: new Date().toLocaleTimeString(),
     latencyMs: 8,
-    modelIdentifier: 'Deterministic-RuleEngine-v4.2-ISO26262-Verified',
-    transparencyNote: '本报告由本地车规物理公式库与标准规则树严格推演生成，0 网络延迟，0 数据上报，100% 离线确定性，杜绝幻觉。',
+    modelIdentifier: 'Deterministic-RuleEngine',
+    transparencyNote: '本结果由本地离线规则引擎生成，不联网、不上报。数值类模式结论以输入工况为准：缺少实测参数时会在对应预计算项标记 INSUFFICIENT_INPUT，引用参考案例的量化数字会被显式标注为假设，不作为当前项目事实。',
   };
 
   return result;
@@ -396,7 +399,7 @@ function buildCrossDomainLinks(domains: import('../utils/scenarioDomainEngine').
 }
 
 function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): number {
-  return Number((T * 0.25 + S * 0.25 + C * 0.15 + Q * 0.20 + L * 0.15).toFixed(1));
+  return recalculateStandardWeightedScore({ T, S, C, Q, L });
 }
 
 function generateEmcAnalysis(context: ProjectContext, issue: IssueInput): CopilotAnalysisResult {

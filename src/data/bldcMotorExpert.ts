@@ -1,9 +1,10 @@
 import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } from '../types';
 import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
 import { extractUnifiedEngineeringModel } from '../utils/unifiedStateExtractor';
+import { recalculateStandardWeightedScore } from '../utils/scoringWeights';
 
 function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): number {
-  return Number((T * 0.25 + S * 0.25 + C * 0.15 + Q * 0.20 + L * 0.15).toFixed(1));
+  return recalculateStandardWeightedScore({ T, S, C, Q, L });
 }
 
 export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueInput): CopilotAnalysisResult {

@@ -326,6 +326,21 @@ function healAndParseJson(raw: string): any {
 }
 
 /**
+ * 校验远端模型端点 URL，收紧 SSRF 暴露面：仅允许 http/https，拒绝 URL 内嵌凭据。
+ * 不阻断回环/内网地址——自定义网关/Ollama/企业私网场景以 localhost 与私有网为合法目标。
+ */
+function assertSafeBaseUrl(raw: string): URL {
+  const url = new URL(raw);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`不支持的端点协议 (${url.protocol})，仅允许 http/https`);
+  }
+  if (url.username || url.password) {
+    throw new Error('端点 URL 不得内嵌用户名/密码凭据');
+  }
+  return url;
+}
+
+/**
  * 通用 OpenAI 兼容协议调用函数 (支持 DeepSeek, 阿里通义千问, 智谱 GLM, 月之暗面, 硅基流动等)
  * 超时按模型架构动态区分：推理/思考模型（R1, O1, Reasoner）给予 120s，常规模型 55s
  */
@@ -339,19 +354,22 @@ async function callCustomOpenAIModel(
   prompt: string,
   systemPrompt: string
 ): Promise<string> {
+  assertSafeBaseUrl(config.baseUrl);
   let normalizedBase = config.baseUrl.trim().replace(/\/+$/, '');
   if (!normalizedBase.endsWith('/chat/completions')) {
     normalizedBase = `${normalizedBase}/chat/completions`;
   }
 
   const modelLower = (config.model || '').toLowerCase();
+  // 仅按明确的推理/思考类模型标识判定 reasoner，不再用 '-pro' 子串：
+  // 否则 deepseek-v4-pro / *-pro 这类常规旗舰模型会被静默跳过 response_format 与 temperature，
+  // 让其在无 json_schema 强约束下盲写深层嵌套 JSON，反而更易触发解析失败 -> 自愈重试。
   const isReasoner =
     modelLower.includes('reasoner') ||
-    modelLower.includes('r1') ||
+    modelLower.includes('deepseek-r1') ||
     modelLower.includes('o1') ||
     modelLower.includes('o3') ||
-    modelLower.includes('thinking') ||
-    modelLower.includes('-pro');
+    modelLower.includes('thinking');
 
   // 说明(2026-09-20 修复)：原 75s/150s 阈值是按"简单问答"估算的，
   // 但本系统每次 /api/copilot/analyze 请求都会拼装完整 grounding 长文本
@@ -596,6 +614,11 @@ app.post('/api/copilot/test-model', async (req, res) => {
         success: false,
         error: '请提供完整的 Base URL、API Key 与 Model 名称',
       });
+    }
+    try {
+      assertSafeBaseUrl(baseUrl);
+    } catch (urlErr) {
+      return res.status(400).json({ success: false, error: (urlErr as Error).message });
     }
     let normalizedBase = baseUrl.trim().replace(/\/+$/, '');
     if (!normalizedBase.endsWith('/chat/completions')) {
@@ -1092,7 +1115,6 @@ ${couplingText}
     const debugSnapshot: DebugSnapshot = {
       promptLength: finalPrompt.length,
       promptSnippet: finalPrompt.slice(0, 320) + '...',
-      fullPrompt: finalPrompt,
       modelIdentifier: modelNameUsed,
       latencyMs: elapsedMs,
       timestamp: new Date().toISOString(),
@@ -1123,13 +1145,14 @@ ${couplingText}
     const { context, issue } = req.body;
     const fallbackResult = runExpertAnalysis(context || {}, issue || {});
     res.setHeader('X-Engine-Source', 'Deterministic-Expert-Engine');
-    return res.status(200).json({
-      success: true,
+    // 出错不再伪装成成功：用 500 + success:false 明确告知前端发生降级/异常。
+    return res.status(500).json({
+      success: false,
+      error: errorMsg,
       data: fallbackResult,
       result: fallbackResult,
       source: 'deterministic-expert',
       useFallback: true,
-      error: errorMsg,
     });
   }
 });

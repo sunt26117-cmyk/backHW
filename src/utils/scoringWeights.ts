@@ -18,6 +18,14 @@ export const STANDARD_TSCQL_WEIGHTS = {
   L: 15,
 } as const;
 
+/**
+ * 权重形状：滑块允许工程师临时拖动做 what-if 探索，所以各属性是可变 number，
+ * 而不是 STANDARD_TSCQL_WEIGHTS 那种只读字面量类型（25/25/15/20/15）。
+ * 用 `useState({ ...STANDARD_TSCQL_WEIGHTS })` 会把字面量类型一并 spread 进 state，
+ * 于是 onChange 里写回 parseInt(...) 的 number 会报 TS2322 number not assignable to 25。
+ */
+export type TscqlWeights = { T: number; S: number; C: number; Q: number; L: number };
+
 export type TscqlScores = { T: number; S: number; C: number; Q: number; L: number };
 
 /**

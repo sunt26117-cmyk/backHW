@@ -3,6 +3,7 @@ import { CopilotAnalysisResult, CandidateAction, HwLeadStyle } from '../types';
 import { evaluateLeadershipFit, applyRecurrencePenaltyToQ } from '../utils/leadershipEngine';
 import { evaluateLeadershipEconomicRisk } from '../data/safetyReliabilityEngine';
 import { STANDARD_TSCQL_WEIGHTS } from '../utils/scoringWeights';
+import type { TscqlWeights } from '../utils/scoringWeights';
 import { ResultProvenanceBanner } from './ResultProvenanceBanner';
 import {
   Sliders,
@@ -52,7 +53,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
 }) => {
   // C-T-S-Q-L 标准权重定义已统一到 scoringWeights.ts（跟 aiResultAuditor.ts 核对AI总分用的是同一份），
   // 这里的 useState 只是把它当作交互滑块的初始值——用户仍然可以拖动调整做 what-if 探索。
-  const [weights, setWeights] = useState({ ...STANDARD_TSCQL_WEIGHTS });
+  const [weights, setWeights] = useState<TscqlWeights>({ ...STANDARD_TSCQL_WEIGHTS });
 
   // 直属领导态度风格状态
   const [currentLeadStyle, setCurrentLeadStyle] = useState<HwLeadStyle>(hwLeadStyle);
