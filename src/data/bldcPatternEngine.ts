@@ -70,6 +70,7 @@ export interface BldcEvaluationInput {
 
   // P003
   cgsPf?: number; // 栅源电容，用于容性分压界
+  sourceInductanceNh?: number; // 源极寄生电感 L_source(nH)，配合 di/dt 估算门极过冲
 
   // P004
   turnOffDelayNs?: number;       // t_d(off) 典型值
@@ -318,8 +319,11 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   const vgateInduced = vgateInducedCapacitiveBound !== undefined
     ? Math.min(vgateInducedResistiveBound, vgateInducedCapacitiveBound)
     : vgateInducedResistiveBound;
-  const millerMargin = vthMinVEff - vgateInduced;
-  const p003ShootThroughRisk = vgateInduced >= vthMinVEff;
+  // 源极寄生电感 di/dt 过冲：V_L = L_source · di/dt（nH·A/ns = V，无需换算）
+  const inductiveVgsSpike = (input.sourceInductanceNh ?? 0) * (input.diDtANs ?? 0);
+  const vgateInducedTotal = vgateInduced + inductiveVgsSpike;
+  const millerMargin = vthMinVEff - vgateInducedTotal;
+  const p003ShootThroughRisk = vgateInducedTotal >= vthMinVEff;
 
   const p003CalculatedValues: Record<string, string | number> = {
     '开关节点电压变化率 dv/dt (V/ns)': input.dvDtVns,
@@ -335,6 +339,8 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     p003CalculatedValues['⚠ 数据缺口'] = '未提供 Cgs，暂只能给出阻性上界，开关沿较短时可能显著高估实际感应电压';
   }
   p003CalculatedValues['门极最小开通阈值 Vth_min (V，@25℃)'] = vthMinVEff;
+  p003CalculatedValues['源极电感 di/dt 过冲项 ΔVgs_inductive (V)'] = Number(inductiveVgsSpike.toFixed(2));
+  p003CalculatedValues['计入过冲后的门极感应 Vgs_total (V)'] = Number(vgateInducedTotal.toFixed(2));
   p003CalculatedValues['门极安全裕量 Margin (V)'] = Number(millerMargin.toFixed(2));
 
   patterns.push({

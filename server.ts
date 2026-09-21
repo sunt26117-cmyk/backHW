@@ -21,6 +21,7 @@ import { getCrossDomainCouplings } from './src/utils/crossDomainCouplingMatrix';
 import { runDeterministicPrecomputations } from './src/utils/deterministicPrecomputation';
 import { buildGroundingText, findSimilarGoldCases } from './src/utils/aiGrounding';
 import { CopilotAnalysisResult, DebugSnapshot } from './src/types';
+import { validateAiResultStructure } from './src/utils/aiResultSchema';
 
 dotenv.config();
 
@@ -877,6 +878,14 @@ app.post('/api/copilot/import-ai-result', (req, res) => {
     }
     const built = buildAnalysisPrompt(context || {}, issue || {});
     const parsed = healAndParseJson(aiContent);
+    const structureCheck = validateAiResultStructure(parsed);
+    if (!structureCheck.valid) {
+      return res.status(400).json({
+        success: false,
+        error: 'AI 返回的 JSON 结构有问题，请让免费 AI 修正后重试：' + structureCheck.issues.map((i) => i.path + ' → ' + i.message).join('；'),
+        structureIssues: structureCheck.issues,
+      });
+    }
     const enriched = validateAndEnrichAiResult(parsed, built.baseline, 'offline-free-ai', context || {}, issue || {}, built.integrityAssessment);
     const audited = auditAiResult(enriched, built.baseline, context || {}, issue || {}, built.integrityAssessment);
     const finalData = audited.sanitizedResult;
