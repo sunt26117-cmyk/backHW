@@ -287,18 +287,19 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
     whyReason: [prefix, ...safeStringArray(dynamic.finalRecommendation?.whyReason)].filter(Boolean),
     immediateSteps: safeArray(dynamic.finalRecommendation?.immediateSteps).map((step: any, idx) => ({ ...step, step: Number(step?.step) || idx + 1, action: `${cfg.verify[idx % cfg.verify.length]}：${String(step?.action || step?.title || '')}` })),
   };
+  const existingDocs = (dynamic.engineeringDocs || {}) as any;
   dynamic.engineeringDocs = {
-    ...dynamic.engineeringDocs,
+    ...existingDocs,
     pmDecisionEmail: {
-      ...dynamic.engineeringDocs.pmDecisionEmail,
-      subject: `【${domain}】${context.projectName}｜${dynamic.engineeringDocs.pmDecisionEmail.subject}`,
+      ...existingDocs.pmDecisionEmail,
+      subject: `【${domain}】${context.projectName}｜${existingDocs.pmDecisionEmail?.subject || '工程决策请求'}`,
       technicalFact: `${issue.actualMeasurement || '暂无实测'}｜${issue.requirement || '暂无规格'}｜测试条件：${issue.testCondition || '待补充'}`,
       currentSituation: `${issue.failurePhenomenon || issue.engineeringConcern || '当前工况问题'}｜${context.nextMilestone}｜剩余${context.daysRemaining}天`,
     },
     meetingMinutes: {
-      ...dynamic.engineeringDocs.meetingMinutes,
-      title: `【${domain}】${context.projectName}｜${dynamic.engineeringDocs.meetingMinutes.title}`,
-      discussionSummary: `${cfg.root} 当前验证主线：${cfg.verify.join('；')}。${dynamic.engineeringDocs.meetingMinutes.discussionSummary}`
+      ...existingDocs.meetingMinutes,
+      title: `【${domain}】${context.projectName}｜${existingDocs.meetingMinutes?.title || '工程评审会纪要'}`,
+      discussionSummary: `${cfg.root} 当前验证主线：${cfg.verify.join('；')}。${existingDocs.meetingMinutes?.discussionSummary || ''}`
     }
   };
 
@@ -455,6 +456,35 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
         regulatoryImpact: domain.startsWith('EMC'),
         massProductionImpact: true,
       };
+
+      // EDR 记录也改为依据当前工况动态生成，避免 decisionPillars 里的历史示例数字(如 150MHz)泄漏进结果。
+      dynamic.edrRecord = {
+        edrId: 'EDR-' + scenarioDomainKey + '-' + Date.now().toString(36).toUpperCase(),
+        projectCode: context.projectName,
+        decisionDate: new Date().toISOString().slice(0, 10),
+        decisionMaker: 'HW Lead / 决策评审会',
+        coreProblem: scenarioDomainKey + '：' + (issue.failurePhenomenon || issue.engineeringConcern || '当前工程问题'),
+        measuredSnapshot: issue.actualMeasurement || '暂无实测回填',
+        specThreshold: issue.requirement || '规格/客户门限待输入',
+        engineeringAssumptions: [
+          '未测量的字段保持 UNKNOWN，不自动生成人为实测值',
+          '当前风险评分 ' + nativeRiskScore + '/100（由当前工况输入推导）',
+        ],
+        chosenOptionId: best.id,
+        chosenOptionTitle: best.name,
+        rejectedOptionsSummary: ranked.filter((a) => a.id !== best.id).map((a) => a.name + '：残余风险 ' + a.residualRisk).join('；'),
+        defenseBasis: '基于当前 ' + scenarioDomainKey + ' 工况输入与确定性规则排序，首选方案总分 ' + best.scores.total,
+        signOffSignatures: [
+          { role: '硬件负责人', name: 'HW Lead', status: 'Pending', signDate: '' },
+          { role: '质量经理', name: 'QA Manager', status: 'Pending', signDate: '' },
+        ],
+        localHashDigest: 'PENDING',
+        decisionStatus: 'CONDITIONALLY_APPROVED',
+        createdAt: new Date().toISOString(),
+      };
+      if (dynamic.engineeringDocs) {
+        dynamic.engineeringDocs.edrRecord = dynamic.edrRecord;
+      }
     }
   }
   const measuredInputs = Object.entries(issue.measuredValues || {}).filter(([,v]) => v !== '' && v !== null && v !== undefined).map(([k,v]) => `${k}=${v}`);

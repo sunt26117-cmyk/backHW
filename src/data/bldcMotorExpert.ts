@@ -47,8 +47,8 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       id: 'Option A',
       category: 'balanced',
       categoryLabel: '软硬协同 (推荐方案)',
-      name: '三相全下桥能耗制动 + 门极有源米勒钳位/反向低阻通路 + 48MHz RC Snubber',
-      description: '1. 固件改写制动逻辑：急停时关断三路上桥，开启三路下桥 MOSFET 实施短接动态制动，动能转化为线圈铜耗，消除母线泵升；2. 硬件启用驱动芯片 Active Miller Clamp 引脚或门极并联 1N4148+1.5Ω 低阻下拉；3. 在三相逆变器半桥中点并联 1360pF NPO + 4.7Ω 0805 RC Snubber 抑制 48MHz 高频振铃。',
+      name: '三相全下桥能耗制动 + 门极有源米勒钳位/反向低阻通路 + 目标谐振频点 RC Snubber',
+      description: '1. 固件改写制动逻辑：急停时关断三路上桥，开启三路下桥 MOSFET 实施短接动态制动，动能转化为线圈铜耗，消除母线泵升；2. 硬件启用驱动芯片 Active Miller Clamp 引脚或门极并联 1N4148+1.5Ω 低阻下拉；3. 在三相逆变器半桥中点并联 1360pF NPO + 4.7Ω 0805 RC Snubber 抑制 目标谐振频点 高频振铃。',
       expectedBenefit: `当前项目整改前的确定性基线为 ${dynamicBus}；Miller 为 ${dynamicMiller}。整改后目标值属于待验证变量，不得用历史模板数字充当实测结果。`,
       scores: {
         T: scoreA.T,
@@ -62,7 +62,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       referenced_standards: [
         { standard: 'ISO 26262-5', clause: 'Clause 7.4.3', relevance: '硬件架构安全指标、单点故障度量 (SPFM) 与失效容限时间间隔 (FHTI) 要求' },
         { standard: 'ISO 16750-2', clause: 'Section 4.6.2', relevance: '车载供电瞬态过电压与反向电势倒灌冲击脉冲测试规范' },
-        { standard: 'CISPR 25', clause: 'Class 5 Table 7', relevance: '车载接收机保护之传导与辐射骚扰限值 (48MHz 谐振抑制)' },
+        { standard: 'CISPR 25', clause: 'Class 5 Table 7', relevance: '车载接收机保护之传导与辐射骚扰限值 (目标谐振频点 谐振抑制)' },
         { standard: 'AEC-Q101', clause: 'Rev E / SOA Limit', relevance: '车规分立功率器件脉冲电流安全工作区与单脉冲抗雪崩能量' },
       ],
       riskBefore: `当前项目确定性计算：Bus Pumping=${dynamicBus}，Vds额定耐压=${vds ?? 'UNKNOWN'}V；Miller=${dynamicMiller}（输入完整性不足时不输出确定值）。EMC 高频振铃以实测频谱为准。`,
@@ -253,7 +253,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
         degradationAction: '触发 2-Hall 容错降级算法重构第三相；限制最大转速 70%、相电流限幅 50%，上报 DTC P0A3F-14 进入跛行保底模式。',
       },
       {
-        failureMode: '三相半桥开关节点 48MHz 高频谐振骚扰发射超标',
+        failureMode: '三相半桥开关节点 目标谐振频点 高频谐振骚扰发射超标',
         failureCause: 'PCB 功率开关回路杂散电感 (16.2nH) 与功率管 Coss 结电容在高速开关瞬间发生欠阻尼振荡',
         localEffect: '开关节点电压振铃峰峰值超标 +14V，对附近敏感线束形成近场耦合辐射',
         systemEffect: '造成车载 FM 广播与钥匙无线接收天线 (RKE) 信噪比恶化',
@@ -318,11 +318,11 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
     candidateActions,
     finalRecommendation: {
       recommendedOptionId: 'Option A',
-      recommendedOptionName: '实施方案 A：三相全下桥能耗制动 + 门极有源米勒钳位/反向低阻通路 + 48MHz RC Snubber',
+      recommendedOptionName: '实施方案 A：三相全下桥能耗制动 + 门极有源米勒钳位/反向低阻通路 + 目标谐振频点 RC Snubber',
       recommendationGrade: 'Strongly Recommended',
       whyReason: [
         `物理机理根治：用电机机电能量守恒原理在下桥循环消纳动能；当前 Bus Pumping 基线=${dynamicBus}，整改后绝对值必须通过实测/重新计算确认。`,
-        `多维兼顾：当前 Miller 基线=${dynamicMiller}；高温裕量与整改后数值须由验证数据确认，RC Snubber 对 48MHz 振铃的效果也必须以实测频谱确认。`,
+        `多维兼顾：当前 Miller 基线=${dynamicMiller}；高温裕量与整改后数值须由验证数据确认，RC Snubber 对 目标谐振频点 振铃的效果也必须以实测频谱确认。`,
         '时间与成本极佳：BOM 仅增加 $0.12，软件 2 天刷写，硬件在原有样件焊盘可快速验证，稳固保住 15 天 DV 准入节点。',
       ],
       immediateSteps: [
@@ -491,7 +491,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
         ],
         deviationDescription: '在 B 样阶段允许使用三相全下桥动态能耗制动替代加装 3 颗 1500W TVS 的硬件硬改版，并在原有样件焊盘上微调 RC Snubber (1360pF+4.7Ω) 进行交付。',
         rootCause5WhySummary: '1. Why母线过压? 急停动能倒灌 -> 2. Why倒灌? 传统停机上桥关闭下桥未导通 -> 3. Why不改版加TVS? 投板需21天击穿DV节点且超支$1.45 -> 4. Why可行? 电机反电势下桥循环消纳经物理建模完全闭环 -> 5. 结论: 软硬协同是兼顾安全与工期的最优车规解。',
-        safetyAndEmcAssessment: `安全与EMC结论需以当前项目验证闭环；当前确定性基线为 Bus Pumping=${dynamicBus}、Miller=${dynamicMiller}，其余SOA、热与48MHz频谱数据均不得用历史模板数字替代。`,
+        safetyAndEmcAssessment: `安全与EMC结论需以当前项目验证闭环；当前确定性基线为 Bus Pumping=${dynamicBus}、Miller=${dynamicMiller}，其余SOA、热与目标谐振频点频谱数据均不得用历史模板数字替代。`,
         qualityContainmentCommitment: 'B 样 15 套样机 100% 进行 85℃ 发泡棉密封箱 1500 次循环急停摸底；每套出具 MES 追溯曲线；C 样模具件正式固化。',
         impactOnVehicleAssembly: '对外电气接口、线束插头、外壳装配尺寸与通信协议完全无变动，对整车流水线装配 0 影响。',
         quantityOrDateLimit: '限定用于 B 样批次 15 台及 DV 试验阶段 (至 2026-11-30 SOP 前 C 样更新完成)。',
@@ -531,7 +531,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       },
       ecrDescription: {
         ecrTitle: 'BLDC 逆变桥 RC Snubber 吸收电路固化与门极关断回路优化工程变更',
-        reasonForChange: '彻底抑制开关节点 48MHz 振铃、滤除门极米勒尖峰，配合底层下桥能耗制动消除急停母线泵升。',
+        reasonForChange: '彻底抑制开关节点 目标谐振频点 振铃、滤除门极米勒尖峰，配合底层下桥能耗制动消除急停母线泵升。',
         proposedSolution: '在三相半桥中点增加 3 组 RC Snubber (1360pF/50V NPO + 4.7Ω 0805)，在门极增加快速关断二极管焊盘。',
         costEstimate: 'BOM 增加约 $0.12/板。',
         toolingLeadTime: '纳入常规 C 样 PCB 改版投板。',

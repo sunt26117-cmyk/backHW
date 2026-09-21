@@ -191,17 +191,17 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
   },
   {
     caseId: 'Case13',
-    title: '供应商跨晶圆厂 PCN / 二次源多维等价性核验',
-    category: 'Supply Chain & PCN',
+    title: '急停动态尖峰 MOSFET VDS 耐压多层级裕量核查 (P014 重点)',
+    category: 'Power & Switching',
     input: {
       issue: { failurePhenomenon: '急停后母线实测峰值 48V，而功率 MOSFET 额定耐压仅 40V，动态尖峰逼近击穿', measuredValues: { busVoltagePeakV: 48, vdsRatingV: 40 } },
     },
     expectedPattern: 'P014',
-    expectedCalculation: { 'Qrr体二极管电荷差异 (%)': '+18.0%', '结论': 'Regression Required' },
+    expectedCalculation: { '动态浪涌过冲估算 Vds_peak (V)': 62.4, '器件额定耐压 Vds_rating (V)': 40, '耐压裕量 (V)': -22.4 },
     expectedRisk: 'Medium-High',
     expectedVeto: false,
-    expectedNextBestAction: '拒绝直接判定 Pin-to-Pin 完全等价，执行 CISPR 25 与反向恢复尖峰对比摸底',
-    expectedVerification: 'Fab 2 样品执行 200 次极限急停冲击测试与暗室测试',
+    expectedNextBestAction: '选用更高耐压车规 MOSFET 拉开耐压裕量，并实测开关节点尖峰替换假设的 30% 过冲系数',
+    expectedVerification: '示波器 1GHz 探头焊在引脚根部捕获极限开关尖峰，并测回路电感与 di/dt 替代假设的过冲系数',
   },
   {
     caseId: 'Case14',
