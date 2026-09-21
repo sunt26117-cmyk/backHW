@@ -22,6 +22,7 @@ import { DesignReviewRegressionView } from './components/DesignReviewRegressionV
 import { ModelSettingsModal } from './components/ModelSettingsModal';
 import { ScenarioManageModal } from './components/ScenarioManageModal';
 import { SourceDownloadModal } from './components/SourceDownloadModal';
+import { DeviceLibraryModal } from './components/DeviceLibraryModal';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { EngineeringWorkflowView } from './components/EngineeringWorkflowView';
 
@@ -130,7 +131,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
   const [isScenarioManageOpen, setIsScenarioManageOpen] = useState<boolean>(false);
-  const [isSourceDownloadOpen, setIsSourceDownloadOpen] = useState<boolean>(false);
+  const [isSourceDownloadOpen, setIsSourceDownloadOpen] = useState<boolean>(false)
+  const [isDeviceLibraryOpen, setIsDeviceLibraryOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [isPwaInstalled, setIsPwaInstalled] = useState<boolean>(false);
@@ -596,6 +598,7 @@ export default function App() {
           document.body.removeChild(a);
         }}
         onOpenSourceDownload={() => setIsSourceDownloadOpen(true)}
+        onOpenDeviceLibrary={() => setIsDeviceLibraryOpen(true)}
       />
 
       {/* Mobile PWA Install Banner */}
@@ -778,6 +781,13 @@ export default function App() {
       <SourceDownloadModal
         isOpen={isSourceDownloadOpen}
         onClose={() => setIsSourceDownloadOpen(false)}
+        showToast={showToast}
+      />
+
+      {/* Device Library Modal */}
+      <DeviceLibraryModal
+        isOpen={isDeviceLibraryOpen}
+        onClose={() => setIsDeviceLibraryOpen(false)}
         showToast={showToast}
       />
     </div>
