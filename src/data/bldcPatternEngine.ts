@@ -125,6 +125,7 @@ export interface BldcEvaluationInput {
   gateTurnOffDelayNsOverride?: number;
   currentFallDelayNsOverride?: number;
   soaShortCircuitTimeUsOverride?: number;
+  easEnergyMj?: number; // 单脉冲雪崩能量 E_AS(mJ)，来自器件库，用于短路能量预算复核
 
   // 器件曲线（可选）：来自器件库，按当前工况插值，替代写死系数。
   rdsOnCurve?: Array<{ x: number; y: number }>;  // x=Tj(℃), y=Rds(on)(mΩ)
@@ -1003,6 +1004,13 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   const timingMarginUs = mosfetSoaShortCircuitTimeUs - faultToOffTimeUs;
   const p016Veto = timingMarginUs <= 0;
 
+  // 短路能量法复核（替代/补充假的"短路耐受时间"）：E_fault = Vbus · Id · t_fault
+  // 注意：短路电流通常远高于运行峰值电流，此处用 currentPeakA 是能量下界估算，超了必然更危险。
+  const p016ShortCircuitCurrentA = input.currentPeakA !== undefined && Number.isFinite(input.currentPeakA) ? input.currentPeakA : 25;
+  const p016FaultEnergyMj = vbusNominalSafe * p016ShortCircuitCurrentA * faultToOffTimeUs / 1000; // V·A·μs/1000 = mJ
+  const p016HasEas = input.easEnergyMj !== undefined && input.easEnergyMj > 0;
+  const p016EnergyExceeds = p016HasEas && p016FaultEnergyMj > (input.easEnergyMj as number);
+
   const p016CalculatedValues: Record<string, string | number> = {
     '电流检测与运放延迟 (ns)': senseDelayNs,
     '硬件比较器响应时间 (ns)': compDelayNs,
@@ -1013,24 +1021,28 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     '整条保护链全关闭时间 Fault-to-Off Time (μs)': Number(faultToOffTimeUs.toFixed(3)),
     [soaTimeAssumed ? '⚠ MOSFET 短路耐受时间(假设值，低压器件通常无此datasheet指标) (μs)' : 'MOSFET SOA 额定极限短路耐受时间 (μs)']: mosfetSoaShortCircuitTimeUs,
     '时序安全裕量 Timing Margin (μs)': Number(timingMarginUs.toFixed(3)),
+    '短路能量估算 E_fault (mJ，能量下界，短路电流会更高)': Number(p016FaultEnergyMj.toFixed(3)),
+    [p016HasEas ? '器件单脉冲雪崩能量 E_AS (mJ)' : '⚠ 数据缺口：器件未提供 E_AS']: p016HasEas ? (input.easEnergyMj as number) : '未提供，无法做能量预算复核',
   };
   pushAssumptionNote(p016CalculatedValues, p016Assumptions);
 
   patterns.push({
     id: 'P016',
     name: '过流/短路保护响应时间时序 ↔ MOSFET SOA 安全区匹配 (Fault-to-Off Timing vs SOA)',
-    triggered: timingMarginUs < 1.0 || p016Veto,
+    triggered: timingMarginUs < 1.0 || p016Veto || p016EnergyExceeds,
     corePhysicalChain: 'Fault occurs → Current rises → Sense delay → Comparator/ADC delay → Digital delay → Driver propagation delay → Gate turn-off → 电流衰减。低压MOSFET更严谨的判据是SOA曲线上的能量积分而非固定的"短路耐受时间"',
     calculatedValues: p016CalculatedValues,
-    riskLevel: p016Veto ? 'High' : (timingMarginUs < 0.5 ? 'Medium-High' : 'Low'),
+    riskLevel: p016Veto || p016EnergyExceeds ? 'High' : (timingMarginUs < 0.5 ? 'Medium-High' : 'Low'),
     confidence: p016Assumptions.length > 2 ? 'LOW' : 'MEDIUM',
     evidenceType: 'CALCULATED',
-    vetoTriggered: p016Veto && !soaTimeAssumed,
-    vetoReason: p016Veto
-      ? (soaTimeAssumed
-        ? `按假设参数估算，全保护链关断时间 (${faultToOffTimeUs.toFixed(2)}μs) 可能超过SOA短路耐受时间假设值 (${mosfetSoaShortCircuitTimeUs}μs)，但该耐受时间是假设值而非实际器件SOA数据，暂不作为一票否决，请先用实际器件SOA曲线复核`
-        : `全保护链关断时间 (${faultToOffTimeUs.toFixed(2)}μs) 超过器件 SOA 额定安全耐受时间 (${mosfetSoaShortCircuitTimeUs}μs)，短路时功率管将先于保护触发烧毁，触发致命一票否决！`)
-      : undefined,
+    vetoTriggered: (p016Veto && !soaTimeAssumed) || p016EnergyExceeds,
+    vetoReason: p016EnergyExceeds
+      ? `短路能量下界估算 (${p016FaultEnergyMj.toFixed(2)}mJ) 已超过器件单脉冲雪崩能量 E_AS (${input.easEnergyMj}mJ)，且短路实际电流通常远高于运行峰值电流——短路时功率管极可能先于保护触发热失效，触发致命一票否决！`
+      : p016Veto
+        ? (soaTimeAssumed
+          ? `按假设参数估算，全保护链关断时间 (${faultToOffTimeUs.toFixed(2)}μs) 可能超过SOA短路耐受时间假设值 (${mosfetSoaShortCircuitTimeUs}μs)，但该耐受时间是假设值而非实际器件SOA数据，暂不作为一票否决，请先用实际器件SOA曲线复核`
+          : `全保护链关断时间 (${faultToOffTimeUs.toFixed(2)}μs) 超过器件 SOA 额定安全耐受时间 (${mosfetSoaShortCircuitTimeUs}μs)，短路时功率管将先于保护触发烧毁，触发致命一票否决！`)
+        : undefined,
     candidateMeasures: [
       '减小门极关断回路消抖滤波时间，优化关断放电电阻 Rg_off 缩短关断延迟',
       '选用具有超高速硬件短路检测的专用车载预驱（低压MOSFET通常不用DESAT，那是IGBT/SiC技术，此处不适用）',

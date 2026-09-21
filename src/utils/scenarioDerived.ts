@@ -156,12 +156,15 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   let rdsOnCurve: Array<{ x: number; y: number }> | undefined;
   let crssCurve: Array<{ x: number; y: number }> | undefined;
   let vthCurve: Array<{ x: number; y: number }> | undefined;
+  let easEnergyMj: number | undefined;
   if (selectedDeviceId) {
     const dev = loadDevices().find((d) => d.id === selectedDeviceId);
     if (dev) {
       rdsOnCurve = getDeviceCurve(dev, 'rdsOn');
       crssCurve = getDeviceCurve(dev, 'crss');
       vthCurve = getDeviceCurve(dev, 'vth');
+      const easPulse = (dev.raw as any)?.maxRatings?.easPulse;
+      easEnergyMj = easPulse && easPulse.value != null ? Number(easPulse.value) : undefined;
     }
   }
 
@@ -193,6 +196,7 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     rdsOnCurve,
     crssCurve,
     vthCurve,
+    easEnergyMj,
   };
 }
 
