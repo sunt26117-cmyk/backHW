@@ -24,6 +24,7 @@ import { ScenarioManageModal } from './components/ScenarioManageModal';
 import { SourceDownloadModal } from './components/SourceDownloadModal';
 import { DeviceLibraryModal } from './components/DeviceLibraryModal';
 import { AiOfflineModal } from './components/AiOfflineModal';
+import { OscilloscopeImportModal } from './components/OscilloscopeImportModal';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { EngineeringWorkflowView } from './components/EngineeringWorkflowView';
 
@@ -134,7 +135,8 @@ export default function App() {
   const [isScenarioManageOpen, setIsScenarioManageOpen] = useState<boolean>(false);
   const [isSourceDownloadOpen, setIsSourceDownloadOpen] = useState<boolean>(false)
   const [isDeviceLibraryOpen, setIsDeviceLibraryOpen] = useState<boolean>(false)
-  const [isAiOfflineOpen, setIsAiOfflineOpen] = useState<boolean>(false);
+  const [isAiOfflineOpen, setIsAiOfflineOpen] = useState<boolean>(false)
+  const [isOscilloscopeOpen, setIsOscilloscopeOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [isPwaInstalled, setIsPwaInstalled] = useState<boolean>(false);
@@ -602,6 +604,7 @@ export default function App() {
         onOpenSourceDownload={() => setIsSourceDownloadOpen(true)}
         onOpenDeviceLibrary={() => setIsDeviceLibraryOpen(true)}
         onOpenAiOffline={() => setIsAiOfflineOpen(true)}
+        onOpenOscilloscope={() => setIsOscilloscopeOpen(true)}
       />
 
       {/* Mobile PWA Install Banner */}
@@ -791,6 +794,21 @@ export default function App() {
       <DeviceLibraryModal
         isOpen={isDeviceLibraryOpen}
         onClose={() => setIsDeviceLibraryOpen(false)}
+        showToast={showToast}
+      />
+
+      {/* Oscilloscope Import Modal */}
+      <OscilloscopeImportModal
+        isOpen={isOscilloscopeOpen}
+        onClose={() => setIsOscilloscopeOpen(false)}
+        onApplyMeasured={(values, provenance) => {
+          setIssue((prev) => ({
+            ...prev,
+            measuredValues: { ...(prev.measuredValues || {}), ...values },
+            measurementProvenance: { ...(prev.measurementProvenance || {}), ...provenance },
+            measuredValueSource: 'IMPORTED',
+          }));
+        }}
         showToast={showToast}
       />
 
