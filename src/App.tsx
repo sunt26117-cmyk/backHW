@@ -2,7 +2,7 @@ import React, { Component, useState, useEffect } from 'react';
 import { ProjectContext, IssueInput, CopilotAnalysisResult, AppTheme, ModelApiConfig, PresetScenario } from './types';
 import { PRESET_SCENARIOS } from './data/presetScenarios';
 import { runExpertAnalysis } from './data/expertEngine';
-import { exportBackupJson, importBackupJson, exportMarkdownReport } from './utils/backupRestore';
+import { exportBackupJson, importBackupJson, exportMarkdownReport, exportHtmlReport } from './utils/backupRestore';
 import { loadCustomScenarios, saveCustomScenario, deleteCustomScenario } from './utils/scenarioStorage';
 import { loadAnalysisResult, saveAnalysisResult, deleteAnalysisResult } from './utils/analysisStorage';
 import { orderScenarios, saveScenarioOrder, resetScenarioOrder } from './utils/scenarioLibrary';
@@ -446,6 +446,14 @@ export default function App() {
     showToast('工程决策评审纪要 (CDR) 已导出为 Markdown 文件', 'success');
   };
 
+  const handlePrintReport = () => {
+    if (!result) {
+      showToast('请先生成工程分析结果后再导出报告', 'info');
+      return;
+    }
+    exportHtmlReport(context, issue, result);
+  };
+
   const runAnalysis = async (ctx = context, iss = issue, scenarioId = currentScenarioId) => {
     const runId = ++analysisRunId.current;
     setResult(null);
@@ -592,6 +600,7 @@ export default function App() {
         onExportBackup={handleExportBackup}
         onImportBackup={handleImportBackup}
         onExportMarkdown={handleExportMarkdown}
+        onPrintReport={handlePrintReport}
         onDownloadOfflineHtml={() => {
           showToast('正在下载纯离线单文件版 HTML，下载后双击即可直接使用！', 'success');
           const a = document.createElement('a');

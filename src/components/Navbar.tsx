@@ -46,6 +46,7 @@ interface NavbarProps {
   onExportBackup: () => void;
   onImportBackup: (file: File) => void;
   onExportMarkdown: () => void;
+  onPrintReport?: () => void;
   onDownloadOfflineHtml?: () => void;
   onOpenSourceDownload?: () => void;
   onOpenDeviceLibrary?: () => void;
@@ -71,6 +72,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onExportBackup,
   onImportBackup,
   onExportMarkdown,
+  onPrintReport,
   onDownloadOfflineHtml,
   onOpenSourceDownload,
   onOpenDeviceLibrary,
@@ -449,7 +451,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                     </button>
 
-                    {/* 4. 下载纯离线单文件 HTML (双击即用) */}
+                    {/* 4. 导出/打印 HTML 报告（可另存为 PDF） */}
+                    {onPrintReport && (
+                      <button
+                        id="print-report-btn"
+                        onClick={() => {
+                          onPrintReport();
+                          setShowBackupMenu(false);
+                        }}
+                        className="w-full px-3 py-2.5 flex items-start gap-2.5 text-left hover:bg-slate-800/80 transition cursor-pointer text-slate-200 border-t border-slate-800/60"
+                      >
+                        <Download className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+                        <div>
+                          <div className="font-semibold text-rose-300">导出 HTML 报告 / 打印为 PDF</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">
+                            生成带签名位与版本号的正式工程报告，浏览器打印对话框可另存为 PDF。
+                          </div>
+                        </div>
+                      </button>
+                    )}
+
+                    {/* 5. 下载纯离线单文件 HTML (双击即用) */}
                     <a
                       id="download-offline-html-btn"
                       href="/api/download/offline-html"

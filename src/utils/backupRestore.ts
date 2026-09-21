@@ -177,3 +177,58 @@ export function exportMarkdownReport(
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+export function exportHtmlReport(
+  context: ProjectContext,
+  issue: IssueInput,
+  result: CopilotAnalysisResult | null
+): void {
+  if (!result) return;
+  const dateStr = new Date().toLocaleString('zh-CN');
+  const projectName = (context.projectName || '车载硬件决策').replace(/[<>&]/g, '');
+
+  const actionRows = result.candidateActions.map((o, i) => {
+    const veto = o.veto.rejection_veto ? '❌ 否决' : '✅ 候选';
+    return '<tr><td>' + (i + 1) + '</td><td>' + String(o.name).replace(/[<>&]/g, '') + '</td><td>' + o.categoryLabel + '</td>' +
+      '<td>' + o.scores.T + '</td><td>' + o.scores.S + '</td><td>' + o.scores.C + '</td><td>' + o.scores.Q + '</td><td>' + o.scores.L + '</td><td>' + o.scores.total + '</td><td>' + veto + '</td></tr>';
+  }).join('');
+
+  const whyReason = (result.finalRecommendation.whyReason || []).map((r) => '<li>' + String(r).replace(/[<>&]/g, '') + '</li>').join('');
+
+  const html = [
+    '<!DOCTYPE html>',
+    '<html lang="zh-CN"><head><meta charset="utf-8"><title>' + projectName + ' 硬件工程决策报告</title>',
+    '<style>body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;max-width:820px;margin:24px auto;padding:0 20px;color:#1a202c;line-height:1.6}h1{font-size:20px;border-bottom:2px solid #2563eb;padding-bottom:8px}h2{font-size:16px;margin-top:24px;color:#2563eb}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:left}th{background:#f1f5f9}.meta{color:#64748b;font-size:12px}.sig{margin-top:32px;display:flex;gap:48px}.sig div{border-top:1px solid #333;padding-top:6px;font-size:12px;width:160px}@media print{body{margin:0;padding:0}}</style></head><body>',
+    '<h1>' + projectName + ' · 硬件工程决策与风险评估报告</h1>',
+    '<div class="meta">生成时间：' + dateStr + ' ｜ 项目阶段：' + (context.projectPhase || '-') + ' ｜ 安全等级：' + (context.asilLevel || '-') + ' ｜ 剩余 ' + (context.daysRemaining ?? '-') + ' 天 ｜ 版本：v1.0（车规离线专家引擎）</div>',
+    '<h2>1. 核心结论</h2>',
+    '<p><strong>问题定性：</strong>' + String(result.coreConclusion.problemSummary || '').replace(/[<>&]/g, '') + '</p>',
+    '<p><strong>推荐措施：</strong>' + String(result.coreConclusion.recommendedMeasure || '').replace(/[<>&]/g, '') + '</p>',
+    '<h2>2. 风险评级</h2>',
+    '<p>综合风险：<strong>' + (result.riskRatings.overallRisk || '-') + '</strong>（风险分 ' + (result.riskRatings.overallRiskScore ?? '-') + '）｜ 技术 ' + (result.riskRatings.technicalRisk || '-') + ' ｜ 质量 ' + (result.riskRatings.qualityRisk || '-') + ' ｜ 进度 ' + (result.riskRatings.scheduleRisk || '-') + ' ｜ 成本 ' + (result.riskRatings.costRisk || '-') + '</p>',
+    '<h2>3. 失效与实测</h2>',
+    '<p><strong>失效分类：</strong>' + (issue.issueCategories.join(', ') || '-') + '</p>',
+    '<p><strong>失效现象：</strong>' + String(issue.failurePhenomenon || '-').replace(/[<>&]/g, '') + '</p>',
+    '<p><strong>实测数据：</strong>' + String(issue.actualMeasurement || '-').replace(/[<>&]/g, '') + '</p>',
+    '<p><strong>规格要求：</strong>' + String(issue.requirement || '-').replace(/[<>&]/g, '') + '</p>',
+    '<h2>4. C-T-S-Q-L 候选方案权衡</h2>',
+    '<table><thead><tr><th>#</th><th>方案</th><th>类型</th><th>T</th><th>S</th><th>C</th><th>Q</th><th>L</th><th>总分</th><th>状态</th></tr></thead><tbody>' + actionRows + '</tbody></table>',
+    '<h2>5. 最终推荐</h2>',
+    '<p><strong>推荐方案：</strong>' + String(result.finalRecommendation.recommendedOptionName || '').replace(/[<>&]/g, '') + '</p>',
+    '<ul>' + whyReason + '</ul>',
+    '<div class="sig"><div>硬件负责人（签字/日期）</div><div>质量经理（签字/日期）</div><div>项目经理（签字/日期）</div></div>',
+    '</body></html>',
+  ].join('');
+
+  const win = window.open('', '_blank', 'width=920,height=1100');
+  if (!win) {
+    alert('浏览器拦截了弹窗，请允许弹窗后重试导出。');
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { try { win.print(); } catch (e) { /* 忽略打印取消 */ } }, 350);
+}
+
+
