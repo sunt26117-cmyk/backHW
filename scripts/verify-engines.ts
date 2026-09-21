@@ -13,6 +13,7 @@ import { runDeterministicPrecomputations } from '../src/utils/deterministicPreco
 import { recalculateStandardWeightedScore } from '../src/utils/scoringWeights';
 import { assessDomainClassificationAmbiguity } from '../src/utils/scenarioDomainEngine';
 import { GOLD_STANDARD_CASES, runGoldStandardCaseRegression } from '../src/data/goldStandardCases';
+import { evaluateAllBldcPatterns } from '../src/data/bldcPatternEngine';
 import type { IssueInput, ProjectContext } from '../src/types';
 
 let failures = 0;
@@ -164,13 +165,22 @@ for (const c of GOLD_STANDARD_CASES) {
   console.log(`  ${mark} ${c.caseId} [预期 ${c.expectedPattern}] 实际触发: ${r.matchedPattern}`);
   if (r.status === 'PASS') goldPass++; else failures++;
 }
-console.log(`  金标准案例：${goldPass}/${GOLD_STANDARD_CASES.length} 通过`);
-console.log(
-  '  注意：P007/P009-P012/P014-P018（以及可能的J系列）在 bldcPatternEngine.ts 里 triggered 字段是硬编码 true，\n' +
-  '  不是真正条件触发——这些案例即使显示PASS，也只是因为预期pattern恰好在"总是触发"名单里，不代表\n' +
-  '  引擎真的识别出了这个case的特征。这是下一轮需要人工逐条给这些判据补真实触发条件的地方，\n' +
-  '  不是这次顺手能改完的，标注出来供后续排期。'
-);
+console.log('  金标准案例：' + goldPass + '/' + GOLD_STANDARD_CASES.length + ' 通过');
+
+console.log('\n=== 负例断言：检测型模式必须在输入不具备时不触发，防止总是触发回潮 ===');
+const quietBldcInput = { vbusNominal: 12, vdsRating: 40, rpm: 500, jInertia: 0.00015, cbusUf: 1000, tAmbientC: 25, currentPeakA: 5, harnessLengthM: 0.5, deadTimeNs: 400, rgOffOhm: 1.0, cgdPf: 45, dvDtVns: 2.0, vthMinV: 2.0 };
+const quietPatterns = evaluateAllBldcPatterns(quietBldcInput).filter((p) => p.triggered).map((p) => p.id);
+check('温和工况不得触发 P001~P008', () => {
+  for (const id of ['P001', 'P002', 'P003', 'P004', 'P005', 'P006', 'P007', 'P008'] as const) {
+    assert.equal(quietPatterns.includes(id), false, id + ' 不应在温和工况触发，实际=' + quietPatterns.join(','));
+  }
+});
+
+check('急停高速工况应触发 P001，温和工况不应', () => {
+  const fast = evaluateAllBldcPatterns({ vbusNominal: 12, vdsRating: 40, rpm: 3800, jInertia: 0.00015, cbusUf: 470, tAmbientC: 25, currentPeakA: 25, harnessLengthM: 0.5, deadTimeNs: 120, rgOffOhm: 4.7, cgdPf: 45, dvDtVns: 6.0, vthMinV: 2.0 }).filter((p) => p.triggered).map((p) => p.id);
+  assert.equal(fast.includes('P001'), true, '急停工况应触发 P001，实际=' + fast.join(','));
+  assert.equal(quietPatterns.includes('P001'), false, '温和工况不得触发 P001');
+});
 
 console.log(`\n${failures === 0 ? '全部通过' : `共 ${failures} 项失败`}`);
 process.exit(failures === 0 ? 0 : 1);

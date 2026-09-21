@@ -371,7 +371,7 @@ export function evaluateAllRobotJointPatterns(input: RobotJointEvaluationInput):
   patterns.push({
     id: 'J002',
     name: '多圈绝对值编码器供电/后备电池丢失 → 位置基准丢失与上电冲位风险 (Multi-Turn Absolute Position Loss)',
-    triggered: true,
+    triggered: j002IsBatteryDependent,
     corePhysicalChain: '编码器主供电跌落或多圈计数后备电池耗尽 → 断电期间圈数计数丢失 → 上电后编码器读数与真实机械位置错位 → 若无位置合理性校验直接使能运动，关节可能高速冲向错误目标位置。多圈编码器后备电池通常是锂亚硫酰氯一次电池，其放电曲线在寿命 90%+ 区间接近平坦后断崖式跌落，电压判据本质上是滞后指标',
     calculatedValues: j002CalculatedValues,
     riskLevel: j002Veto ? 'High' : (j002IsBatteryDependent ? 'Medium' : 'Low'),
@@ -502,7 +502,7 @@ export function evaluateAllRobotJointPatterns(input: RobotJointEvaluationInput):
   patterns.push({
     id: 'J004',
     name: '连续往复动作再生能量 → 泄放电阻连续热过载 (Continuous Duty Regenerative Braking, 区别于车规单次急停)',
-    triggered: true,
+    triggered: Number.isFinite(input.regenPowerPeakW) && input.regenPowerPeakW > 0,
     corePhysicalChain: '车规急停制动是低频单次事件，而关节在协作作业中高频往复加减速 → 每次减速动能经逆变器回馈进母线 → 母线电容先吸收一部分，超出斩波阈值后泄放电阻(Brake Chopper)持续斩波耗散 → 平均功率若长期超出额定连续功率 → 电阻阻值漂移/绝缘老化/最终烧毁，且伴随母线过压保护频繁跳闸',
     calculatedValues: j004CalculatedValues,
     riskLevel: j004Veto ? 'High' : (avgRegenPowerW > input.brakingResistorRatedContinuousW * 0.7 ? 'Medium-High' : 'Low'),
@@ -550,7 +550,7 @@ export function evaluateAllRobotJointPatterns(input: RobotJointEvaluationInput):
   patterns.push({
     id: 'J005',
     name: '力矩闭环误差链：电流估算力矩 vs 减速器效率漂移/力矩传感器 (Torque Estimation Confidence Chain)',
-    triggered: true,
+    triggered: input.hasDedicatedTorqueSensor === false || input.collaborativeSafetyRequired === true,
     corePhysicalChain: '若无独立力矩传感器，仅用 q 轴电流 × Kt × 减速比 估算关节输出力矩 → 误差链至少包含：电流采样零漂/增益误差、Kt随温度漂移、减速器效率随温度/转速/负载方向非线性变化（典型 65%~90%区间，且正驱/反驱不对称）、冷态摩擦与齿槽转矩 → 综合估算误差可达 ±15%~30%（未计入摩擦与Kt温漂时可能更保守） → 力控/柔顺控制或碰撞检测阈值失真。注意：本模块只覆盖到"关节输出力矩"这一层，ISO/TS 15066 约束的是末端接触力/压强，还需经雅可比与等效质量换算，力矩估算准确不等于接触力安全论证已完成',
     calculatedValues: j005CalculatedValues,
     riskLevel: j005Veto ? 'High' : (!input.hasDedicatedTorqueSensor ? 'Medium-High' : 'Low'),
@@ -697,7 +697,7 @@ export function evaluateAllRobotJointPatterns(input: RobotJointEvaluationInput):
   patterns.push({
     id: 'J007',
     name: '现场总线周期(EtherCAT/CANopen DS402)与本地控制环耦合 → 指令台阶化与丢包降级策略缺失',
-    triggered: true,
+    triggered: input.busCycleTimeUs > 0 || input.busLossFallbackStrategy === 'NONE',
     corePhysicalChain: '主站以总线周期下发目标位置/力矩指令 → 若总线周期远大于本地位置/电流环周期且缺少本地插补，指令在环路视角呈现台阶状 → 速度/加速度不连续引发转矩纹波与关节抖动，若台阶基频恰好靠近机械谐振点（见J003）则风险叠加；总线丢包/断线时若无预定义降级策略，存在失控风险；CANopen 等基于仲裁的总线在高负载下本身就不是严格确定性的',
     calculatedValues: j007CalculatedValues,
     riskLevel: j006Veto || j007Veto ? 'High' : (j007ExcitesResonance || j007CanopenNonDeterministic ? 'Medium-High' : (j007StepRisk ? 'Medium-High' : 'Low')),
