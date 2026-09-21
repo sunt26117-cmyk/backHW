@@ -498,6 +498,33 @@ export function auditAiResult(
     sanitized.dualTimeline = baseline.dualTimeline || buildDualTimelinePlan(sanitized, context, issue);
   }
 
+  // 9b. 确定性判据硬约束 (RULE_13_DETERMINISTIC_VETO_FLOOR)
+  // 本地确定性预计算若给出 CRITICAL/FAIL 判据(如母线泵升突破耐压、热失控、时序越界)，
+  // 属于不可推翻的硬门禁：AI 的整体风险评级不得低于 Medium-High，更不得把硬冲突误判为
+  // Low/Medium 后直接放行。这是"确定性事实否决 AI 输出"的最后一道闭环。
+  const criticalEvidence = (baseline.analysisBasis?.calculatedOutputEvidence || []).filter(
+    (e: any) => (e.complianceVerdict === 'CRITICAL' || e.complianceVerdict === 'FAIL') && e.status === 'CALCULATED'
+  );
+  if (criticalEvidence.length > 0 && sanitized.riskRatings) {
+    const riskRank: Record<string, number> = { High: 3, 'Medium-High': 2, Medium: 1, Low: 0 };
+    const aiRank = riskRank[sanitized.riskRatings.overallRisk] ?? 1;
+    if (aiRank < 2) {
+      flags.push({
+        level: 'FATAL',
+        ruleId: 'RULE_13_DETERMINISTIC_VETO_FLOOR',
+        title: '确定性否决判据被 AI 低估',
+        message: '本地确定性计算给出 ' + criticalEvidence.length + ' 项 CRITICAL/FAIL 判据 (' + criticalEvidence.map((e: any) => e.id).join('、') + ')，但模型整体风险评级仅为 ' + sanitized.riskRatings.overallRisk + '，已强制抬升至 High。',
+        fieldPath: 'riskRatings.overallRisk',
+        autoFixApplied: true,
+      });
+      sanitized.riskRatings.overallRisk = 'High';
+      if (typeof sanitized.riskRatings.overallRiskScore === 'number') {
+        sanitized.riskRatings.overallRiskScore = Math.max(sanitized.riskRatings.overallRiskScore, 82);
+      }
+      autoFixSummary.push('确定性 CRITICAL 判据强制将整体风险抬升至 High');
+    }
+  }
+
   // 9. 计算审计总分与评定状态
   let auditScore = 100;
   for (const flag of flags) {

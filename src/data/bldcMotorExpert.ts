@@ -28,6 +28,20 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
   const dynamicBus = bus?.status === 'CALCULATED' && bus.value !== undefined ? `${bus.value.toFixed(2)}V` : '当前输入不足，待补充结构化参数后计算';
   const dynamicMiller = miller?.status === 'CALCULATED' && miller.value !== undefined ? `${miller.value.toFixed(2)}V` : '当前输入不足，待补充结构化参数后计算';
 
+  // 动态评分：技术(T)分随确定性计算出的泵升过压/米勒直通风险严重度变化，
+  // 进度(S)分随剩余工期变化；成本/质量/可靠性保留方案内在画像(保守/激进结构特性)。
+  const daysRemaining = context.daysRemaining;
+  const busMarginV = bus?.status === 'CALCULATED' && bus.value !== undefined && vds !== undefined ? vds - bus.value : undefined;
+  const millerMarginV = miller?.status === 'CALCULATED' && miller.value !== undefined && vth !== undefined ? vth - miller.value : undefined;
+  let riskSeverity = 50;
+  if (busMarginV !== undefined && busMarginV < 5) riskSeverity = Math.min(95, 60 + (5 - busMarginV) * 6);
+  if (millerMarginV !== undefined && millerMarginV < 0.5) riskSeverity = Math.max(riskSeverity, 85);
+  const daysFactor = typeof daysRemaining === 'number' && daysRemaining <= 7 ? 1 : 0;
+  const clamp = (v: number) => Math.max(15, Math.min(98, Math.round(v)));
+  const scoreA = { T: clamp(88 + (riskSeverity - 50) * 0.3), S: clamp(88 - daysFactor * 6), C: 80, Q: 90, L: 88 };
+  const scoreB = { T: clamp(74 + (riskSeverity - 50) * 0.3), S: clamp(40 - daysFactor * 20), C: 40, Q: 80, L: 60 };
+  const scoreC = { T: 35, S: clamp(96 + daysFactor * 2), C: 98, Q: 30, L: 30 };
+
   const candidateActions: CandidateAction[] = [
     {
       id: 'Option A',
@@ -37,12 +51,12 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       description: '1. 固件改写制动逻辑：急停时关断三路上桥，开启三路下桥 MOSFET 实施短接动态制动，动能转化为线圈铜耗，消除母线泵升；2. 硬件启用驱动芯片 Active Miller Clamp 引脚或门极并联 1N4148+1.5Ω 低阻下拉；3. 在三相逆变器半桥中点并联 1360pF NPO + 4.7Ω 0805 RC Snubber 抑制 48MHz 高频振铃。',
       expectedBenefit: `当前项目整改前的确定性基线为 ${dynamicBus}；Miller 为 ${dynamicMiller}。整改后目标值属于待验证变量，不得用历史模板数字充当实测结果。`,
       scores: {
-        T: 95,
-        S: 92,
-        C: 90,
-        Q: 92,
-        L: 88,
-        total: calculateCtsql(95, 92, 90, 92, 88),
+        T: scoreA.T,
+        S: scoreA.S,
+        C: scoreA.C,
+        Q: scoreA.Q,
+        L: scoreA.L,
+        total: calculateCtsql(scoreA.T, scoreA.S, scoreA.C, scoreA.Q, scoreA.L),
       },
       veto: { rejection_veto: false },
       referenced_standards: [
@@ -71,12 +85,12 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       description: '在母线侧并联 3 颗 1500W 车规双向 TVS 吸收反向泵升浪涌，并将电解电容容量从 470μF 翻倍至 1500μF，门极电阻由 4.7Ω 强制减小为 1.0Ω 强行压低感应电压。',
       expectedBenefit: '纯硬件被动吸收，不依赖底层软件制动算法。',
       scores: {
-        T: 75,
-        S: 40,
-        C: 45,
-        Q: 80,
-        L: 60,
-        total: calculateCtsql(75, 40, 45, 80, 60),
+        T: scoreB.T,
+        S: scoreB.S,
+        C: scoreB.C,
+        Q: scoreB.Q,
+        L: scoreB.L,
+        total: calculateCtsql(scoreB.T, scoreB.S, scoreB.C, scoreB.Q, scoreB.L),
       },
       veto: {
         rejection_veto: true,
@@ -110,12 +124,12 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       description: '急停触发时立即封锁所有 6 个 MOSFET 门极输出，使电机自由旋转靠机械摩擦力减速滑行停止。',
       expectedBenefit: '软件 0 代码改动，0 硬件成本，眼下不延期。',
       scores: {
-        T: 35,
-        S: 95,
-        C: 98,
-        Q: 30,
-        L: 30,
-        total: calculateCtsql(35, 95, 98, 30, 30),
+        T: scoreC.T,
+        S: scoreC.S,
+        C: scoreC.C,
+        Q: scoreC.Q,
+        L: scoreC.L,
+        total: calculateCtsql(scoreC.T, scoreC.S, scoreC.C, scoreC.Q, scoreC.L),
       },
       veto: {
         rejection_veto: true,

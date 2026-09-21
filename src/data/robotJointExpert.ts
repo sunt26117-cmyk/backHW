@@ -6,6 +6,22 @@ function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): 
 }
 
 export function generateRobotJointAnalysis(context: ProjectContext, issue: IssueInput): CopilotAnalysisResult {
+  // 动态评分：技术/进度分随当前背隙超规格程度与剩余工期变化，成本/质量/可靠性保留方案画像。
+  const mv = issue.measuredValues || {};
+  const num = (k: string) => { const v = Number(mv[k]); return Number.isFinite(v) ? v : undefined; };
+  const backlash = num('backlashArcmin');
+  const required = num('requiredPositionAccuracyArcmin');
+  const daysRemaining = context.daysRemaining;
+  let riskSeverity = 50;
+  if (backlash !== undefined && required !== undefined && required > 0) {
+    riskSeverity = Math.max(20, Math.min(95, 55 + (backlash / required - 1) * 30));
+  }
+  const daysFactor = typeof daysRemaining === 'number' && daysRemaining <= 7 ? 1 : 0;
+  const clamp = (v: number) => Math.max(15, Math.min(98, Math.round(v)));
+  const scoreA = { T: clamp(90 + (riskSeverity - 50) * 0.25), S: clamp(58 - daysFactor * 18), C: 50, Q: 93, L: 90 };
+  const scoreB = { T: clamp(86 + (riskSeverity - 50) * 0.2), S: clamp(94 + daysFactor * 2), C: 86, Q: 90, L: 92 };
+  const scoreC = { T: 45, S: 90, C: 92, Q: 42, L: 35 };
+
   const candidateActions: CandidateAction[] = [
     {
       id: 'Option A',
@@ -15,12 +31,8 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
       description: '1. 机械装配重做：重新装配关节减速器，通过高精磨削垫片将谐波减速器柔轮轴向预紧，将初始机械背隙压低至 1.8 arcmin 以内；2. 驱动控制板重新 Layout：彻底分离 STO Channel 1 与 Channel 2 供电与走线，使用两颗独立 IEC 61800-5-2 认证光耦及独立隔离电源，电气爬电间距 ≥ 6.3mm，杜绝共因失效 (CCF)；3. 热设计：制动泄放电阻从驱动腔体移出，通过导热硅脂紧贴关节铝合金壳体散热。',
       expectedBenefit: '机械背隙从 5.2 arcmin 根治至 1.8 arcmin；STO 具备完全硬件独立性，100% 满足 ISO 13849-1 Cat 3 PLd 认证；泄放电阻温升下降 35℃，支持持续往复作业。',
       scores: {
-        T: 94,
-        S: 58,
-        C: 50,
-        Q: 93,
-        L: 90,
-        total: calculateCtsql(94, 58, 50, 93, 90),
+        T: scoreA.T, S: scoreA.S, C: scoreA.C, Q: scoreA.Q, L: scoreA.L,
+        total: calculateCtsql(scoreA.T, scoreA.S, scoreA.C, scoreA.Q, scoreA.L),
       },
       veto: { rejection_veto: false },
       referenced_standards: [
@@ -54,12 +66,8 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
       description: '1. 运动学补偿：使用多齿分度台与激光干涉仪测出减速器正反向回程滞环曲线，驱动底层固件注入双向 Backlash 动态查表补偿与速度前馈，将末端重复定位精度直接收敛至 2.3 arcmin；2. 安全合规过渡：关节驱动器外部过渡加装通过 TÜV 认证的双通道干簧式安全继电器盒，将控制柜 STO 信号分两路硬件硬切断驱动器上下桥门极电源，满足现场机构审查；3. 能量管理：优化加减速 S 曲线与加加速度 (Jerk)，将单次减速回馈峰值功率压降 25%，并增加 300ms 间歇节拍，泄放电阻温升下降至 82℃。',
       expectedBenefit: '0 天 PCB 改版工期，3 天内将定位精度收敛至 2.3 arcmin (规格 ≤ 3.0 arcmin)；STO 现场审查通过独立安全盒判定合格；泄放电阻温升受控，稳固保住 20 天 DVT 节点。',
       scores: {
-        T: 88,
-        S: 94,
-        C: 86,
-        Q: 90,
-        L: 92,
-        total: calculateCtsql(88, 94, 86, 90, 92),
+        T: scoreB.T, S: scoreB.S, C: scoreB.C, Q: scoreB.Q, L: scoreB.L,
+        total: calculateCtsql(scoreB.T, scoreB.S, scoreB.C, scoreB.Q, scoreB.L),
       },
       veto: { rejection_veto: false },
       referenced_standards: [
@@ -92,12 +100,8 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
       description: '不改动减速器机械间隙，不加装任何外部或内部独立 STO 安全切断回路；仅在上位机配置中把机器人末端最大线速度和角加速度腰斩 50% 降低发热和惯性超冲，并在驱动固件中强行调高温度报警阈值 20℃ 以掩盖停机。',
       expectedBenefit: '零硬件成本，半天完成配置修改，勉强避免过热停机。',
       scores: {
-        T: 45,
-        S: 90,
-        C: 92,
-        Q: 42,
-        L: 35,
-        total: calculateCtsql(45, 90, 92, 42, 35),
+        T: scoreC.T, S: scoreC.S, C: scoreC.C, Q: scoreC.Q, L: scoreC.L,
+        total: calculateCtsql(scoreC.T, scoreC.S, scoreC.C, scoreC.Q, scoreC.L),
       },
       veto: {
         rejection_veto: true,
