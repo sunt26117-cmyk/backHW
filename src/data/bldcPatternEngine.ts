@@ -39,6 +39,7 @@ import {
   EvidenceType,
   ConfidenceLevel,
 } from '../types';
+import { linearInterp } from '../utils/deviceLibrary';
 
 export interface BldcEvaluationInput {
   vbusNominal: number;      // V
@@ -123,6 +124,11 @@ export interface BldcEvaluationInput {
   gateTurnOffDelayNsOverride?: number;
   currentFallDelayNsOverride?: number;
   soaShortCircuitTimeUsOverride?: number;
+
+  // 器件曲线（可选）：来自器件库，按当前工况插值，替代写死系数。
+  rdsOnCurve?: Array<{ x: number; y: number }>;  // x=Tj(℃), y=Rds(on)(mΩ)
+  crssCurve?: Array<{ x: number; y: number }>;   // x=Vds(V), y=Crss(pF)
+  vthCurve?: Array<{ x: number; y: number }>;    // x=Tj(℃), y=Vth(V)
 }
 
 function pushAssumptionNote(
@@ -294,22 +300,30 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   // ----------------------------------------------------
   // P003: 高dv/dt→米勒误导通 (Section 4)
   // ----------------------------------------------------
-  const imiller = (input.cgdPf * 1e-12) * (input.dvDtVns * 1e9); // A
+  // 若器件库提供了 Crss@Vds / Vth@Tj 曲线，按当前工况插值替代写死标量
+  const cgdPfEff = input.crssCurve && input.crssCurve.length >= 2
+    ? linearInterp(input.crssCurve, vbusNominalSafe).value
+    : input.cgdPf;
+  const vthMinVEff = input.vthCurve && input.vthCurve.length >= 2
+    ? linearInterp(input.vthCurve, 25).value
+    : input.vthMinV;
+
+  const imiller = (cgdPfEff * 1e-12) * (input.dvDtVns * 1e9); // A
   const vgateInducedResistiveBound = imiller * input.rgOffOhm; // V，阻性上界
   let vgateInducedCapacitiveBound: number | undefined;
   if (input.cgsPf !== undefined && input.cgsPf > 0) {
-    vgateInducedCapacitiveBound = (input.cgdPf / (input.cgdPf + input.cgsPf)) * vbusNominalSafe;
+    vgateInducedCapacitiveBound = (cgdPfEff / (cgdPfEff + input.cgsPf)) * vbusNominalSafe;
   }
   // [FIX] 真实感应电压是两个界的较小值：开关沿很短时容性分压界更紧，阻性上界会显著高估。
   const vgateInduced = vgateInducedCapacitiveBound !== undefined
     ? Math.min(vgateInducedResistiveBound, vgateInducedCapacitiveBound)
     : vgateInducedResistiveBound;
-  const millerMargin = input.vthMinV - vgateInduced;
-  const p003ShootThroughRisk = vgateInduced >= input.vthMinV;
+  const millerMargin = vthMinVEff - vgateInduced;
+  const p003ShootThroughRisk = vgateInduced >= vthMinVEff;
 
   const p003CalculatedValues: Record<string, string | number> = {
     '开关节点电压变化率 dv/dt (V/ns)': input.dvDtVns,
-    'MOSFET栅漏米勒电容 Cgd (pF，注意应为 Crss 且随 Vds 变化，需标注取值电压点)': input.cgdPf,
+    'MOSFET栅漏米勒电容 Cgd (pF，注意应为 Crss 且随 Vds 变化，需标注取值电压点)': cgdPfEff,
     '米勒感应耦合电流 I_miller (A)': Number(imiller.toFixed(3)),
     '门极关断回路总阻抗 Rg_off (Ω，需含外部电阻+芯片内阻+驱动下拉内阻)': input.rgOffOhm,
     '阻性上界 Vgs_resistive (V)': Number(vgateInducedResistiveBound.toFixed(2)),
@@ -320,7 +334,7 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   } else {
     p003CalculatedValues['⚠ 数据缺口'] = '未提供 Cgs，暂只能给出阻性上界，开关沿较短时可能显著高估实际感应电压';
   }
-  p003CalculatedValues['门极最小开通阈值 Vth_min (V，@25℃)'] = input.vthMinV;
+  p003CalculatedValues['门极最小开通阈值 Vth_min (V，@25℃)'] = vthMinVEff;
   p003CalculatedValues['门极安全裕量 Margin (V)'] = Number(millerMargin.toFixed(2));
 
   patterns.push({
@@ -480,7 +494,10 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   const iDeviceRms = iPeak * Math.sqrt(Math.max(0, 1 / 8 + (modIdx * pf) / (3 * Math.PI)));
   // 温度归一化 Rds(on)：迭代过程中按当前 Tj 估算而非固定按125℃
   function rdsOnAtTemp(tjC: number): number {
-    // 65%@125℃ / 100%@150℃ 附近的线性近似，仅在缺乏datasheet曲线时使用
+    // 若器件库提供了 Rds(on)@Tj 曲线，按当前结温插值；否则用写死的归一化近似（仅缺曲线时用）
+    if (input.rdsOnCurve && input.rdsOnCurve.length >= 2) {
+      return linearInterp(input.rdsOnCurve, tjC).value;
+    }
     const normAt125 = 1.65;
     const normAt150 = 1.85;
     if (tjC <= 25) return rdsOn25;

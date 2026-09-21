@@ -7,9 +7,10 @@ interface DeviceLibraryModalProps {
   isOpen: boolean;
   onClose: () => void;
   showToast?: (text: string, type: 'success' | 'info' | 'error') => void;
+  onSelectDevice?: (deviceId: string) => void;
 }
 
-export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, onClose, showToast }) => {
+export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, onClose, showToast, onSelectDevice }) => {
   const [devices, setDevices] = useState<DeviceEntry[]>(() => loadDevices());
   const [importText, setImportText] = useState('');
   const [importResult, setImportResult] = useState<{ ok?: string; warnings: string[]; error?: string } | null>(null);
@@ -139,9 +140,12 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
                       <div className='text-sm font-medium text-slate-100'>{d.partNumber}</div>
                       <div className='text-[11px] text-slate-400'>{d.deviceType} · {d.manufacturer} · {d.aecqGrade}</div>
                     </div>
-                    <button onClick={() => setDevices(deleteDevice(d.id))} className='rounded-lg p-1.5 text-slate-500 hover:bg-red-950/40 hover:text-red-300 cursor-pointer'>
-                      <Trash2 className='h-4 w-4' />
-                    </button>
+                    <div className='flex items-center gap-1.5 shrink-0'>
+                      <button onClick={() => { onSelectDevice?.(d.id); showToast?.('已设为当前器件：' + d.partNumber + '（物理引擎将按工况插值读取其参数）', 'success'); }} className='rounded-lg border border-blue-500/40 bg-blue-600/20 px-2 py-1 text-[11px] font-medium text-blue-300 hover:bg-blue-600/30 cursor-pointer'>设为当前</button>
+                      <button onClick={() => setDevices(deleteDevice(d.id))} className='rounded-lg p-1.5 text-slate-500 hover:bg-red-950/40 hover:text-red-300 cursor-pointer'>
+                        <Trash2 className='h-4 w-4' />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

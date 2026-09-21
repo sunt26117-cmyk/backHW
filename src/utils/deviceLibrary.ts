@@ -126,3 +126,43 @@ export function validateDeviceCompleteness(device: DeviceEntry): string[] {
   return warnings;
 }
 
+export interface DeviceCurvePoint {
+  x: number;
+  y: number;
+}
+
+/** 线性插值：区间内线性，超界截断到端点并标记 extrapolated。 */
+export function linearInterp(curve: DeviceCurvePoint[], x: number): { value: number; extrapolated: boolean } {
+  const pts = curve
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+    .sort((a, b) => a.x - b.x);
+  if (pts.length === 0) return { value: NaN, extrapolated: true };
+  if (x <= pts[0].x) return { value: pts[0].y, extrapolated: x < pts[0].x };
+  if (x >= pts[pts.length - 1].x) return { value: pts[pts.length - 1].y, extrapolated: x > pts[pts.length - 1].x };
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    if (x >= a.x && x <= b.x) {
+      const t = (x - a.x) / (b.x - a.x);
+      return { value: a.y + t * (b.y - a.y), extrapolated: false };
+    }
+  }
+  return { value: NaN, extrapolated: true };
+}
+
+/** 从器件原始 JSON 里提取某条曲线（rdsOn@Tj / crss@Vds / vth@Tj）。 */
+export function getDeviceCurve(device: DeviceEntry, key: 'rdsOn' | 'crss' | 'vth'): DeviceCurvePoint[] {
+  const r = device.raw as any;
+  const obj = key === 'rdsOn'
+    ? r && r.staticParams && r.staticParams.rdsOn
+    : key === 'crss'
+      ? r && r.capacitanceParams && r.capacitanceParams.crss
+      : r && r.staticParams && r.staticParams.vth;
+  if (!obj || !Array.isArray(obj.points)) return [];
+  return obj.points
+    .filter((p: any) => p && p.x !== null && p.x !== undefined && p.y !== null && p.y !== undefined && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
+    .map((p: any) => ({ x: Number(p.x), y: Number(p.y) }));
+}
+
+
+

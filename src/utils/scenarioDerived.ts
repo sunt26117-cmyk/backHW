@@ -4,6 +4,7 @@ import { FmedaRow, FtaNode, SafetyTraceabilityNode, PhaseCheckItem, WorstCaseCom
 import { SAMPLE_FMEDA_ROWS, SAMPLE_FTA_TREE, SAMPLE_SAFETY_TRACEABILITY_CHAIN } from '../data/safetyReliabilityEngine';
 import { generateWorstCaseCandidates, getPhaseReviewChecklist } from '../data/designReviewEngine';
 import { resolveEngineeringDomain, getDomainPhysics } from './scenarioDomainEngine';
+import { loadDevices, getDeviceCurve } from './deviceLibrary';
 
 const allText = (issue: IssueInput) => [
   ...(issue.issueCategories || []),
@@ -150,6 +151,20 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   const jInertiaEstimate = Number.isFinite(rpm) ? 0.00015 * (rpm / 3800) ** 0.15 : NaN;
   const jInertia = preferMeasured(issue, 'rotorInertiaKgm2', jInertiaEstimate);
 
+  // 从器件库读取当前选中器件，提取曲线用于按工况插值（无选中器件时退回写死默认值）
+  const selectedDeviceId = (context as any).selectedDeviceId;
+  let rdsOnCurve: Array<{ x: number; y: number }> | undefined;
+  let crssCurve: Array<{ x: number; y: number }> | undefined;
+  let vthCurve: Array<{ x: number; y: number }> | undefined;
+  if (selectedDeviceId) {
+    const dev = loadDevices().find((d) => d.id === selectedDeviceId);
+    if (dev) {
+      rdsOnCurve = getDeviceCurve(dev, 'rdsOn');
+      crssCurve = getDeviceCurve(dev, 'crss');
+      vthCurve = getDeviceCurve(dev, 'vth');
+    }
+  }
+
   return {
     vbusNominal,
     vbusMeasuredPeak: Number.isFinite(vbusMeasuredPeak) ? vbusMeasuredPeak : undefined,
@@ -175,6 +190,9 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     gateTurnOffDelayNsOverride: optMeas(issue, 'gateTurnOffDelayNs'),
     currentFallDelayNsOverride: optMeas(issue, 'currentFallDelayNs'),
     soaShortCircuitTimeUsOverride: optMeas(issue, 'soaShortCircuitTimeUs'),
+    rdsOnCurve,
+    crssCurve,
+    vthCurve,
   };
 }
 

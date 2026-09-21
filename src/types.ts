@@ -37,6 +37,7 @@ export interface ProjectContext {
   hwLeadStyle?: HwLeadStyle; // 直属领导处理风格与态度倾向
   customerSpecialAgreements?: CustomerSpecialAgreement[]; // 客户特殊技术协议红线
   recurrenceCount?: number;
+  selectedDeviceId?: string; // 当前分析绑定的器件库料号（用于物理引擎按工况插值）
 }
 
 export type IssueCategory =

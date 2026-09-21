@@ -795,6 +795,7 @@ export default function App() {
         isOpen={isDeviceLibraryOpen}
         onClose={() => setIsDeviceLibraryOpen(false)}
         showToast={showToast}
+        onSelectDevice={(id) => setContext((prev) => ({ ...prev, selectedDeviceId: id }))}
       />
 
       {/* Oscilloscope Import Modal */}
