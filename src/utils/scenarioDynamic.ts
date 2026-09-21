@@ -315,6 +315,68 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
     dynamic.coreConclusion = { ...dynamic.coreConclusion, problemSummary: replaceLegacy(dynamic.coreConclusion.problemSummary), reasonSummary: replaceLegacy(dynamic.coreConclusion.reasonSummary) };
   }
   void overDb; void errPct;
+  // BLDC 也重建通用支柱(classifiedInfo/multiRiskBreakdown/redTeamChallenge/edrRecord/whyNotComparison/next24HourPlan)，
+  // 避免 decisionPillars.getBldcPillars 里 3800rpm/48MHz/37.8V 等参考案例数字泄漏进结果。
+  if (domain === 'BLDC') {
+    const riskScore = dynamic.riskRatings?.overallRiskScore ?? 60;
+    const presentInputs = Object.entries(issue.measuredValues || {})
+      .filter(([, v]) => v !== '' && v !== null && v !== undefined)
+      .map(([k, v]) => k + '=' + v);
+    const missingRequired = profile.measurements.filter((f) => f.required && !(issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== ''));
+    dynamic.classifiedInfo = [
+      { id: 'FACT-01', tag: 'MEASURED', title: '当前工程事实', content: issue.actualMeasurement || issue.failurePhenomenon || '暂无实测结果', sourceOrBasis: issue.measuredValueSource === 'BENCHMARK' ? 'BENCHMARK · 示例输入' : issue.measuredValueSource === 'IMPORTED' ? 'IMPORTED · 原始数据导入' : 'USER_MEASURED · 工程师回填', confidenceLevel: issue.measuredValueSource === 'BENCHMARK' ? 40 : (issue.actualMeasurement || issue.failurePhenomenon) ? 92 : 20, verificationMethod: '保留原始报告/波形/CSV作为证据' },
+      { id: 'FACT-02', tag: 'SPEC', title: '当前放行基线', content: issue.requirement || '规格尚未提供', sourceOrBasis: '客户/标准/设计规格，由工程师确认适用性', confidenceLevel: issue.requirement ? 90 : 20 },
+      { id: 'FACT-03', tag: 'CALCULATED', title: '确定性领域计算', content: 'BLDC 物理链路：' + profile.chain + '；输出：' + profile.outputs.slice(0, 4).join('、'), sourceOrBasis: 'ECU Copilot 领域规则 + 当前输入', confidenceLevel: 85, verificationMethod: '用实验结果回灌并做模型-实测交叉验证' },
+    ];
+    const lvl = (score: number) => (score >= 82 ? 'High' : score >= 68 ? 'Medium-High' : score >= 50 ? 'Medium' : 'Low');
+    const dim = (name: string, key: 'techMargin' | 'reliabilityStress' | 'scheduleDelay' | 'redesignCost' | 'verificationGap', score: number, evidence: string) => ({ name, dimensionKey: key, score, level: lvl(score) as any, evidence });
+    dynamic.multiRiskBreakdown = {
+      techMargin: dim('技术裕量', 'techMargin', riskScore, 'BLDC：' + profile.question),
+      reliabilityStress: dim('可靠性应力', 'reliabilityStress', Math.min(98, riskScore), profile.chain),
+      scheduleDelay: dim('节点风险', 'scheduleDelay', Math.min(98, 50 + Math.max(0, 14 - context.daysRemaining) * 2), '剩余 ' + context.daysRemaining + ' 天 / ' + context.nextMilestone),
+      redesignCost: dim('改动成本', 'redesignCost', Math.min(98, 45), context.costConstraint || '成本约束待输入'),
+      verificationGap: dim('验证缺口', 'verificationGap', Math.min(98, 25 + missingRequired.length * 12), '必填数据缺口：' + (missingRequired.map((f) => f.label).join('、') || '无')),
+    };
+    dynamic.redTeamChallenge = {
+      auditVerdict: '当前 BLDC 结论只有在“事实—物理机理—验证”三者一致时才能进入正式放行。',
+      riskGaps: ['是否把 BLDC 之外的历史案例数字误当成当前项目事实？', '是否存在未量测但被方案叙述默认通过的关键边界？', '模型是否存在相关性、温漂、装配状态或测试夹具影响的未验证假设？'],
+      missingEvidenceList: missingRequired.map((f) => f.label + (f.unit ? ' (' + f.unit + ')' : '')),
+      confidenceScorePct: issue.measuredValueSource === 'BENCHMARK' ? 55 : profile.measurements.filter((f) => f.required).length === 0 ? 75 : Math.round((profile.measurements.filter((f) => f.required && issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '').length / Math.max(1, profile.measurements.filter((f) => f.required).length)) * 100),
+    };
+    const ranked = [...(dynamic.candidateActions || [])].sort((a: any, b: any) => (b.scores?.total || 0) - (a.scores?.total || 0));
+    const best = ranked[0];
+    if (best) {
+      dynamic.whyNotComparison = dynamic.candidateActions.map((a: any, idx: number) => ({
+        optionId: a.id, optionName: a.name, categoryLabel: a.categoryLabel, isRecommended: a.id === best.id,
+        verdictTitle: a.id === best.id ? '为什么选它' : '为什么不选它',
+        coreTradeoffReason: a.id === best.id ? '在当前 BLDC 工况下，综合 T/S/C/Q/L 后总分 ' + (a.scores?.total ?? '') + '。' : '相对首选方案的主要差异：' + (a.residualRiskDetail || a.residualRisk),
+        keyRiskOrPenalty: [a.residualRiskDetail, a.sideEffects].filter(Boolean),
+        reActivationCondition: a.id === best.id ? '出现新实测证据、规格变化或验证失败时重新评估。' : ((a.planB || '') + '；验证首选方案失败时重新激活。'),
+      }) as any);
+      const timelineBase = cfg.verify.length ? cfg.verify : ['补齐当前工况关键实测证据', '做最小区分试验', '回填结果并重算', '执行门禁复核'];
+      dynamic.next24HourPlan = {
+        timeline: timelineBase.slice(0, 4).map((task: string, i: number) => ({
+          timeWindow: ['0~2h', '2~6h', '6~12h', '12~24h'][i], phase: 'Current Scenario Closed Loop',
+          task: task + '；配套方案：' + (dynamic.candidateActions[(i) % dynamic.candidateActions.length]?.name || ''),
+          owner: '硬件负责人 / 验证测试工程师', deliverable: 'MEASURED / CALCULATED 证据 + Go/No-Go结论',
+        })),
+        passFailCriteria: buildScenarioPassFailCriteria(issue, context),
+      };
+      dynamic.edrRecord = {
+        edrId: 'EDR-BLDC-' + Date.now().toString(36).toUpperCase(),
+        projectCode: context.projectName, decisionDate: new Date().toISOString().slice(0, 10), decisionMaker: 'HW Lead / 决策评审会',
+        coreProblem: 'BLDC：' + (issue.failurePhenomenon || issue.engineeringConcern || '当前工程问题'),
+        measuredSnapshot: issue.actualMeasurement || '暂无实测回填', specThreshold: issue.requirement || '规格/客户门限待输入',
+        engineeringAssumptions: ['未测量的字段保持 UNKNOWN，不自动生成人为实测值', '当前风险评分 ' + riskScore + '/100（由当前工况输入推导）'],
+        chosenOptionId: best.id, chosenOptionTitle: best.name,
+        rejectedOptionsSummary: ranked.filter((a: any) => a.id !== best.id).map((a: any) => a.name + '：残余风险 ' + a.residualRisk).join('；'),
+        defenseBasis: '基于当前 BLDC 工况输入与确定性规则排序，首选方案总分 ' + (best.scores?.total ?? ''),
+        signOffSignatures: [{ role: '硬件负责人', name: 'HW Lead', status: 'Pending', signDate: '' }, { role: '质量经理', name: 'QA Manager', status: 'Pending', signDate: '' }],
+        localHashDigest: 'PENDING', decisionStatus: 'CONDITIONALLY_APPROVED', createdAt: new Date().toISOString(),
+      };
+      if (dynamic.engineeringDocs) dynamic.engineeringDocs.edrRecord = dynamic.edrRecord;
+    }
+  }
   // Replace case-specific candidate tables with scenario-native actions for non-BLDC domains.
   // This prevents the legacy EMC/WCCA case library from leaking 150MHz/BLDC numbers into unrelated scenarios.
   if (domain !== 'BLDC') {

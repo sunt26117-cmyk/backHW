@@ -94,7 +94,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       },
       veto: {
         rejection_veto: true,
-        veto_reason: 'PCB 重新投板与打样周期需 21 天，直接击穿 15 天 DV 节点；BOM 增加 $1.45 严重违反 +$0.35 预算红线，且大尺寸电容无法装入结构外壳。',
+        veto_reason: 'PCB 重新投板与打样周期需约三周，直接击穿 当前 DV 节点；BOM 增加 $1.45 严重违反 +$0.35 预算红线，且大尺寸电容无法装入结构外壳。',
       },
       customerVetoViolations: [
         '客户技术协议条款 3.2：DV 样件改动周期不得突破节点日 (击穿超期 6 天)',
@@ -110,7 +110,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       residualRiskDetail: '门极电阻过小导致开启 dv/dt 飙升，将严重恶化 CISPR 25 辐射发射，引发连锁失败。',
       sideEffects: '单板成本超支、空间干涉、EMC 恶化。',
       verificationCost: '约为 PCB 打样 + 贴片 + 模具修改评估（按当前项目资源核算）',
-      timeCost: '约 21 天（需按当前项目 DV 门禁重新核算是否违约）',
+      timeCost: '约 约三周（需按当前项目 DV 门禁重新核算是否违约）',
       failureConsequence: '项目 DV 准入延期 1 个月，客户启动商务考核。',
       preconditions: '结构空间允许增大外壳尺寸，PM 批准超支与延期。',
       verificationMethod: '新样板打样后进暗室与台架重测。',
@@ -323,7 +323,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       whyReason: [
         `物理机理根治：用电机机电能量守恒原理在下桥循环消纳动能；当前 Bus Pumping 基线=${dynamicBus}，整改后绝对值必须通过实测/重新计算确认。`,
         `多维兼顾：当前 Miller 基线=${dynamicMiller}；高温裕量与整改后数值须由验证数据确认，RC Snubber 对 目标谐振频点 振铃的效果也必须以实测频谱确认。`,
-        '时间与成本极佳：BOM 仅增加 $0.12，软件 2 天刷写，硬件在原有样件焊盘可快速验证，稳固保住 15 天 DV 准入节点。',
+        '时间与成本极佳：BOM 仅增加 $0.12，软件 2 天刷写，硬件在原有样件焊盘可快速验证，稳固保住 当前 DV 准入节点。',
       ],
       immediateSteps: [
         { step: 1, title: '底层固件三相下桥制动刷写', action: '电机控制软件工程师配置紧急制动函数：刹车中断触发时关断三路上桥 PWM，强行拉高三路下桥栅极信号 500ms 进行动态制动。', owner: 'Embedded SW Lead', deadline: 'Day 2 17:00' },
@@ -350,7 +350,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       { role: 'HW', raciType: 'R', owner: 'HW Motor Lead', action: '完成 RC Snubber 选型、门极米勒钳位电路验证及示波器波形抓取', output: 'BLDC 驱动电气尖峰整改与实测报告', dueDate: 'Day 4', decisionGate: '硬件门禁' },
       { role: 'SW', raciType: 'R', owner: 'Motor Control SW', action: '修改急停制动策略为三相全下桥动态能耗制动，并实施防夹超时自锁保护', output: '制动策略优化固件 V1.2', dueDate: 'Day 2', decisionGate: '软件门禁' },
       { role: 'System', raciType: 'C', owner: 'Cabin System Lead', action: '确认滑移屏与座椅执行器紧急制动最大响应时间 (<250ms) 与防夹制动力矩', output: '机械阻尼与制动响应边界规范', dueDate: 'Day 2', decisionGate: '系统门禁' },
-      { role: 'PM', raciType: 'A', owner: 'Project Manager', action: '管控 15 天 DV 节点，协调座舱暗室与台架测试排期', output: 'DV 节点推进跟踪表', dueDate: 'Day 1', decisionGate: '项目里程碑' },
+      { role: 'PM', raciType: 'A', owner: 'Project Manager', action: '管控 当前 DV 节点，协调座舱暗室与台架测试排期', output: 'DV 节点推进跟踪表', dueDate: 'Day 1', decisionGate: '项目里程碑' },
       { role: 'Quality', raciType: 'A', owner: 'QA Manager', action: '审核 MOS 结温降额裕量、急停寿命试验数据与 DFMEA 闭环', output: '质量审核报告', dueDate: 'Day 8', decisionGate: '质量门禁' },
       { role: 'Safety', raciType: 'C', owner: 'Safety Manager', action: '评估三相下桥制动策略在 MCU 异常失步时的失效安全 (Fail-safe) 机制', output: 'ASIL B 安全分析声明', dueDate: 'Day 5', decisionGate: '功能安全' },
       { role: 'Sourcing', raciType: 'I', owner: 'Buyer', action: '锁定 1360pF NPO 与 4.7Ω 0805 车规阻容物料交期', output: 'BOM 成本与物料清单', dueDate: 'Day 3', decisionGate: '采购门禁' },
@@ -372,12 +372,12 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       pmDecisionEmail: {
         subject: `[Emergency Action Proposal] ${context.projectName} BLDC 急停母线泵升与米勒直通闭环治理方案`,
         technicalFact: `结构化输入与本地确定性计算：rpm=${rpm ?? 'UNKNOWN'}；Bus Pumping=${dynamicBus}；Vds额定耐压=${vds ?? 'UNKNOWN'}V；dv/dt=${dvdt ?? 'UNKNOWN'}V/ns；Miller=${dynamicMiller}。以上数值均不得由历史模板数字替代。`,
-        currentSituation: '距离正式 DV 准入仅剩 15 天，传统重新投板改走大尺寸电解电容与大功率 TVS 周期需 21 天且单板超支 $1.45，将直接导致节点违约。',
+        currentSituation: `距离正式 DV 准入仅剩 ${daysRemaining} 天，传统重新投板改走大尺寸电解电容与大功率 TVS 周期需约三周且单板超支，将直接导致节点违约。`,
         risk: '若不做处理硬推测试，高温急停时必发生母线电容爆浆或同桥臂直通炸管严重事故。',
         options: '方案 A：三相下桥能耗制动 + 有源米勒钳位 + RC Snubber (推荐)；方案 B：大改硬件并联 3 颗 TVS 及 1500uF 电容；方案 C：自由滑行停机 (ASIL B违约)。',
         recommendedOption: `强烈建议采纳方案 A：软硬件协同就地消化能量。当前确定性基线为 Bus Pumping=${dynamicBus}、Miller=${dynamicMiller}；整改后电压/门极峰值、BOM 与工期必须经过项目验证后确认。`,
         costImpact: '单板 BOM 增加约 $0.12 (满足项目 +$0.35 预算控制红线)。',
-        scheduleImpact: '对 15 天 DV 节点 0 延期影响，4 天内完成工程自检闭环。',
+        scheduleImpact: '对 当前 DV 节点 0 延期影响，4 天内完成工程自检闭环。',
         requiredDecision: '请 PM 及硬件总监签批批准方案 A 实施路径。',
         decisionOwner: 'Project Manager & Chief Engineer',
         deadline: '今日 18:00 前签批',
@@ -423,7 +423,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
         fiveWhyRootCause: [
           `1. Why: rpm=${rpm ?? 'UNKNOWN'} 急停制动时母线泵升为何达到 ${dynamicBus}？ -> 转子机械动能经逆变器回灌母线的机理需要结合 J、Cbus 与效率确认。`,
           '2. Why: 动能为何向母线倒灌？ -> 传统自由滑行控制在上桥关断后下桥高阻，回馈电流经体二极管充入母线。',
-          '3. Why: 为何不通过改版增加 3 颗 1500W TVS？ -> 改版制板打样需 21 天，直接突破 15 天 DV 准入节点，且 BOM 超支 $1.45。',
+          '3. Why: 为何不通过改版增加 3 颗 1500W TVS？ -> 改版制板打样需 约三周，直接突破 当前 DV 准入节点，且 BOM 超支 $1.45。',
           '4. Why: 下桥能耗制动为何能闭环？ -> 闭合下桥 MOSFET 构筑相绕组闭环环流回路，动能完全转化为绕组铜耗就地吸收。',
           '5. Why: 能否保证安全与可靠性？ -> 需要补充实际制动电流、SOA 与瞬态热证据；本轮不把历史示例电流/温升数字当作当前项目事实。',
         ],
@@ -507,7 +507,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
         discussionSummary: `动力学与物理模型表明急停动能回灌是母线泵升的重要机理；当前本地计算基线为 Bus Pumping=${dynamicBus}、Miller=${dynamicMiller}。RC Snubber 参数属于候选设计值，最终需通过波形/频谱验证。`,
         agreements: [
           '全员一致否决硬改版堆 TVS 方案 (耗时太长且成本超标)。',
-          '一致同意采纳方案 A：软硬件协同三重防护，作为保住 15 天 DV 节点的唯一破局路径。',
+          '一致同意采纳方案 A：软硬件协同三重防护，作为保住 当前 DV 节点的唯一破局路径。',
           'C 样阶段全面将 RC Snubber 与低寄生电感桥臂布线纳入 PCB 设计规则。',
         ],
         actionItems: [
