@@ -22,6 +22,7 @@ import {
   Globe2,
   Trash2,
   Database,
+  Bot,
 } from 'lucide-react';
 
 import { AppTheme, ModelApiConfig, PresetScenario } from '../types';
@@ -47,6 +48,7 @@ interface NavbarProps {
   onDownloadOfflineHtml?: () => void;
   onOpenSourceDownload?: () => void;
   onOpenDeviceLibrary?: () => void;
+  onOpenAiOffline?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -70,6 +72,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onDownloadOfflineHtml,
   onOpenSourceDownload,
   onOpenDeviceLibrary,
+  onOpenAiOffline,
 }) => {
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [showBackupMenu, setShowBackupMenu] = useState(false);
@@ -537,6 +540,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <Download className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="hidden sm:inline">源码与优化指南</span>
                 <span className="sm:hidden">源码包</span>
+              </button>
+            )}
+
+            {/* AI Offline Collaboration Button */}
+            {onOpenAiOffline && (
+              <button
+                id="header-open-ai-offline-btn"
+                onClick={onOpenAiOffline}
+                className="flex items-center space-x-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 active:bg-cyan-600/40 text-cyan-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-cyan-500/40 transition shadow-sm cursor-pointer shrink-0"
+                title="离线 AI 协作：导出 Prompt 给免费 AI，再导入结果"
+              >
+                <Bot className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden sm:inline">AI 离线协作</span>
               </button>
             )}
 

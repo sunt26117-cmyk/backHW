@@ -789,6 +789,108 @@ app.post('/api/copilot/assess-input', (req, res) => {
   }
 });
 
+// 离线人工 LLM 循环：把完整 Prompt 导出给免费 AI，再把 AI 的 JSON 结果粘贴回来自动审计渲染。
+function buildAnalysisPrompt(context: any, issue: any) {
+  const integrityAssessment = assessInputIntegrity(context, issue);
+  const integrityPromptDirectives = generatePromptIntegrityDirectives(integrityAssessment);
+  const baseline = runExpertAnalysis(context, issue);
+  if (baseline.provenance) baseline.provenance.inputIntegrity = integrityAssessment;
+  const precomputedFacts = runDeterministicPrecomputations(context, issue);
+  const similarGoldCases = findSimilarGoldCases(issue, 2);
+  const grounding = buildGroundingText(baseline, precomputedFacts, similarGoldCases);
+
+  const allExpectedFields = getDomainMeasurementFields(issue);
+  const isFilled = (v: unknown) => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
+  const missingFieldsList = allExpectedFields.filter((f) => !isFilled((issue?.measuredValues || {})[f.key]));
+  const missingFieldsText = missingFieldsList.length
+    ? missingFieldsList.map((f) => '- ' + f.key + '（' + f.label + (f.unit ? '，单位 ' + f.unit : '') + '，' + f.tag + (f.required ? '，必填缺失' : '') + '）').join('\n')
+    : '（本次涉及的工程域测量字段均已填写）';
+
+  const prompt = [
+    '【执行优先级（不可违背）】',
+    '1. 必须直接引用【本地确定性预核算事实】中的数值与裕量，严禁另造冲突数字。',
+    '2. 缺失参数一律视为 UNKNOWN，禁止默认值填充。',
+    '3. 输出必须是纯 JSON，无任何 Markdown 外壳。',
+    '4. 必须同时给出 containmentPhase（T+24h）与 permanentPhase。',
+    '5. 任何触及功能安全/降额击穿的方案必须显式标记 VETO。',
+    '',
+    '=============================================',
+    '【1. 输入工程背景】',
+    '- 项目名称: ' + (context?.projectName || '未提供'),
+    '- ECU 类型: ' + (context?.ecuType || '未提供') + ' (' + (context?.productType || '未提供') + ')',
+    '- 项目阶段: ' + (context?.projectPhase || 'DV') + ' | 样品状态: ' + (context?.sampleStatus || 'B样'),
+    '- 功能安全等级: ' + (context?.asilLevel || 'ASIL B'),
+    '- 交付倒计时: 距离【' + (context?.nextMilestone || '交付节点') + '】仅剩【' + (context?.daysRemaining ?? 14) + '天】',
+    '- 成本约束: ' + (context?.costConstraint || '未提供'),
+    '',
+    '【2. 输入实测问题与工程顾虑】',
+    '- 领域分类: ' + (issue?.issueCategories?.join(', ') || '硬件工程'),
+    '- 规范要求: ' + (issue?.requirement || '未定义'),
+    '- 实际测量结果: ' + (issue?.actualMeasurement || '未提供实测'),
+    '- 测试条件: ' + (issue?.testCondition || '未提供测试边界'),
+    '- 失效现象: ' + (issue?.failurePhenomenon || '未提供现象'),
+    '- 核心工程顾虑: ' + (issue?.engineeringConcern || '未提供顾虑'),
+    '- 关键实测数值: ' + JSON.stringify(issue?.measuredValues || {}, null, 2),
+    '',
+    '【3. 本地确定性工程事实层（NON-NEGOTIABLE FACTS）】',
+    grounding.baselineText,
+    '',
+    grounding.precomputedText,
+    '',
+    '★ 事实边界：以上事实来自本地确定性规则或物理计算；同一工程量的结论直接沿用。若认为输入/模型/计算存在冲突，应在 assumptions/unknowns 中说明，不生成第二套未标注来源的数字。',
+    '',
+    '【4. 输入数据完整度车规审计】',
+    integrityPromptDirectives,
+    '',
+    '【5. 本次未提供的工程参数（UNKNOWN 边界）】',
+    missingFieldsText,
+    '',
+    '【6. 金标准参考案例（只作分析严谨度参考，不得把案例数值当当前项目事实）】',
+    grounding.goldCaseText,
+    '',
+    '【7. 车规基准定锚】',
+    '- 确定性问题定性: ' + (baseline?.coreConclusion?.problemSummary || ''),
+    '- 综合风险评级基准: ' + (baseline?.riskRatings?.overallRisk || 'Medium-High') + ' (' + (baseline?.riskRatings?.overallRiskScore ?? 75) + '分)',
+  ].join('\n');
+
+  const userPrompt = prompt + '\n\n【输出JSON字段结构清单（必须严格按此结构输出完整 JSON，不得遗漏必填字段，不得新增字段）】\n' + COPILOT_RESULT_FIELD_OUTLINE;
+  return { systemPrompt: HARDWARE_CHIEF_SYSTEM_PROMPT, userPrompt, baseline, integrityAssessment, precomputedFacts };
+}
+
+// 导出完整 Prompt，供工程师粘贴到免费 AI（离线人工 LLM 循环）。
+app.post('/api/copilot/build-prompt', (req, res) => {
+  try {
+    const { context, issue } = req.body || {};
+    const built = buildAnalysisPrompt(context || {}, issue || {});
+    return res.json({ success: true, systemPrompt: built.systemPrompt, userPrompt: built.userPrompt, fullPrompt: built.systemPrompt + '\n\n---USER---\n\n' + built.userPrompt });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 导入免费 AI 返回的 JSON，走同一套解析+审计管线后自动渲染。
+app.post('/api/copilot/import-ai-result', (req, res) => {
+  try {
+    const { context, issue, aiContent } = req.body || {};
+    if (!aiContent || typeof aiContent !== 'string') {
+      return res.status(400).json({ success: false, error: '缺少 aiContent（AI 返回的 JSON 文本）' });
+    }
+    const built = buildAnalysisPrompt(context || {}, issue || {});
+    const parsed = healAndParseJson(aiContent);
+    const enriched = validateAndEnrichAiResult(parsed, built.baseline, 'offline-free-ai', context || {}, issue || {}, built.integrityAssessment);
+    const audited = auditAiResult(enriched, built.baseline, context || {}, issue || {}, built.integrityAssessment);
+    const finalData = audited.sanitizedResult;
+    if (finalData && finalData.provenance) {
+      finalData.provenance.inputIntegrity = built.integrityAssessment;
+      finalData.provenance.aiAudit = audited.auditResult;
+    }
+    return res.json({ success: true, data: finalData, result: finalData, source: 'offline-free-ai', aiAudit: audited.auditResult });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// AI Analysis Endpoint (主推理与决策推演接口)
 // AI Analysis Endpoint (主推理与决策推演接口)
 app.post('/api/copilot/analyze', async (req, res) => {
   const startTime = Date.now();

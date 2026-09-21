@@ -23,6 +23,7 @@ import { ModelSettingsModal } from './components/ModelSettingsModal';
 import { ScenarioManageModal } from './components/ScenarioManageModal';
 import { SourceDownloadModal } from './components/SourceDownloadModal';
 import { DeviceLibraryModal } from './components/DeviceLibraryModal';
+import { AiOfflineModal } from './components/AiOfflineModal';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { EngineeringWorkflowView } from './components/EngineeringWorkflowView';
 
@@ -132,7 +133,8 @@ export default function App() {
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
   const [isScenarioManageOpen, setIsScenarioManageOpen] = useState<boolean>(false);
   const [isSourceDownloadOpen, setIsSourceDownloadOpen] = useState<boolean>(false)
-  const [isDeviceLibraryOpen, setIsDeviceLibraryOpen] = useState<boolean>(false);
+  const [isDeviceLibraryOpen, setIsDeviceLibraryOpen] = useState<boolean>(false)
+  const [isAiOfflineOpen, setIsAiOfflineOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [isPwaInstalled, setIsPwaInstalled] = useState<boolean>(false);
@@ -599,6 +601,7 @@ export default function App() {
         }}
         onOpenSourceDownload={() => setIsSourceDownloadOpen(true)}
         onOpenDeviceLibrary={() => setIsDeviceLibraryOpen(true)}
+        onOpenAiOffline={() => setIsAiOfflineOpen(true)}
       />
 
       {/* Mobile PWA Install Banner */}
@@ -788,6 +791,21 @@ export default function App() {
       <DeviceLibraryModal
         isOpen={isDeviceLibraryOpen}
         onClose={() => setIsDeviceLibraryOpen(false)}
+        showToast={showToast}
+      />
+
+      {/* AI Offline Collaboration Modal */}
+      <AiOfflineModal
+        isOpen={isAiOfflineOpen}
+        onClose={() => setIsAiOfflineOpen(false)}
+        context={context}
+        issue={issue}
+        onApplyResult={(r) => {
+          setResult(r);
+          saveAnalysisResult(currentScenarioId, r);
+          setActiveTab('facts');
+          showToast('已导入免费 AI 结果并完成审计渲染', 'success');
+        }}
         showToast={showToast}
       />
     </div>
