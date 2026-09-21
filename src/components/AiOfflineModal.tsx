@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Copy, Download, Upload, Sparkles, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
+import { buildAnalysisPrompt, processImportedAiResult } from '../utils/aiProtocol';
 
 interface AiOfflineModalProps {
   isOpen: boolean;
@@ -20,22 +21,13 @@ export const AiOfflineModal: React.FC<AiOfflineModalProps> = ({ isOpen, onClose,
 
   if (!isOpen) return null;
 
-  const buildPrompt = async () => {
+  const buildPrompt = () => {
     setIsBuilding(true);
     try {
-      const res = await fetch('/api/copilot/build-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context, issue }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setFullPrompt(data.fullPrompt || data.userPrompt || '');
-      } else {
-        showToast?.('生成 Prompt 失败：' + (data.error || '未知错误'), 'error');
-      }
+      const built = buildAnalysisPrompt(context, issue);
+      setFullPrompt(built.systemPrompt + '\n\n---USER---\n\n' + built.userPrompt);
     } catch (err: any) {
-      showToast?.('生成 Prompt 失败：' + (err?.message || '网络错误'), 'error');
+      showToast?.('生成 Prompt 失败：' + (err?.message || '未知错误'), 'error');
     } finally {
       setIsBuilding(false);
     }
@@ -50,28 +42,22 @@ export const AiOfflineModal: React.FC<AiOfflineModalProps> = ({ isOpen, onClose,
     }
   };
 
-  const importResult = async () => {
+  const importResult = () => {
     if (!importText.trim()) { showToast?.('请先粘贴 AI 返回的 JSON', 'info'); return; }
     setIsImporting(true);
     setImportMsg(null);
     try {
-      const res = await fetch('/api/copilot/import-ai-result', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context, issue, aiContent: importText }),
-      });
-      const data = await res.json();
-      if (data.success && data.result) {
-        const audit = data.aiAudit;
-        const warnCount = audit?.flags?.length || 0;
+      const r = processImportedAiResult(importText, context, issue);
+      if (r.success && r.data) {
+        const warnCount = r.aiAudit?.flags?.length || 0;
         setImportMsg({ ok: '导入成功，已通过审计并渲染（审计命中 ' + warnCount + ' 条规则）' });
-        onApplyResult(data.result);
+        onApplyResult(r.data);
         setImportText('');
       } else {
-        setImportMsg({ error: data.error || '导入失败' });
+        setImportMsg({ error: r.error || '导入失败' });
       }
     } catch (err: any) {
-      setImportMsg({ error: err?.message || '网络错误' });
+      setImportMsg({ error: err?.message || '处理错误' });
     } finally {
       setIsImporting(false);
     }

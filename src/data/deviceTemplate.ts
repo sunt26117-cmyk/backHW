@@ -34,6 +34,15 @@ export const MOSFET_PARAM_TEMPLATE = {
     tjMax: { value: null, unit: '℃', conditions: {}, stat: 'max', source: null },
     easPulse: { value: null, unit: 'mJ', conditions: { id: null, vdd: null }, stat: 'max', source: null },
   },
+  soaCurve: {
+    note: 'SOA 安全区边界点（Id vs Vds vs 脉冲宽度），从规格书 SOA 曲线图读取；用于 P016 短路能量/安全区复核',
+    source: null,
+    points: [
+      { vds: null, id: null, pulseTimeUs: null },
+      { vds: null, id: null, pulseTimeUs: null },
+      { vds: null, id: null, pulseTimeUs: null },
+    ],
+  },
   staticParams: {
     rdsOn: {
       xAxis: 'tj', conditions: { vgs: 10, id: 20 }, stat: 'typ',
@@ -87,5 +96,6 @@ export const DEVICE_FIELD_MEANINGS: Array<{ field: string; engine: string }> = [
   { field: 'switchingParams.tr/tf/tdOn/tdOff', engine: 'P004 死区、P016 保护时序' },
   { field: 'thermalParams.rthJc/rthJa', engine: 'P006/P007 结温与热裕量' },
   { field: 'bodyDiode.qrr/trr', engine: 'P006 反向恢复损耗' },
+  { field: 'soaCurve', engine: 'P016 短路 SOA 能量/安全区复核' },
 ];
 
