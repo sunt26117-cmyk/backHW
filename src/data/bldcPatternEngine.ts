@@ -853,6 +853,13 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   const combinedDeratingFactor = (1 - initTolPct / 100) * (1 - eolDeratingPct / 100) * (1 - lowTempDeratingPct / 100);
   const minEffectiveCapUf = cbusUf013 * combinedDeratingFactor;
 
+  // 电解电容寿命 Arrhenius 估算（10℃ 规则：L = L0 · 2^((T0 - T_use)/10)，寿命每降 10℃ 翻倍）
+  const capRatedLifeHours = 5000; // 额定寿命 @105℃（典型值，需按 datasheet 替换）
+  const capRatedTempC = 105;
+  const capUseTempC = Number.isFinite(input.tAmbientC) ? input.tAmbientC : capRatedTempC;
+  const capLifeHours = capRatedLifeHours * Math.pow(2, (capRatedTempC - capUseTempC) / 10);
+  const capLifeYears = capLifeHours / (24 * 365);
+
   const p013CalculatedValues: Record<string, string | number> = {
     '母线电容标称容量 (μF)': cbusUf013,
     '初始容差降额 (%)': initTolPct,
@@ -861,6 +868,8 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     '三项降额后最小有效容量 (μF)': Number(minEffectiveCapUf.toFixed(0)),
     '高频纹波电流估算 I_ripple_rms (A，按调制比/功率因数闭式解)': Number(rippleCurrentEst.toFixed(1)),
     '电容额定允许纹波电流 @105C (A)': 4.5,
+    '电容寿命 Arrhenius 估算 (h，10℃规则 L=L0·2^((105-T)/10)，未计纹波自热，仅供参考)': Number(capLifeHours.toFixed(0)),
+    '折算寿命年限 (年)': Number(capLifeYears.toFixed(1)),
   };
   pushAssumptionNote(p013CalculatedValues, p013Assumptions);
 
