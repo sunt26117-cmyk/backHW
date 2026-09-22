@@ -314,6 +314,7 @@ export interface CapacitorLifeEstimate {
 export interface SecondSourceComparison {
   primaryPart: string;
   secondSourcePart: string;
+  isElectricalInputProvided?: boolean; // 是否真的填了器件电气参数（缺输入时 UI 不得显示定量差值）
   electricalEquivalence: {
     vdsMatch: boolean;
     idMatch: boolean;

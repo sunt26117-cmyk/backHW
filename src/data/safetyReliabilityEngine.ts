@@ -282,87 +282,146 @@ export function calculateCapacitorLife(
   };
 }
 
+export interface SecondSourceInput {
+  primaryRdsOnMilliOhm?: number;
+  secondaryRdsOnMilliOhm?: number;
+  primaryQgNc?: number;
+  secondaryQgNc?: number;
+  primaryQrrNc?: number;
+  secondaryQrrNc?: number;
+  primaryRthJcCPerW?: number;
+  secondaryRthJcCPerW?: number;
+}
+
+export interface PcnInput {
+  component?: string;
+  supplier?: string;
+  changeDescription?: string;
+}
+
+export interface EsdInput {
+  esdLevelKv?: number;
+  esdPeakCurrentA?: number;
+  recoveryTimeMs?: number;
+  canErrorCount?: number;
+  affectedPort?: string;
+  tvsClampingVoltageV?: number;
+  requiredEsdLevelKv?: number;
+  harnessLengthM?: number;
+}
+
+export interface BciInput {
+  bciInjectionMa?: number;
+  bciSensitiveFreqMhz?: number;
+  recoveryTimeMs?: number;
+  harnessLengthM?: number;
+  commonModeCurrentMa?: number;
+  bciNodeVoltageV?: number;
+  canErrorCount?: number;
+  currentSenseErrorPct?: number;
+}
+
+const fin = (v: unknown): number | undefined => { const n = Number(v); return Number.isFinite(n) ? n : undefined; };
+const deltaPct = (a?: number, b?: number): number | undefined => (a !== undefined && b !== undefined && a !== 0 ? Number((((b - a) / a) * 100).toFixed(1)) : undefined);
+const sign = (v: number): string => (v > 0 ? '+' : '');
+
 export function compareSecondSource(
   primaryPart: string,
-  secondSourcePart: string
+  secondSourcePart: string,
+  input: SecondSourceInput = {}
 ): SecondSourceComparison {
-  // 综合电气、热、开关、安全、EMC 五维评估
+  // [输入驱动] 电气等价性必须由两只器件的实测/规格参数算出；没有输入时不得沿用历史示例差值。
+  const rds = deltaPct(input.primaryRdsOnMilliOhm, input.secondaryRdsOnMilliOhm);
+  const qg = deltaPct(input.primaryQgNc, input.secondaryQgNc);
+  const qrr = deltaPct(input.primaryQrrNc, input.secondaryQrrNc);
+  const rth = deltaPct(input.primaryRthJcCPerW, input.secondaryRthJcCPerW);
+  const hasElec = rds !== undefined || qg !== undefined || qrr !== undefined;
   return {
     primaryPart,
     secondSourcePart,
-    electricalEquivalence: {
-      vdsMatch: true,
-      idMatch: true,
-      rdsOnDeltaPct: +4.2, // 阻抗增加 4.2%
-      qgDeltaPct: -8.5,   // 门极电荷减少 8.5%
-      qrrDeltaPct: +18.0, // 体二极管反向恢复电荷大 18% (关键差异)
-    },
-    thermalEquivalence: {
-      rthJcDeltaPct: -2.0,
-      tjMaxSame: true,
-    },
+    isElectricalInputProvided: hasElec,
+    electricalEquivalence: { vdsMatch: true, idMatch: true, rdsOnDeltaPct: rds ?? 0, qgDeltaPct: qg ?? 0, qrrDeltaPct: qrr ?? 0 },
+    thermalEquivalence: { rthJcDeltaPct: rth ?? 0, tjMaxSame: true },
     switchingEquivalence: {
-      dvDtImpact: '因 Qg 较小，在相同 Rg 下开通速度加快 15%，中点开关节点 dv/dt 增大',
-      ringingRisk: '由于 Qrr 增大 18%，关断瞬态反向恢复尖峰增加约 3.8V，48MHz 振铃幅度增大 2.5dB',
+      dvDtImpact: qg !== undefined ? '按实测 Qg 差异 ' + sign(qg) + qg + '% 评估开通速度变化（需在相同 Rg 下复核，不得沿用历史示例）' : '待输入：需填两只器件 Qg/Qgd 后才能评估 dv/dt 影响',
+      ringingRisk: qrr !== undefined ? '按 Qrr 差异 ' + sign(qrr) + qrr + '% 评估关断振铃与反向恢复尖峰（具体频点/幅值必须实测，不得套用历史 48MHz/3.8V 示例）' : '待输入：需填两只器件 Qrr 后才能评估关断振铃风险',
     },
     safetyEmcEquivalence: {
-      emcRisk: 'CISPR 25 传导发射高频段超标风险增加，不可直接作为完全等价替换',
-      functionalSafetyAecQ: '均通过 AEC-Q101 Grade 1 认证，但雪崩能量 EAS 略低 12%',
+      emcRisk: '替代料 EMC 影响必须通过同一暗室 A/B 对比实测确认，不得用经验值判定',
+      functionalSafetyAecQ: '需核对两只器件的 AEC-Q101 Qualification Summary 与 EAS/SOA 差异（未提供时保持 UNKNOWN）',
     },
     overallVerdict: 'DERIVATIVE_REGRESSION_REQUIRED',
     retestRequired: [
       'CISPR 25 Class 5 传导骚扰 (150kHz ~ 108MHz) 对比测试',
-      '急停反向恢复尖峰峰值 Vds 示波器精确捕获',
-      '85℃ 温箱 100% 满载温升对照摸底测试',
+      '关断瞬态反向恢复尖峰 Vds 示波器精确捕获',
+      hasElec ? ('Rds(on) ' + (rds !== undefined ? sign(rds) + rds + '%' : '待输入') + '；Qrr ' + (qrr !== undefined ? sign(qrr) + qrr + '%' : '待输入')) : 'Rds(on)/Qg/Qrr 差异待输入：填两只器件参数后给出定量回归判据',
+      '按项目温箱条件做 100% 满载温升对照摸底',
     ],
   };
 }
 
-export function evaluatePcn(changeType: PcnEvaluation['changeType']): PcnEvaluation {
+export function evaluatePcn(changeType: PcnEvaluation['changeType'], input: PcnInput = {}): PcnEvaluation {
+  const comp = (input.component || '').trim();
+  const supp = (input.supplier || '').trim();
+  const desc = (input.changeDescription || '').trim();
   return {
-    component: 'Power MOSFET 40V / 3.5mΩ (车载分立器件)',
-    supplier: '国际一线半导体供应商',
+    component: comp || '待输入：未提供变更器件型号（不得用历史 Power MOSFET 40V 示例代替）',
+    supplier: supp || '待输入：未提供供应商名称',
     changeType,
-    changeDescription: '晶圆制造厂由欧洲 Fab 1 转至亚洲 Fab 2，引入 8 英寸更新代沟槽蚀刻工艺',
-    invalidatedPreviousTests: [
-      '前序 DVT 阶段通过的单脉冲雪崩耐受性能测试 (EAS)',
-      '高温栅极偏压试验 (HTGB 1000h) 早期失效率数据',
-      '开关瞬态 dv/dt 振铃峰值与辐射发射一致性数据',
-    ],
-    regressionVerdict: 'Regression Required',
+    changeDescription: desc || '待输入：未提供 ' + changeType + ' 变更的具体内容（不得用历史 Fab 迁移示例代替）',
+    invalidatedPreviousTests: ['待输入：需列出被本次变更判定为失效的前序试验数据'],
+    regressionVerdict: 'Engineering Review Required',
     recommendedActions: [
-      '要求供应商提供 Fab 2 与 Fab 1 的晶圆切片 SEM 与 AEC-Q101 Qualification Summary',
-      '组织样品在电机台架执行 200 次极限堵转冲击测试与 EMC 暗室摸底测试',
+      '要求供应商提供变更前后的晶圆/封装 Qualification Summary 与 AEC-Q101 对比数据',
+      '组织样品在台架执行与变更项对应的极限/寿命回归测试',
       '向主机厂提交 PCN 评估说明书并获得工程评审批准 (Customer Engineering Review)',
     ],
   };
 }
 
-export function evaluateEsdProtection(): EsdAnalysis {
+export function evaluateEsdProtection(input: EsdInput = {}): EsdAnalysis {
+  const level = fin(input.esdLevelKv);
+  const required = fin(input.requiredEsdLevelKv);
+  const recovery = fin(input.recoveryTimeMs);
+  const canErr = fin(input.canErrorCount);
+  const tvs = fin(input.tvsClampingVoltageV);
+  const clamping = tvs ?? 0;
+  const levelPass = level !== undefined && required !== undefined ? level >= required : undefined;
+  const recoveryBad = recovery !== undefined && recovery > 100;
+  const canErrBad = canErr !== undefined && canErr > 0;
+  const status: EsdAnalysis['status'] = levelPass === undefined ? 'WARNING' : (levelPass && !recoveryBad && !canErrBad ? 'PASS' : (recoveryBad || canErrBad ? 'CRITICAL' : 'WARNING'));
+  const port = (input.affectedPort || '').trim();
   return {
-    dischargePath: '电机外露线束接插件端子 → 内部走线 → PCB共模电容与TVS → 铝合金金属外壳 → 车身搭铁地',
-    tvsModel: '车规级双向 TVS (SMCJ24CA, 24V 工作电压 / 38.9V 钳位电压)',
-    clampingVoltageV: 38.9,
-    connectorGroundReturn: '连接器专用屏蔽环就近 360° 压接金属机壳',
-    chassisCapacitancePf: 2200,
-    sensitiveIcExposed: '预驱芯片相线采样监测引脚 (内置 2kV HBM 防护，需二级 TVS 保护)',
-    testStandardRequirement: 'ISO 10605 / 接触放电 ±8kV，空气放电 ±15kV',
-    isRequirementUnknown: false,
-    status: 'PASS',
+    dischargePath: port ? port + ' 端子 → 内部走线 → TVS/共模电容 → 金属外壳 → 车身搭铁地' : '待输入：未提供受扰端口，放电路径需按实际连接器与搭铁设计确认',
+    tvsModel: tvs !== undefined ? '项目 TVS 器件（钳位残压 ' + tvs + 'V，按实际器件规格）' : '待输入：未提供 TVS 钳位残压/型号（不套用历史 SMCJ24CA）',
+    clampingVoltageV: clamping,
+    connectorGroundReturn: '待确认：连接器屏蔽环 360° 压接金属机壳与搭铁阻抗需按实际结构测量',
+    chassisCapacitancePf: fin(input.harnessLengthM) !== undefined ? Math.max(100, Math.round((fin(input.harnessLengthM) as number) * 100)) : 0,
+    sensitiveIcExposed: '预驱芯片相线采样监测引脚（需按实际原理图确认，并核对器件 HBM 等级）',
+    testStandardRequirement: required !== undefined ? 'ISO 10605：项目要求接触放电 ±' + required + 'kV' : '待输入：未提供项目要求的 ESD 等级（requirement 中未解析到 kV 等级）',
+    isRequirementUnknown: required === undefined || level === undefined,
+    status,
   };
 }
 
-export function evaluateBciImmunity(): BciAnalysis {
+export function evaluateBciImmunity(input: BciInput = {}): BciAnalysis {
+  const loop = fin(input.harnessLengthM);
+  const freq = fin(input.bciSensitiveFreqMhz);
+  const inj = fin(input.bciInjectionMa);
+  const rec = fin(input.recoveryTimeMs);
+  const node = fin(input.bciNodeVoltageV);
+  const cm = fin(input.commonModeCurrentMa);
+  const err = fin(input.currentSenseErrorPct);
   return {
-    harnessCouplingLoopCm2: 45.0,
-    susceptibleBandMhz: '20MHz ~ 80MHz (与电机相电感形成LC共振敏感频段)',
-    injectionPointRecommended: '距控制器端线束连接器 150mm 处大电流注入钳位点',
-    measurementPointRecommended: '运放采样差分输入端与 MCU 内部 ADC 输入管脚',
+    harnessCouplingLoopCm2: loop !== undefined ? Number((loop * 2).toFixed(1)) : 0,
+    susceptibleBandMhz: freq !== undefined ? freq + ' MHz（实测敏感频点，以其倍频/共模谐振边界为验证中心）' : '待输入：未提供实测敏感频点',
+    injectionPointRecommended: inj !== undefined ? '按实测注入电流 ' + inj + 'mA，注入点距控制器端线束连接器 150mm 处（以实际标定为准）' : '待输入：未提供注入电流，注入点需按 ISO 11452-4 标定位置确认',
+    measurementPointRecommended: (err !== undefined || node !== undefined) ? ('运放采样差分输入端与 MCU ADC 输入管脚（受扰节点' + (node !== undefined ? '噪声 ' + node + 'V' : '') + (err !== undefined ? '、采样误差 ' + err + '%' : '') + '）') : '运放采样差分输入端与 MCU ADC 输入管脚（受扰节点需实测确认）',
     filteringMeasures: [
-      '检流差分信号线并联 100pF NPO 共模与 470pF 差模滤波电容',
+      '检流差分信号线并联 100pF NPO 共模与 470pF 差模滤波电容（容值需按实测敏感频点重新核算，不套用示例）',
       '电源与电机相线在进板端增加差模π型 LC 滤波网络',
     ],
-    verificationMethod: 'ISO 11452-4 大电流注入 (BCI) 法，等级 Class A (全功能正常运行)',
+    verificationMethod: 'ISO 11452-4 大电流注入 (BCI) 法，等级 Class A（全功能正常运行）；恢复时间' + (rec !== undefined ? ' ' + rec + 'ms' : ' 待实测') + (cm !== undefined ? '，共模电流 ' + cm + 'mA' : ''),
   };
 }
 

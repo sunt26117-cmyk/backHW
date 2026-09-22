@@ -76,54 +76,53 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
     const isHv = /(?:400V|800V|高压|400\s*V|800\s*V)/i.test(text);
     const isEmc = domain === 'EMC_BCI' || domain === 'EMC_ESD' || domain === 'EMC_RE_CE';
     const isBldc = domain === 'BLDC';
+    const num = (k: string): number | undefined => { const v = Number(issue.measuredValues?.[k]); return Number.isFinite(v) ? v : undefined; };
+    const str = (k: string): string => { const v = issue.measuredValues?.[k]; return v === undefined || v === null ? '' : String(v); };
     const primary = isHv ? '当前高压主功率器件（Primary）' : isBldc ? '当前 3 相逆变功率管（Primary）' : `${context.productType} 关键器件（Primary）`;
     const secondary = isHv ? '候选高压二供器件（Secondary）' : isBldc ? '候选 Gate Driver / MOSFET 二供（Secondary）' : `${context.productType} 候选二供器件（Secondary）`;
-    const source = compareSecondSource(primary, secondary);
-    const pcn = domain === 'COMPONENT' ? evaluatePcn('PROCESS_NODE') : isEmc ? evaluatePcn('PACKAGE_FACILITY') : evaluatePcn('WAFER_FAB');
-    const esd = evaluateEsdProtection();
-    const bci = evaluateBciImmunity();
-    const risk = result?.riskRatings.overallRiskScore ?? 60;
-    const recovery = Number(issue.measuredValues?.recoveryTimeMs);
-    const bciFreq = Number(issue.measuredValues?.bciSensitiveFreqMhz);
-    const esdKv = Number(issue.measuredValues?.esdLevelKv);
-    const bciLoop = Number(issue.measuredValues?.harnessLengthM);
+    const source = compareSecondSource(primary, secondary, {
+      primaryRdsOnMilliOhm: num('primaryRdsOnMilliOhm'),
+      secondaryRdsOnMilliOhm: num('secondaryRdsOnMilliOhm'),
+      primaryQgNc: num('primaryQgNc'),
+      secondaryQgNc: num('secondaryQgNc'),
+      primaryQrrNc: num('primaryQrrNc'),
+      secondaryQrrNc: num('secondaryQrrNc'),
+      primaryRthJcCPerW: num('primaryRthJcCPerW'),
+      secondaryRthJcCPerW: num('secondaryRthJcCPerW'),
+    });
+    const pcn = evaluatePcn(domain === 'COMPONENT' ? 'PROCESS_NODE' : isEmc ? 'PACKAGE_FACILITY' : 'WAFER_FAB', {
+      component: str('componentPartNumber') || context.productType || '',
+      supplier: str('supplierName'),
+      changeDescription: str('pcnChangeDescription'),
+    });
+    const requiredKv = (() => { const mm = text.match(/(?:±\s*)?(\d+(?:\.\d+)?)\s*kV/i); return mm ? Number(mm[1]) : undefined; })();
+    const esd = evaluateEsdProtection({
+      esdLevelKv: num('esdLevelKv'),
+      esdPeakCurrentA: num('esdPeakCurrentA'),
+      recoveryTimeMs: num('recoveryTimeMs'),
+      canErrorCount: num('canErrorCount'),
+      affectedPort: str('affectedPort'),
+      tvsClampingVoltageV: num('tvsClampingVoltageV'),
+      requiredEsdLevelKv: requiredKv,
+      harnessLengthM: num('harnessLengthM'),
+    });
+    const bci = evaluateBciImmunity({
+      bciInjectionMa: num('bciInjectionMa'),
+      bciSensitiveFreqMhz: num('bciSensitiveFreqMhz'),
+      recoveryTimeMs: num('recoveryTimeMs'),
+      harnessLengthM: num('harnessLengthM'),
+      commonModeCurrentMa: num('commonModeCurrentMa'),
+      bciNodeVoltageV: num('bciNodeVoltageV'),
+      canErrorCount: num('canErrorCount'),
+      currentSenseErrorPct: num('currentSenseErrorPct'),
+    });
     return {
-      secondSource: {
-        ...source,
-        electricalEquivalence: {
-          ...source.electricalEquivalence,
-          rdsOnDeltaPct: Number((source.electricalEquivalence.rdsOnDeltaPct + (risk - 60) / 20).toFixed(1)),
-          qgDeltaPct: Number((source.electricalEquivalence.qgDeltaPct + (isBldc ? -4 : 0)).toFixed(1)),
-          qrrDeltaPct: Number((source.electricalEquivalence.qrrDeltaPct + (isEmc ? 5 : 0)).toFixed(1))
-        },
-        switchingEquivalence: {
-          ...source.switchingEquivalence,
-          dvDtImpact: `${source.switchingEquivalence.dvDtImpact}；当前工况：${issue.testCondition || '按当前测试边界验证'}`,
-          ringingRisk: `${source.switchingEquivalence.ringingRisk}；当前风险：${result?.riskRatings.overallRisk || 'Medium'}`
-        },
-        safetyEmcEquivalence: { ...source.safetyEmcEquivalence, emcRisk: `${source.safetyEmcEquivalence.emcRisk}；场景=${domain}` },
-      },
-      pcn: {
-        ...pcn,
-        component: `${context.productType}｜${domain}`,
-        changeDescription: `${pcn.changeDescription}；当前项目 ${context.projectName} / ${context.projectPhase}`
-      },
-      esd: {
-        ...esd,
-        tvsModel: isHv ? '高压输入级瞬态抑制与放电回路（按器件额定值确认）' : esd.tvsModel,
-        clampingVoltageV: Number.isFinite(esdKv) ? Number((esdKv * 1.15).toFixed(1)) : esd.clampingVoltageV,
-        chassisCapacitancePf: isEmc ? (Number.isFinite(bciLoop) ? Math.max(100, Math.round(bciLoop * 100)) : esd.chassisCapacitancePf) : esd.chassisCapacitancePf,
-      },
-      bci: {
-        ...bci,
-        harnessCouplingLoopCm2: Number.isFinite(bciLoop) ? Number((bci.harnessCouplingLoopCm2 + bciLoop * 2).toFixed(1)) : bci.harnessCouplingLoopCm2,
-        susceptibleBandMhz: isEmc
-          ? (Number.isFinite(bciFreq) ? `${bciFreq} MHz：以当前敏感频点为中心验证` : '当前超标/敏感频段及其倍频/共模谐振边界')
-          : isBldc ? '优先电机开关频率、相线共振及线束耦合敏感频段' : bci.susceptibleBandMhz,
-        recoveryEvidence: Number.isFinite(recovery) ? `当前恢复时间 ${recovery} ms（以实测门禁为准）` : '当前恢复时间待实测',
-      },
+      secondSource: source,
+      pcn,
+      esd,
+      bci,
       provenanceNote: issue.measuredValueSource === 'BENCHMARK' ? '当前安全/可靠性页面中的演示数值仅用于验证界面与规则链，正式项目必须用器件 Safety Manual / FMEDA / 测试数据覆盖。' : '当前页面计算优先使用项目输入与当前域规则。',
-    } as any;
+    };
   }, [context, issue, result]);
 
   const secondSourceResult = safetyBenchmarks.secondSource;
@@ -519,6 +518,9 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
       {/* 5. 供应商二供与 PCN 评估 */}
       {activeSubTab === 'SECOND_SOURCE_PCN' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="md:col-span-2 bg-blue-950/30 border border-blue-800/50 rounded-lg p-3 text-[11px] text-slate-300">
+            参数输入口：在「1. 统一工程输入」→「实测参数回填」里，把当前域切到 <span className="font-mono text-cyan-300">器件替代 (COMPONENT)</span>，填入 一供/二供 的 Rds(on)/Qg/Qrr/Rth(j-c) 与 器件型号/供应商/PCN变更内容。未填时本页显示「待输入」，不再用历史示例数字冒充。
+          </div>
           {/* 二供多维等价性对比 */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
             <div className="flex items-center justify-between">
@@ -537,7 +539,7 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
                 <span>二供: {secondSourceResult.secondSourcePart}</span>
               </div>
               <div className="border-t border-slate-800/80 pt-2 space-y-1 text-slate-300">
-                <div>• 电气匹配: Vds/Id 一致，但 Rds(on) +4.2%，体二极管 Qrr 增大 18%！</div>
+                <div>• 电气匹配: {secondSourceResult.isElectricalInputProvided ? ('Vds/Id 一致，Rds(on) ' + (secondSourceResult.electricalEquivalence.rdsOnDeltaPct > 0 ? '+' : '') + secondSourceResult.electricalEquivalence.rdsOnDeltaPct + '%，Qrr ' + (secondSourceResult.electricalEquivalence.qrrDeltaPct > 0 ? '+' : '') + secondSourceResult.electricalEquivalence.qrrDeltaPct + '%') : 'Vds/Id 一致，Rds(on)/Qg/Qrr 差异待输入（在“实测参数回填”中填两只器件参数后计算）'}</div>
                 <div>• 开关影响: {secondSourceResult.switchingEquivalence.ringingRisk}</div>
                 <div>• EMC 与安全: {secondSourceResult.safetyEmcEquivalence.emcRisk}</div>
               </div>
@@ -592,6 +594,9 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
       {/* 6. ESD 防护与 BCI 大电流注入 */}
       {activeSubTab === 'EMC_IMMUNITY' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="md:col-span-2 bg-blue-950/30 border border-blue-800/50 rounded-lg p-3 text-[11px] text-slate-300">
+            参数输入口：在「1. 统一工程输入」→「实测参数回填」里，把当前域切到 <span className="font-mono text-cyan-300">EMC_ESD / EMC_BCI</span>，填入 ESD放电等级/TVS钳位残压/受扰端口、BCI注入电流/敏感频点/线束长度/恢复时间等。未填时本页显示「待输入」。
+          </div>
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
             <h2 className="text-xs font-bold text-white flex items-center gap-1.5">
               <Shield className="w-4 h-4 text-emerald-400" />
@@ -599,9 +604,10 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
             </h2>
             <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs space-y-2 text-slate-300">
               <div>• 释放路径: {esdResult.dischargePath}</div>
-              <div>• TVS 型号与残压: <strong className="text-cyan-300">{esdResult.tvsModel}</strong> (钳位残压 {esdResult.clampingVoltageV}V)</div>
+              <div>• TVS 型号与残压: <strong className="text-cyan-300">{esdResult.tvsModel}</strong>{esdResult.clampingVoltageV > 0 ? (' (钳位残压 ' + esdResult.clampingVoltageV + 'V)') : ' (钳位残压待输入)'}</div>
               <div>• 敏感引脚暴露: {esdResult.sensitiveIcExposed}</div>
               <div>• 测试等级标准: <span className="text-emerald-400 font-mono">{esdResult.testStandardRequirement}</span></div>
+              <div>• 判定: <span className={esdResult.status === 'PASS' ? 'text-emerald-400' : esdResult.status === 'CRITICAL' ? 'text-red-400' : 'text-amber-400'}>{esdResult.status}{esdResult.isRequirementUnknown ? '（缺输入，待补实测放电等级）' : ''}</span></div>
             </div>
           </div>
 

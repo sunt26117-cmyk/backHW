@@ -14,7 +14,7 @@ import {
   Layers,
   ShieldAlert,
 } from 'lucide-react';
-import { WccaCalcParams, ThermalCalcParams, VoltageMarginParams, ProjectContext, IssueInput } from '../types';
+import { WccaCalcParams, WccaComponent, ThermalCalcParams, VoltageMarginParams, ProjectContext, IssueInput } from '../types';
 import { MotorDriveToolbox } from './MotorDriveToolbox';
 import {
   runMonteCarloEngine,
@@ -415,8 +415,24 @@ export const EngineeringCalculatorView: React.FC<EngineeringCalculatorViewProps>
     const limitMatch = text.match(/(?:±|<=|≤|\+\/-)\s*(\d+(?:\.\d+)?)\s*%/);
     const target = limitMatch ? Number(limitMatch[1]) : undefined;
     if (target && target > 0 && target < 20) setWccaParams(prev => ({ ...prev, targetErrorLimitPercent: target }));
+    // WCCA 误差预算：把当前工况里 WCCA 域的结构化输入全部回填进容差链，
+    // 避免 12 个公差/温漂/老化参数只吃代码里的示例默认值。
     const shuntTol = num('shuntTolerancePct');
-    if (shuntTol !== undefined) setWccaParams(prev => ({ ...prev, components: prev.components.map((c, i) => i === 0 ? { ...c, initTolPercent: shuntTol } : c) }));
+    const afeOffset = num('afeOffsetBudgetPct');
+    const adcRef = num('adcRefDriftBudgetPct');
+    const tempDrift = num('tempDriftBudgetPct');
+    const agingDrift = num('agingDriftBudgetPct');
+    if ([shuntTol, afeOffset, adcRef, tempDrift, agingDrift].some((v) => v !== undefined)) {
+      setWccaParams(prev => ({
+        ...prev,
+        components: prev.components.map((c, i) => ({
+          ...c,
+          initTolPercent: (i === 0 ? shuntTol : i === 1 ? afeOffset : i === 2 ? adcRef : undefined) ?? c.initTolPercent,
+          tempDriftPercent: tempDrift ?? c.tempDriftPercent,
+          agingPercent: agingDrift ?? c.agingPercent,
+        })),
+      }));
+    }
     const hot = num('ambientTempC') ?? num('junctionTempC');
     if (hot !== undefined) setThermalParams(prev => ({ ...prev, ambientTempC: hot }));
     const power = num('powerLossW');
@@ -623,19 +639,49 @@ export const EngineeringCalculatorView: React.FC<EngineeringCalculatorViewProps>
                   <tbody className="divide-y divide-slate-800 text-slate-300">
                     {wccaParams.components.map((c, i) => {
                       const totalComp = c.initTolPercent + c.tempDriftPercent + c.agingPercent;
+                      const upd = (patch: Partial<WccaComponent>) =>
+                        setWccaParams((prev) => ({ ...prev, components: prev.components.map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
+                      const cellCls = 'w-20 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-white font-mono text-center focus:outline-none focus:border-blue-500';
                       return (
                         <tr key={i} className="hover:bg-slate-800/40 transition">
-                          <td className="py-2.5 text-white font-medium">{c.name}</td>
-                          <td className="py-2.5 font-mono">{c.nominal}</td>
-                          <td className="py-2.5 font-mono">±{c.initTolPercent}%</td>
-                          <td className="py-2.5 font-mono">±{c.tempDriftPercent}%</td>
-                          <td className="py-2.5 font-mono">±{c.agingPercent}%</td>
+                          <td className="py-2.5 text-white font-medium">
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={c.name}
+                                onChange={(e) => upd({ name: e.target.value })}
+                                className="w-44 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-white text-xs focus:outline-none focus:border-blue-500"
+                              />
+                              <button
+                                onClick={() => setWccaParams((prev) => ({ ...prev, components: prev.components.filter((_, j) => j !== i) }))}
+                                disabled={wccaParams.components.length <= 1}
+                                className="text-slate-500 hover:text-red-400 disabled:opacity-30 cursor-pointer px-1"
+                                title="删除该误差预算项"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          </td>
+                          <td className="py-2.5"><input type="number" step="any" value={c.nominal} onChange={(e) => upd({ nominal: Number(e.target.value) })} className={cellCls} /></td>
+                          <td className="py-2.5"><input type="number" step="any" value={c.initTolPercent} onChange={(e) => upd({ initTolPercent: Number(e.target.value) })} className={cellCls} /></td>
+                          <td className="py-2.5"><input type="number" step="any" value={c.tempDriftPercent} onChange={(e) => upd({ tempDriftPercent: Number(e.target.value) })} className={cellCls} /></td>
+                          <td className="py-2.5"><input type="number" step="any" value={c.agingPercent} onChange={(e) => upd({ agingPercent: Number(e.target.value) })} className={cellCls} /></td>
                           <td className="py-2.5 font-mono text-amber-400 font-semibold">
                             ±{totalComp.toFixed(2)}%
                           </td>
                         </tr>
                       );
                     })}
+                    <tr>
+                      <td colSpan={6} className="pt-3">
+                        <button
+                          onClick={() => setWccaParams((prev) => ({ ...prev, components: [...prev.components, { name: '新误差预算项', nominal: 1, initTolPercent: 0.5, tempDriftPercent: 0.5, agingPercent: 0.2, distribution: 'gaussian' as const }] }))}
+                          className="text-[11px] px-2.5 py-1 rounded border border-dashed border-slate-600 text-slate-300 hover:border-blue-500 hover:text-blue-300 cursor-pointer"
+                        >
+                          + 添加误差预算项
+                        </button>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
