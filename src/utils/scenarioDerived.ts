@@ -168,6 +168,43 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     }
   }
 
+  // ----------------------------------------------------------------
+  // [本次修复新增] P009/P010/P011/P018 此前在引擎里是无条件 triggered:true 的硬编码，
+  // 现在改为依据下面这些从自由文本/结构化实测值中抽取出的证据字段来判断是否适用于
+  // 当前case。抽取不到证据时保持 undefined——引擎侧会据此不触发，而不是继续拍脑袋硬编码。
+  // ----------------------------------------------------------------
+
+  // P009: 电机位置传感器类型 + 霍尔信号故障的具体症状描述
+  // 关键词命中"霍尔/hall/H1|H2|H3信号线"，且同时出现典型故障症状词，才判定为"文本证据"；
+  // 仅提到霍尔但没有故障症状(例如只是选型对比)不应算作"检测到故障"。
+  const hallKeywordHit = /霍尔|hall\s*sensor|\bH[123]\b/i.test(text);
+  const hallFaultSymptomHit = /(开路|断线|失效|故障|卡死|干扰|跳变|非法状态|失步|虚焊|抖动)/i.test(text);
+  const hallFaultRiskIndicated = hallKeywordHit && hallFaultSymptomHit;
+  let motorSensorType: BldcEvaluationInput['motorSensorType'];
+  if (/sensorless|无(?:位置)?(?:传感器)?感|反电动势观测|BEMF\s*observer/i.test(text)) motorSensorType = 'SENSORLESS';
+  else if (/编码器|encoder/i.test(text)) motorSensorType = 'ENCODER';
+  else if (/旋变|resolver/i.test(text)) motorSensorType = 'RESOLVER';
+  else if (hallKeywordHit) motorSensorType = 'HALL';
+
+  // P010: 电流采样架构 + 采样链路(分流电阻/运放/ADC)故障的具体症状描述
+  const currentSenseFaultRiskIndicated = /(分流电阻|采样电阻|运放|电流采样|电流检测|ADC)[^。\n]{0,15}(虚焊|漂移|饱和|失效|故障|偏置|跌落|异常|丢失采样窗口)/i.test(text);
+  let currentSenseArchitecture: BldcEvaluationInput['currentSenseArchitecture'];
+  if (/低边单电阻|单电阻采样|single[\s-]?low[\s-]?side/i.test(text)) currentSenseArchitecture = 'LOW_SIDE_SINGLE';
+  else if (/三相低边独立采样|相电流独立采样|three[\s-]?phase[\s-]?low[\s-]?side/i.test(text)) currentSenseArchitecture = 'THREE_PHASE_LOW_SIDE';
+  else if (/相线直串|inline[\s-]?phase/i.test(text)) currentSenseArchitecture = 'INLINE_PHASE';
+  else if (/霍尔电流传感器|hall[\s-]?current[\s-]?sensor/i.test(text)) currentSenseArchitecture = 'HALL_SENSOR';
+
+  // P011: 预期最低供电电压(如冷启动跌落曲线) + 升压稳压兜底 + 预驱死锁/UVLO文本症状
+  const vbusMinExpectedV = optMeas(issue, 'vbusMinExpectedV');
+  const boostRaw = measuredNumber(issue, 'hasSupplyBoostRegulation');
+  const hasSupplyBoostRegulation = Number.isFinite(boostRaw)
+    ? boostRaw !== 0
+    : (/升压稳压|boost\s*regulat/i.test(text) ? true : undefined);
+  const driverLockupRiskIndicated = /(预驱|驱动芯片|gate\s*driver)[^。\n]{0,10}(死锁|锁死|锁定|死机)|UVLO|欠压锁定/i.test(text);
+
+  // P018: 堵转/机械卡滞的具体症状描述
+  const stallRiskIndicated = /堵转|卡死|卡滞|locked\s*rotor|抱死|机械死锁/i.test(text);
+
   return {
     vbusNominal,
     vbusMeasuredPeak: Number.isFinite(vbusMeasuredPeak) ? vbusMeasuredPeak : undefined,
@@ -197,6 +234,15 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     crssCurve,
     vthCurve,
     easEnergyMj,
+    gateSpikeMeasuredV: optMeas(issue, 'gateSpikeV'),
+    motorSensorType,
+    hallFaultRiskIndicated: hallFaultRiskIndicated || undefined,
+    currentSenseArchitecture,
+    currentSenseFaultRiskIndicated: currentSenseFaultRiskIndicated || undefined,
+    vbusMinExpectedV,
+    hasSupplyBoostRegulation,
+    driverLockupRiskIndicated: driverLockupRiskIndicated || undefined,
+    stallRiskIndicated: stallRiskIndicated || undefined,
   };
 }
 

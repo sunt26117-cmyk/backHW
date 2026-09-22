@@ -71,6 +71,12 @@ export interface BldcEvaluationInput {
   // P003
   cgsPf?: number; // 栅源电容，用于容性分压界
   sourceInductanceNh?: number; // 源极寄生电感 L_source(nH)，配合 di/dt 估算门极过冲
+  // [本次修复新增] 示波器导入的门极 Vgs 实测尖峰(参见 OscilloscopeImportModal 的"Vgs 门极"
+  // 通道)。此前这个字段(gateSpikeV)只被导入并展示，没有任何引擎读取它——用户辛辛苦苦导入
+  // 的门极尖峰波形不会影响任何风险判断。现在接入 P003：有实测值时优先于米勒效应理论估算值，
+  // 因为实测直接反映了包括米勒耦合、源极电感过冲、以及模型未覆盖的其他寄生路径在内的
+  // 真实总尖峰，比任何理论估算都更可信。
+  gateSpikeMeasuredV?: number;
 
   // P004
   turnOffDelayNs?: number;       // t_d(off) 典型值
@@ -131,6 +137,27 @@ export interface BldcEvaluationInput {
   rdsOnCurve?: Array<{ x: number; y: number }>;  // x=Tj(℃), y=Rds(on)(mΩ)
   crssCurve?: Array<{ x: number; y: number }>;   // x=Vds(V), y=Crss(pF)
   vthCurve?: Array<{ x: number; y: number }>;    // x=Tj(℃), y=Vth(V)
+
+  // ---- 以下为本次修复新增：P009/P010/P011/P018 此前是无条件 triggered:true 的硬编码
+  // （不管工况是什么，每次分析都会命中），现在改为依据实际工况证据判断是否适用于当前case，
+  // 未提供证据时不触发（但模式本身仍在"全部模式"列表中可查阅，只是不计入"已触发风险"）。
+
+  // P009：电机位置传感器类型 + 自由文本中是否有霍尔信号故障的具体症状描述
+  motorSensorType?: 'HALL' | 'ENCODER' | 'RESOLVER' | 'SENSORLESS';
+  hallFaultRiskIndicated?: boolean;
+
+  // P010：电流采样架构 + 自由文本中是否有采样链路故障的具体症状描述
+  currentSenseArchitecture?: 'LOW_SIDE_SINGLE' | 'THREE_PHASE_LOW_SIDE' | 'INLINE_PHASE' | 'HALL_SENSOR';
+  currentSenseFaultRiskIndicated?: boolean;
+
+  // P011：预期最低供电电压(如冷启动跌落曲线) + 是否有升压稳压电路兜底 + 自由文本中是否有
+  // 驱动欠压锁定/预驱死锁的具体症状描述
+  vbusMinExpectedV?: number;
+  hasSupplyBoostRegulation?: boolean;
+  driverLockupRiskIndicated?: boolean;
+
+  // P018：自由文本中是否有堵转/机械卡滞的具体症状描述
+  stallRiskIndicated?: boolean;
 }
 
 function pushAssumptionNote(
@@ -322,7 +349,11 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     : vgateInducedResistiveBound;
   // 源极寄生电感 di/dt 过冲：V_L = L_source · di/dt（nH·A/ns = V，无需换算）
   const inductiveVgsSpike = (input.sourceInductanceNh ?? 0) * (input.diDtANs ?? 0);
-  const vgateInducedTotal = vgateInduced + inductiveVgsSpike;
+  const vgateInducedTheoreticalTotal = vgateInduced + inductiveVgsSpike;
+  // [本次修复] 有示波器实测 Vgs 尖峰时，优先采用实测值判定风险/裕量——实测天然涵盖理论模型
+  // 未覆盖的寄生路径，比任何理论估算都更可信；没有实测时才退回理论估算。
+  const hasGateSpikeMeasured = input.gateSpikeMeasuredV !== undefined;
+  const vgateInducedTotal = hasGateSpikeMeasured ? input.gateSpikeMeasuredV! : vgateInducedTheoreticalTotal;
   const millerMargin = vthMinVEff - vgateInducedTotal;
   const p003ShootThroughRisk = vgateInducedTotal >= vthMinVEff;
 
@@ -341,21 +372,26 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   }
   p003CalculatedValues['门极最小开通阈值 Vth_min (V，@25℃)'] = vthMinVEff;
   p003CalculatedValues['源极电感 di/dt 过冲项 ΔVgs_inductive (V)'] = Number(inductiveVgsSpike.toFixed(2));
-  p003CalculatedValues['计入过冲后的门极感应 Vgs_total (V)'] = Number(vgateInducedTotal.toFixed(2));
+  p003CalculatedValues['理论估算(米勒耦合+源极电感过冲) Vgs_theoretical (V)'] = Number(vgateInducedTheoreticalTotal.toFixed(2));
+  if (hasGateSpikeMeasured) {
+    p003CalculatedValues['示波器实测门极 Vgs 尖峰 Vgs_measured (V)'] = Number(input.gateSpikeMeasuredV!.toFixed(2));
+    p003CalculatedValues['理论值与实测值差异 (V，越大说明模型假设需修正)'] = Number((vgateInducedTheoreticalTotal - input.gateSpikeMeasuredV!).toFixed(2));
+  }
+  p003CalculatedValues[hasGateSpikeMeasured ? '判据取用值(实测优先) Vgs_total (V)' : '判据取用值(无实测，用理论估算) Vgs_total (V)'] = Number(vgateInducedTotal.toFixed(2));
   p003CalculatedValues['门极安全裕量 Margin (V)'] = Number(millerMargin.toFixed(2));
 
   patterns.push({
     id: 'P003',
     name: '高dv/dt→门极米勒效应误导通 (Miller Effect Induced False Turn-On)',
-    triggered: input.dvDtVns >= 4.0 || input.rgOffOhm >= 3.0,
-    corePhysicalChain: '开关管对管开通 → 桥臂中点高dv/dt → 经Cgd耦合米勒位移电流 → 流经关断电阻Rg_off → 门极抬升Vgs > Vth → 同桥臂瞬态直通炸机。真实感应电压是阻性界与容性分压界中的较小值，仅算阻性界会在开关沿较短时高估',
+    triggered: input.dvDtVns >= 4.0 || input.rgOffOhm >= 3.0 || p003ShootThroughRisk,
+    corePhysicalChain: '开关管对管开通 → 桥臂中点高dv/dt → 经Cgd耦合米勒位移电流 → 流经关断电阻Rg_off → 门极抬升Vgs > Vth → 同桥臂瞬态直通炸机。真实感应电压是阻性界与容性分压界中的较小值，仅算阻性界会在开关沿较短时高估；有示波器实测Vgs尖峰时以实测为准',
     calculatedValues: p003CalculatedValues,
     riskLevel: p003ShootThroughRisk ? 'High' : (millerMargin < 0.5 ? 'Medium-High' : 'Low'),
-    confidence: vgateInducedCapacitiveBound !== undefined ? 'HIGH' : 'MEDIUM',
-    evidenceType: 'CALCULATED',
+    confidence: hasGateSpikeMeasured ? 'HIGH' : (vgateInducedCapacitiveBound !== undefined ? 'HIGH' : 'MEDIUM'),
+    evidenceType: hasGateSpikeMeasured ? 'MEASURED' : 'CALCULATED',
     vetoTriggered: p003ShootThroughRisk,
     vetoReason: p003ShootThroughRisk
-      ? `高dv/dt感应门极抬升电压 (${vgateInduced.toFixed(2)}V) 已超出MOSFET阈值下限 (${input.vthMinV}V)，同桥臂直通 (Shoot-Through) 致命风险触发一票否决！`
+      ? `门极抬升电压 (${vgateInducedTotal.toFixed(2)}V${hasGateSpikeMeasured ? '，示波器实测' : '，理论估算'}) 已超出MOSFET阈值下限 (${input.vthMinV}V)，同桥臂直通 (Shoot-Through) 致命风险触发一票否决！`
       : undefined,
     candidateMeasures: [
       '门极回路增加有源米勒钳位电路 (Active Miller Clamp) 或门极对地反向二极管+低阻下拉',
@@ -679,19 +715,32 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   // ----------------------------------------------------
   // P009: 霍尔故障 (Section 4)
   // ----------------------------------------------------
+  // [FIX-8，本次修复] 原来 triggered 无条件写死 true，不管当前电机是否用霍尔传感器、
+  // 也不管case内容跟霍尔有没有关系都会命中。现在改为：只有当(a)明确指定电机位置传感器
+  // 类型为HALL，或(b)自由文本里有霍尔信号故障的具体症状描述时才触发；如果明确指定了
+  // 非霍尔方案(编码器/旋变/无感)，则直接判定为不适用。未提供任何证据时不触发，但该模式
+  // 仍保留在"全部模式"列表中供工程师主动查阅参考内容。
+  const p009SensorType = input.motorSensorType;
+  const p009ExplicitlyNotHall = p009SensorType !== undefined && p009SensorType !== 'HALL';
+  const p009HallImplied = p009SensorType === 'HALL' || input.hallFaultRiskIndicated === true;
+  const p009Triggered = p009HallImplied && !p009ExplicitlyNotHall;
+  const p009SensorTypeKnown = p009SensorType !== undefined;
   patterns.push({
     id: 'P009',
     name: '霍尔传感器故障与容错退避 (Hall Sensor Hardware Failure & Degradation)',
-    triggered: true,
+    triggered: p009Triggered,
+    patternKind: 'DETECTED_RISK',
     corePhysicalChain: '霍尔线缆断线/虚焊/短路/强磁干扰 → 产生非法编码 (000/111) 或状态跳变卡死 → MCU换相失步 → 电机失步停转、强烈抖动或反转风险 → 触发整车功能降级',
     calculatedValues: {
+      '电机位置传感器类型': p009SensorTypeKnown ? p009SensorType! : (input.hallFaultRiskIndicated ? '未显式指定，由自由文本中的霍尔故障症状描述推断为霍尔方案' : '未提供，无法判断本模式是否适用于当前电机方案'),
       '支持诊断的物理失效模式': '开路 / 高钳位 / 低钳位 / 卡死 / 非法状态 / 高频抖动噪声',
       '失效检测响应时间 (ms)': '< 2.5 ms (1个PWM控制周期内锁定)',
       '整车危害等级': 'ASIL B (防失控飞车与意外反转)',
+      ...(p009ExplicitlyNotHall ? { '⚠ 不适用说明': `电机位置传感器已明确为 ${p009SensorType}，不存在霍尔硬件故障这一物理模式，本条不适用于当前工况` } : {}),
     },
-    riskLevel: 'Medium-High',
-    confidence: 'HIGH',
-    evidenceType: 'SPECIFICATION',
+    riskLevel: p009Triggered ? 'Medium-High' : 'Low',
+    confidence: p009SensorTypeKnown ? 'HIGH' : (input.hallFaultRiskIndicated ? 'MEDIUM' : 'LOW'),
+    evidenceType: p009SensorTypeKnown ? 'SPECIFICATION' : (input.hallFaultRiskIndicated ? 'AI_INFERENCE' : 'UNKNOWN'),
     vetoTriggered: false,
     candidateMeasures: [
       '双霍尔容错估计算法 (2-Hall Fault Tolerant Logic)：单霍尔损坏时利用剩余两相推算换相角',
@@ -705,19 +754,30 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   // ----------------------------------------------------
   // P010: 电流采样故障 (Section 4)
   // ----------------------------------------------------
+  // [FIX-9，本次修复] 原来 triggered 无条件写死 true。现在改为：只有当(a)电流采样架构
+  // 明确是依赖分流电阻+运放+ADC的方案(低边单电阻/三相低边独立/相线直串，隔离霍尔电流
+  // 传感器不适用这条"虚焊/偏置漂移/ADC饱和"的具体失效链)，或(b)自由文本里有采样链路
+  // 故障的具体症状描述时才触发。
+  const p010ShuntBasedArchitectures: Array<NonNullable<BldcEvaluationInput['currentSenseArchitecture']>> = ['LOW_SIDE_SINGLE', 'THREE_PHASE_LOW_SIDE', 'INLINE_PHASE'];
+  const p010UsesShuntSensing = input.currentSenseArchitecture !== undefined && p010ShuntBasedArchitectures.includes(input.currentSenseArchitecture);
+  const p010ExplicitlyHallCurrentSensor = input.currentSenseArchitecture === 'HALL_SENSOR';
+  const p010Triggered = (p010UsesShuntSensing || input.currentSenseFaultRiskIndicated === true) && !p010ExplicitlyHallCurrentSensor;
   patterns.push({
     id: 'P010',
     name: '电流采样硬件故障双重致命性 (Current Sensing Dual Failure: Control & Protection)',
-    triggered: true,
+    triggered: p010Triggered,
+    patternKind: 'DETECTED_RISK',
     corePhysicalChain: '分流电阻虚焊/运放供电跌落/偏置漂移/ADC饱和 → 同时引发两大致命后果：① 闭环 FOC 电流环发散产生失控过流；② 硬件过流保护判据失效无法关断，造成灾难性炸机',
     calculatedValues: {
+      '电流采样架构': input.currentSenseArchitecture ?? (input.currentSenseFaultRiskIndicated ? '未显式指定，由自由文本中的采样故障症状描述推断为分流电阻方案' : '未提供，无法判断本模式是否适用于当前工况'),
       '失效影响': '控制失效 + 保护失效 双重并发',
       '检测机制': '运放虚地偏置电压自检 (Vref/2) + 零电流采样窗口校准',
       '容错等级': '双通道交叉校验 (Dual Channel ADC Redundancy)',
+      ...(p010ExplicitlyHallCurrentSensor ? { '⚠ 不适用说明': '电流采样架构已明确为隔离霍尔电流传感器，不存在分流电阻/运放/ADC这条具体失效链，本条不适用于当前工况(霍尔电流传感器有其自身的失效模式，需另行评估)' } : {}),
     },
-    riskLevel: 'High',
-    confidence: 'HIGH',
-    evidenceType: 'SPECIFICATION',
+    riskLevel: p010Triggered ? 'High' : 'Low',
+    confidence: input.currentSenseArchitecture !== undefined ? 'HIGH' : (input.currentSenseFaultRiskIndicated ? 'MEDIUM' : 'LOW'),
+    evidenceType: input.currentSenseArchitecture !== undefined ? 'SPECIFICATION' : (input.currentSenseFaultRiskIndicated ? 'AI_INFERENCE' : 'UNKNOWN'),
     vetoTriggered: false,
     candidateMeasures: [
       '在每次上电自检 (POST) 中检查运放静止偏置电压是否在 1.65V ± 50mV 窗口内',
@@ -737,22 +797,45 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   if (input.uvloTypicalV === undefined || input.uvloMinV === undefined) {
     p011Assumptions.push('UVLO门限未指定具体驱动芯片型号，假设典型8.2V/最小7.8V，请替换为实际选型器件的datasheet值');
   }
+  // [FIX-10，本次修复] 原来 triggered 无条件写死 true。现在改为两条独立证据路径，任一满足
+  // 才触发：(a) 计算路径——提供了预期最低供电电压(如冷启动跌落曲线)，且没有升压稳压兜底，
+  // 跌落值真的会侵入UVLO典型门限以内；(b) 文本路径——自由文本明确描述了预驱死锁/UVLO/
+  // 驱动欠压锁定这类具体症状(例如ESD瞬态导致预驱芯片死锁，不一定是"电源慢跌落"这种狭义
+  // UVLO物理过程，但同属"驱动芯片保护性锁死"这一类故障，仍应提示核查UVLO相关设计)。
+  // 未提供预期最低供电电压时，不再用一个固定假设值(6.0V)直接顶替计算然后作为触发依据——
+  // 那样等于换了个方式继续硬编码；假设值只用于展示裕量供参考，不据此单独触发。
+  const p011VbusMinProvided = input.vbusMinExpectedV !== undefined;
+  const p011VbusMinEffective = p011VbusMinProvided ? input.vbusMinExpectedV! : 6.0;
+  if (!p011VbusMinProvided) {
+    p011Assumptions.push('未提供预期最低供电电压(如ISO 16750-2冷启动跌落曲线)，以下跌落裕量按典型cranking最低值6.0V展示，仅供数量级参考，不作为触发依据');
+  }
+  const p011HasBoost = input.hasSupplyBoostRegulation === true;
+  const p011MarginV = uvloTyp - p011VbusMinEffective;
+  const p011ComputedRisk = p011VbusMinProvided && !p011HasBoost && p011VbusMinEffective < uvloTyp;
+  const p011TextRisk = input.driverLockupRiskIndicated === true;
+  const p011Triggered = p011ComputedRisk || p011TextRisk;
+
   const p011CalculatedValues: Record<string, string | number> = {
     '驱动芯片 UVLO 门限 (V)': `${uvloTyp}V (典型值) / ${uvloMin}V (最小值)`,
+    [p011VbusMinProvided ? '预期最低供电电压 (V)' : '⚠ 预期最低供电电压：未提供，以下为按6.0V假设展示 (V)']: p011VbusMinEffective,
+    '升压稳压兜底': p011HasBoost ? '已确认有升压稳压电路兜底' : (input.hasSupplyBoostRegulation === false ? '已确认无升压稳压电路' : '未提供'),
+    '相对UVLO典型门限的裕量 (V，负值代表会侵入UVLO区间)': Number(p011MarginV.toFixed(2)),
     '全关断响应延迟 (ns)': '< 150 ns',
     '独立保护能力': '硬件独立硬关断，无需 MCU 软件干预',
+    ...(p011TextRisk ? { '⚠ 文本证据': '自由文本描述了预驱死锁/驱动欠压锁定类具体症状，据此触发本模式' } : {}),
   };
   pushAssumptionNote(p011CalculatedValues, p011Assumptions);
 
   patterns.push({
     id: 'P011',
     name: '栅极驱动芯片欠压锁定 (Gate Driver Under-Voltage Lock-Out, UVLO)',
-    triggered: true,
+    triggered: p011Triggered,
+    patternKind: 'DETECTED_RISK',
     corePhysicalChain: `驱动供电 Vcc 异常跌落至 ${uvloMin}V 以下 → 门极驱动输出电压不足 → MOSFET 进入高阻放大区而非饱和导通 → 导通压降 Vds 激增 → 芯片数毫秒内热击穿`,
     calculatedValues: p011CalculatedValues,
-    riskLevel: 'Medium',
-    confidence: p011Assumptions.length > 0 ? 'LOW' : 'HIGH',
-    evidenceType: p011Assumptions.length > 0 ? 'CALCULATED' : 'DATASHEET',
+    riskLevel: p011Triggered ? 'Medium-High' : 'Low',
+    confidence: (p011Assumptions.length > 0 && !p011TextRisk) ? 'LOW' : 'HIGH',
+    evidenceType: p011TextRisk ? 'AI_INFERENCE' : (p011Assumptions.length > 0 ? 'CALCULATED' : 'DATASHEET'),
     vetoTriggered: false,
     candidateMeasures: [
       '选用集成硬件独立 UVLO 的车规预驱芯片，一旦欠压自动拉低所有门极输出并锁存 FAULT 引脚',
@@ -843,7 +926,10 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   );
   const p013VetoBase = rippleCurrentEst > 6.0;
   const p013Veto = hasProvidedPeakCurrent013 ? p013VetoBase : false;
-  const p013Triggered = cbusUf013 < 600;
+  // [FIX] 缺母线电容实测值时 cbusUf013 缺省 470μF，天然 <600μF 阈值，会让几乎所有未填电容的
+  // case 都触发。现在只有当工程师显式提供了母线电容实测值(Number.isFinite 且 >0)且确实偏小时
+  // 才触发，与 P009~P018 的"缺证据不触发"口径一致。
+  const p013Triggered = Number.isFinite(input.cbusUf) && input.cbusUf > 0 && cbusUf013 < 600;
   // [FIX] 把原来笼统的 0.75 拆成三个独立、可查的因子，而不是一个数吃掉所有降额
   const initTolPct = input.capInitialTolerancePct !== undefined ? input.capInitialTolerancePct : 20;
   const eolDeratingPct = input.capEolDeratingPct !== undefined ? input.capEolDeratingPct : 20;
@@ -935,7 +1021,10 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   patterns.push({
     id: 'P014',
     name: 'MOSFET VDS多层级电压裕量核查 (VDS Stress vs Rating Hierarchy)',
-    triggered: Number.isFinite(peakVds) && peakVds >= input.vdsRating * 0.75,
+    // [FIX] 无实测母线峰值时 peakVds 会退化成"P001理论泵升 × 30%过冲假设"两层假设叠加，
+    // 越过75%降额线导致"给不给实测数据结论都差不多"。现在只有当有实测母线峰值(hasMeasuredVbus)
+    // 时才触发；veto 已有更严格的 p014InputsAssumed 守卫，此处把 triggered 与之一致化。
+    triggered: hasMeasuredVbus && Number.isFinite(peakVds) && peakVds >= input.vdsRating * 0.75,
     corePhysicalChain: '区分：Vds_nominal / Vds_peak / Vds_repetitive_peak / Vds_absolute_maximum；若瞬态尖峰突破额定击穿电压，直接触发一票否决！',
     calculatedValues: p014CalculatedValues,
     riskLevel: p014Veto ? 'High' : (vdsMargin < input.vdsRating * 0.1 || peakVds > input.vdsRating * 0.8 ? 'Medium-High' : 'Low'),
@@ -962,6 +1051,10 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     id: 'P015',
     name: 'MCU依赖型保护独立性评估 (Protection Independence Taxonomy)',
     triggered: true,
+    // [FIX-11，本次修复] 本条是"保护链分类参考清单"，不是针对某个具体case测出来的故障，
+    // 标记为 CHECKLIST 后 UI/统计口径会把它从"已触发风险"列表中分离，避免跟P009/P010等
+    // 真实测出来的故障模式混在一起、让人误以为这也是本次分析新发现的问题。
+    patternKind: 'CHECKLIST',
     corePhysicalChain: '保护链分类：Fault → Detection → Decision → Protection → Actuation → Confirmation；区分软件依赖与硬件独立断路',
     calculatedValues: {
       '软件依赖保护 (Software-Dependent)': '过温降额、堵转停机、弱磁限速、相平衡诊断',
@@ -1062,6 +1155,9 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     id: 'P017',
     name: '电流采样架构决策矩阵 (Current Sensing Architecture Trade-Off)',
     triggered: true,
+    // [FIX-11，本次修复] 同 P015，这是架构选型权衡参考表，标记为 CHECKLIST 与真实检测到
+    // 的故障模式区分开，不计入"已触发风险"统计。
+    patternKind: 'CHECKLIST',
     corePhysicalChain: '系统级权衡：低边单电阻 (Single Low-Side) vs 三相低边独立采样 (Three-Phase Low-Side) vs 相线直串采样 (Inline Phase) vs 霍尔电流传感器 (Hall Sensor)',
     calculatedValues: {
       '方案 A (相电流独立采样 - 推荐)': '高精度FOC支持、全占空比采样、支持单相开路短路独立诊断、PCB复杂度中等、BOM适中',
@@ -1082,21 +1178,27 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   // ----------------------------------------------------
   // P018: 堵转保护多级判据 (重点新增模块 4.1)
   // ----------------------------------------------------
+  // [FIX-12，本次修复] 原来 triggered 无条件写死 true。堵转保护判据是否需要重点核查，
+  // 取决于当前case是否真的存在堵转/机械卡滞相关的具体症状描述——不是每个case都在谈堵转，
+  // 未提供证据时不触发。
+  const p018Triggered = input.stallRiskIndicated === true;
   patterns.push({
     id: 'P018',
     name: '电机堵转保护多级复合联合判据 (Multi-Level Stall Protection Rule Engine)',
-    triggered: true,
+    triggered: p018Triggered,
+    patternKind: 'DETECTED_RISK',
     corePhysicalChain: '联合判据：相电流 > I_stall_th AND 机械转速 < RPM_low_th AND 持续时间 > Time_window；严禁单纯使用温度阈值粗暴判断！四级阈值的结构具有普遍工程意义，但具体数值(电流/转速/时间窗)必须按电机额定电流与P006/P007给出的热时间常数标定，不应直接套用示例数字',
     calculatedValues: {
+      ...(p018Triggered ? {} : { '⚠ 适用性说明': '自由文本/工况输入中未发现堵转、机械卡滞相关的具体症状描述，本模式暂未判定为当前case的已触发风险，如设计确实存在堵转工况请补充描述' }),
       'Level 1 (软限制，示例阈值，需按实际电机标定)': '电流 > I_stall_th 且 RPM < RPM_low_th 持续 t1 → 实施转矩限制',
       'Level 2 (PWM降额，示例阈值，需按实际电机标定)': '持续 t2 未恢复 → PWM 占空比阶梯降额，并上报 DTC 预警码',
       'Level 3 (安全停机，示例阈值，需按实际电机标定)': '持续 t3 仍未脱困 → 触发安全停机，关断三相逆变桥，进入低功耗怠速保护',
       'Level 4 (故障锁存，示例阈值，需按实际电机标定)': '单次点火循环内累计触发 N 次 Level 3 → 永久锁存故障码，禁止再次强拖点火',
       '⚠ 标定依据': 't1/t2/t3 时间窗应基于 P006/P007 给出的热时间常数标定(堵转保护延时的物理依据本质上是热)，而不是独立拍脑袋设定；电流阈值应基于电机连续/峰值电流规格',
     },
-    riskLevel: 'Medium',
-    confidence: 'HIGH',
-    evidenceType: 'SPECIFICATION',
+    riskLevel: p018Triggered ? 'Medium' : 'Low',
+    confidence: p018Triggered ? 'HIGH' : 'LOW',
+    evidenceType: p018Triggered ? 'AI_INFERENCE' : 'UNKNOWN',
     vetoTriggered: false,
     candidateMeasures: ['实施四级递进式堵转闭环保护策略，兼顾机械卡滞脱困能力与电子器件防烧毁安全，时间窗与P006/P007的热模型联动标定'],
     sideEffects: ['频繁微小卡滞可能引起短暂停机，需针对机械机构调优延时滞回参数'],

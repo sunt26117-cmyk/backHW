@@ -161,16 +161,24 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
                   )}
 
                   {/* 跨域物理耦合复核闭环 (待办 1.3) */}
-                  {opt.crossDomainCouplingChecks && opt.crossDomainCouplingChecks.length > 0 && (
+                  {/* [本次修复] 原来只判空(opt.crossDomainCouplingChecks && .length > 0)，跟同文件
+                      customerVetoViolations/referenced_standards 两处的 Array.isArray 防护不一致：
+                      如果这个字段被AI结果/上游数据意外填成非数组的真值(例如字符串)，.length同样
+                      存在但.map会直接抛错导致整个页面白屏。现在统一用 Array.isArray 归一化，
+                      不再依赖 expertEngine.ts 兜底逻辑单方面保证类型正确。 */}
+                  {(() => {
+                    const crossDomainCouplingChecks = Array.isArray(opt.crossDomainCouplingChecks) ? opt.crossDomainCouplingChecks : [];
+                    if (crossDomainCouplingChecks.length === 0) return null;
+                    return (
                     <div className="bg-indigo-950/30 p-2.5 rounded-lg border border-indigo-800/40 mb-3 text-xs space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-indigo-300 text-[10px] font-bold flex items-center">
                           <Layers className="w-3 h-3 mr-1 text-indigo-400" />
-                          跨域物理耦合复核 ({opt.crossDomainCouplingChecks.filter((c) => c.addressed).length}/{opt.crossDomainCouplingChecks.length} 项闭环)
+                          跨域物理耦合复核 ({crossDomainCouplingChecks.filter((c) => c.addressed).length}/{crossDomainCouplingChecks.length} 项闭环)
                         </span>
                       </div>
                       <div className="space-y-1 max-h-24 overflow-y-auto pr-0.5">
-                        {opt.crossDomainCouplingChecks.map((chk, cIdx) => (
+                        {crossDomainCouplingChecks.map((chk, cIdx) => (
                           <div key={cIdx} className="flex items-start space-x-1.5 text-[10px] bg-slate-900/60 p-1 rounded border border-indigo-900/30">
                             {chk.addressed ? (
                               <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
@@ -185,7 +193,8 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
                         ))}
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Time & Cost metrics */}
                   <div className="grid grid-cols-2 gap-2 text-xs mb-3 font-mono">

@@ -60,7 +60,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
   }, [derivedParams]);
 
   const [selectedPatternId, setSelectedPatternId] = useState<BldcPatternId>('P001');
-  const [filterMode, setFilterMode] = useState<'ALL' | 'TRIGGERED' | 'VETO'>('ALL');
+  const [filterMode, setFilterMode] = useState<'ALL' | 'TRIGGERED' | 'VETO' | 'CHECKLIST'>('ALL');
 
   const patternResults = useMemo(() => {
     if (!isBldcScenario) return [];
@@ -68,15 +68,31 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
     return evaluateAllBldcPatterns(params);
   }, [params, isBldcScenario, hasUsableBldcInputs]);
 
+  // [本次修复] "已触发风险"此前把 P015/P017 这类恒定展示的设计检查清单/架构权衡矩阵
+  // 也算进去了，跟P009等真实测出来的故障模式混在同一条列表/计数里，工程师没法区分
+  // "这是本次case测出来的问题"还是"这是通用参考清单"。现在用 patternKind 区分开：
+  // 已触发风险只统计 DETECTED_RISK，CHECKLIST 单独一个筛选项。
+  const detectedRiskPatterns = useMemo(
+    () => patternResults.filter((p) => p.patternKind !== 'CHECKLIST'),
+    [patternResults]
+  );
+  const checklistPatterns = useMemo(
+    () => patternResults.filter((p) => p.patternKind === 'CHECKLIST'),
+    [patternResults]
+  );
+
   const filteredPatterns = useMemo(() => {
     if (filterMode === 'TRIGGERED') {
-      return patternResults.filter((p) => p.triggered);
+      return detectedRiskPatterns.filter((p) => p.triggered);
     }
     if (filterMode === 'VETO') {
       return patternResults.filter((p) => p.vetoTriggered);
     }
+    if (filterMode === 'CHECKLIST') {
+      return checklistPatterns;
+    }
     return patternResults;
-  }, [patternResults, filterMode]);
+  }, [patternResults, detectedRiskPatterns, checklistPatterns, filterMode]);
 
   const activePattern = useMemo(() => {
     return patternResults.find((p) => p.id === selectedPatternId) || patternResults[0];
@@ -232,7 +248,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
                   : 'bg-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              已触发风险 ({patternResults.filter((p) => p.triggered).length})
+              已触发风险 ({detectedRiskPatterns.filter((p) => p.triggered).length})
             </button>
             <button
               onClick={() => setFilterMode('VETO')}
@@ -243,6 +259,17 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
               }`}
             >
               一票否决 VETO ({patternResults.filter((p) => p.vetoTriggered).length})
+            </button>
+            <button
+              onClick={() => setFilterMode('CHECKLIST')}
+              className={`px-3 py-1 rounded text-xs font-medium cursor-pointer transition ${
+                filterMode === 'CHECKLIST'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+              title="设计检查清单/架构权衡矩阵类内容，供随时查阅参考，不是针对当前case测出来的具体故障"
+            >
+              设计检查清单 ({checklistPatterns.length})
             </button>
           </div>
         </div>
@@ -374,7 +401,11 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
                   </div>
 
                   <div className="shrink-0 flex flex-col items-end gap-1">
-                    {pattern.vetoTriggered ? (
+                    {pattern.patternKind === 'CHECKLIST' ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                        检查清单
+                      </span>
+                    ) : pattern.vetoTriggered ? (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/40">
                         VETO
                       </span>

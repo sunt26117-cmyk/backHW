@@ -180,7 +180,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '母线电解电容 Arrhenius 寿命加速模型估算',
     category: 'Reliability & Aging',
     input: {
-      issue: { failurePhenomenon: '母线电解电容在 85℃ 环温与 3.5A 纹波下工作，需评估 15 年车规寿命' },
+      issue: { failurePhenomenon: '母线电解电容在 85℃ 环温与 3.5A 纹波下工作，需评估 15 年车规寿命', measuredValues: { cBusUf: 470, currentPeakA: 15, ambientTempC: 85 } },
     },
     expectedPattern: 'P013',
     expectedCalculation: { '估算寿命 (h)': 20000, '目标寿命 (h)': 15000, '寿命裕量 (h)': 5000 },

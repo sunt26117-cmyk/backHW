@@ -169,11 +169,67 @@ console.log('  金标准案例：' + goldPass + '/' + GOLD_STANDARD_CASES.length
 
 console.log('\n=== 负例断言：检测型模式必须在输入不具备时不触发，防止总是触发回潮 ===');
 const quietBldcInput = { vbusNominal: 12, vdsRating: 40, rpm: 500, jInertia: 0.00015, cbusUf: 1000, tAmbientC: 25, currentPeakA: 5, harnessLengthM: 0.5, deadTimeNs: 400, rgOffOhm: 1.0, cgdPf: 45, dvDtVns: 2.0, vthMinV: 2.0 };
-const quietPatterns = evaluateAllBldcPatterns(quietBldcInput).filter((p) => p.triggered).map((p) => p.id);
+const quietAllPatterns = evaluateAllBldcPatterns(quietBldcInput);
+const quietPatterns = quietAllPatterns.filter((p) => p.triggered).map((p) => p.id);
 check('温和工况不得触发 P001~P008', () => {
   for (const id of ['P001', 'P002', 'P003', 'P004', 'P005', 'P006', 'P007', 'P008'] as const) {
     assert.equal(quietPatterns.includes(id), false, id + ' 不应在温和工况触发，实际=' + quietPatterns.join(','));
   }
+});
+
+// [本次修复新增] 之前这里只覆盖 P001~P008，P009/P010/P011/P015/P017/P018 被刻意绕开——
+// 也正是这批被绕开的模式里，P009/P010/P011/P018 当时是硬编码 triggered:true。现在把覆盖
+// 范围扩到 P009~P018（除 P015/P017 外，它们是设计检查清单类型，允许恒定为 true，见下方
+// 单独断言），让"这些模式是否真的会随工况变化"重新变得可见、可回归验证。
+// 注意：P013/P014 本轮已一并修复——P013 原来因 cbusUf 缺省470μF < 600μF 阈值而几乎总触发，
+// P014 原来因"P001理论泵升 × 30%过冲假设"两层假设叠加越过75%降额线而触发。现在二者都加了
+// triggered 守卫(缺实测证据不触发)，并重新纳入本断言范围做回归验证。
+check('温和工况不得触发 P009~P018 中的检测型模式（P015/P017 checklist 除外）', () => {
+  for (const id of ['P009', 'P010', 'P011', 'P012', 'P013', 'P014', 'P016', 'P018'] as const) {
+    assert.equal(quietPatterns.includes(id), false, id + ' 不应在温和工况触发，实际=' + quietPatterns.join(','));
+  }
+});
+
+check('P015/P017 是设计检查清单类型 (patternKind=CHECKLIST)，与检测型模式的 triggered 语义区分开', () => {
+  const p015 = quietAllPatterns.find((p) => p.id === 'P015');
+  const p017 = quietAllPatterns.find((p) => p.id === 'P017');
+  assert.equal(p015?.patternKind, 'CHECKLIST', 'P015 应标记为 CHECKLIST');
+  assert.equal(p017?.patternKind, 'CHECKLIST', 'P017 应标记为 CHECKLIST');
+});
+
+check('霍尔故障症状文本证据应触发 P009，缺少证据的温和工况不应', () => {
+  const hallCase = evaluateAllBldcPatterns({ ...quietBldcInput, hallFaultRiskIndicated: true }).filter((p) => p.triggered).map((p) => p.id);
+  assert.equal(hallCase.includes('P009'), true, '有霍尔故障文本证据应触发 P009，实际=' + hallCase.join(','));
+  assert.equal(quietPatterns.includes('P009'), false, '温和工况(无证据)不得触发 P009');
+});
+
+check('明确指定编码器方案时 P009 不适用，即使给了霍尔故障文本证据也不应触发', () => {
+  const encoderCase = evaluateAllBldcPatterns({ ...quietBldcInput, motorSensorType: 'ENCODER', hallFaultRiskIndicated: true }).filter((p) => p.triggered).map((p) => p.id);
+  assert.equal(encoderCase.includes('P009'), false, '编码器方案下不应触发霍尔故障模式，实际=' + encoderCase.join(','));
+});
+
+check('缺母线电容实测值(cbusUf=NaN)时 P013 不得触发——修复默认470μF越阈值问题', () => {
+  const noCbus = evaluateAllBldcPatterns({ ...quietBldcInput, cbusUf: NaN }).filter((p) => p.triggered).map((p) => p.id);
+  assert.equal(noCbus.includes('P013'), false, '缺母线电容实测值时不应触发 P013，实际=' + noCbus.join(','));
+});
+
+check('缺母线实测峰值(vbusMeasuredPeak 未提供)时 P014 不得触发——修复双层假设叠加问题', () => {
+  const noVbusMeasured = evaluateAllBldcPatterns({ ...quietBldcInput }).filter((p) => p.triggered).map((p) => p.id);
+  assert.equal(noVbusMeasured.includes('P014'), false, '缺母线实测峰值时不应触发 P014，实际=' + noVbusMeasured.join(','));
+});
+
+check('堵转文本证据应触发 P018，缺少证据的温和工况不应', () => {
+  const stallCase = evaluateAllBldcPatterns({ ...quietBldcInput, stallRiskIndicated: true }).filter((p) => p.triggered).map((p) => p.id);
+  assert.equal(stallCase.includes('P018'), true, '有堵转文本证据应触发 P018，实际=' + stallCase.join(','));
+  assert.equal(quietPatterns.includes('P018'), false, '温和工况(无证据)不得触发 P018');
+});
+
+check('gateSpikeV(示波器实测门极尖峰)必须真正接入引擎，不能只是导入展示而不影响任何判据', () => {
+  const withoutMeasured = evaluateAllBldcPatterns(quietBldcInput).find((p) => p.id === 'P003')!;
+  const withMeasured = evaluateAllBldcPatterns({ ...quietBldcInput, gateSpikeMeasuredV: 5.5 }).find((p) => p.id === 'P003')!;
+  assert.equal(withoutMeasured.triggered, false, '温和工况无实测门极尖峰时 P003 不应触发');
+  assert.equal(withMeasured.triggered, true, '门极尖峰实测值(5.5V)超过Vth(2.0V)时应触发 P003，实际未触发说明 gateSpikeV 没有真正接入');
+  assert.equal(withMeasured.evidenceType, 'MEASURED', 'gateSpikeV 生效时 evidenceType 应为 MEASURED');
 });
 
 check('急停高速工况应触发 P001，温和工况不应', () => {

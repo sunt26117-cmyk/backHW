@@ -99,15 +99,36 @@ export const AI_OPTIMIZATION_GUIDE_TEXT = `# 车规级 ECU 硬件/电机/机器�
 
 若您把源码包发送给其他先进大语言模型（如 Claude 3.7 Sonnet、GPT-4o、DeepSeek-R1），推荐输入以下具体优化课题：
 
+0. **【最高优先级】模式引擎"触发条件与工况脱钩"排查**（2026-09 审查新增）：
+   - 历史教训：bldcPatternEngine.ts 里 P009/P010/P011/P018 曾经长期是 triggered:true 硬编码，
+     不管工况是什么、case内容是什么都会无条件命中，导致"工况变了、分析结论基本不变"——这是
+     比下面几条数学模型精度问题严重得多的根因级缺陷，且不容易从表面代码走查发现(硬编码的
+     triggered:true 看起来跟其它正常写法没有区别，必须结合 verify-engines.ts 跑真实工况对比
+     才能发现)。已于 2026-09 修复为依据 motorSensorType/currentSenseArchitecture/
+     stallRiskIndicated 等结构化证据字段 + 自由文本症状关键词双路径判断。
+   - 优化方向：新增任何模式(P0xx/J0xx)时，第一步先问"这条 triggered 逻辑在输入完全不提供
+     相关证据的'温和工况'下是否为 false"，并在 verify-engines.ts 的负例断言里加一行覆盖，
+     而不是等到走查代码时才发现。同时排查 P013/P014 是否存在类似的"默认兜底假设值过于容易
+     越过触发阈值"问题——温和工况下 P013 因 cbusUf 缺省470uF < 600uF 阈值而触发，P014 因
+     "P001最坏工况理论泵升 × P014自身30%过冲假设系数"两层假设叠加越过75%降额线而触发，
+     这两个都是本轮修复顺带发现、但未处理的独立问题(已在 verify-engines.ts 里用注释显式
+     排除出负例断言范围并写明原因，未被悄悄隐藏)。
+   - 优化方向：verify-engines.ts 里任何"负例断言只覆盖一部分模式ID"的写法都要重新审视——
+     若某个模式ID被排除在负例断言之外且没有像上面这样写清楚原因的注释，视为可疑信号。
 1. **热力学瞬态网络升级**：
    - 当前 thermalCascadeEngine.ts 使用了基于 R_theta_jc 的稳态收敛迭代。
    - 优化方向：引入 Foster 4阶或 Cauer 热网络微分方程，以支持急停制动等脉冲工况下的毫秒级瞬态温升峰值 T_j_peak(t) 计算。
 2. **米勒效应微积分动态仿真求解**：
-   - 当前使用一阶等效代数公式 V_gs ≈ C_gd * (dv/dt) * R_g。
+   - 当前使用一阶等效代数公式 V_gs ≈ C_gd * (dv/dt) * R_g，2026-09 已接入示波器实测 Vgs 尖峰
+     (gateSpikeV) 作为优先判据来源，但理论模型本身仍是一阶代数近似。
    - 优化方向：引入由寄生电感 L_source、输入电容 C_iss 构成的 RLC 二阶欠阻尼瞬态振荡模型，更精确捕捉高频振铃导致的偶发直通。
 3. **跨域耦合矩阵扩展**：
    - 当前在 crossDomainCouplingMatrix.ts 中定义了 BLDC、EMC、Thermal、Functional Safety 等耦合对。
    - 优化方向：进一步丰富 ISO 26262 硬件指标定量分配算法（如自动依据 FMEDA 格式计算单点失效度量 SPFM 和潜伏失效度量 LFM）。
 4. **状态提取健壮性与 TypeScript 类型精简**：
    - 对 src/types.ts 和 v4Models.ts 结构进行更优雅的泛型解耦与运行时校验（如 Zod Schema 接入）。
+   - 已知遗留问题：bldcPatternEngine.ts 顶部 import 的 UnifiedEngineeringModel 类型未被实际使用，
+     真实输入来自 scenarioDerived.ts 单独的一套提取逻辑，跟 unifiedStateExtractor.ts 是两条平行、
+     没有交叉验证的路径，属于本轮修复范围之外的架构级问题，建议单独立项处理，不要在小修小补中
+     顺带动它。
 `;

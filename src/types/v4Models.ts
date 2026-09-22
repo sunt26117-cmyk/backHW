@@ -191,6 +191,12 @@ export interface PatternOutputItem {
   id: BldcPatternId;
   name: string;
   triggered: boolean;
+  // 区分"实测/工况相关，检测到才报"的具体故障模式 (DETECTED_RISK，默认值，向后兼容未标注的旧数据)
+  // 与"设计参考清单/架构权衡矩阵"类内容 (CHECKLIST，例如 P015/P017)。
+  // CHECKLIST 类模式的 triggered 恒为 true 属于预期设计(供工程师随时查阅)，UI 与统计口径
+  // 不应把它们和 DETECTED_RISK 的 triggered 混入同一条"已触发风险"列表，避免检查清单
+  // 冒充成"这个具体case测出来的问题"。
+  patternKind?: 'DETECTED_RISK' | 'CHECKLIST';
   corePhysicalChain: string;
   calculatedValues: Record<string, string | number>;
   riskLevel: RiskLevel;
