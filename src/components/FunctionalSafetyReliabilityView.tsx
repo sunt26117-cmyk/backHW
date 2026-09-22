@@ -4,7 +4,7 @@
  * 包含常驻强制免责声明
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Shield,
   ShieldAlert,
@@ -35,6 +35,28 @@ import { ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
 import { deriveSafetyTraceability, deriveFmedaRows, deriveFtaTree, deriveSafetyCollateral } from '../utils/scenarioDerived';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 
+const FSR_INPUT_KEYS = ['primaryRdsOnMilliOhm','secondaryRdsOnMilliOhm','primaryQgNc','secondaryQgNc','primaryQrrNc','secondaryQrrNc','primaryRthJcCPerW','secondaryRthJcCPerW','componentPartNumber','supplierName','pcnChangeDescription','esdLevelKv','esdPeakCurrentA','recoveryTimeMs','canErrorCount','affectedPort','tvsClampingVoltageV','harnessLengthM','bciInjectionMa','bciSensitiveFreqMhz','commonModeCurrentMa','bciNodeVoltageV','currentSenseErrorPct'] as const;
+
+const cellInputCls = 'w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700 text-xs focus:outline-none focus:border-blue-500';
+
+function NumCell({ label, unit, value, onChange }: { label: string; unit?: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="bg-slate-950 p-2 rounded border border-slate-800">
+      <label className="text-[10px] text-slate-400 block mb-1">{label}{unit ? ' (' + unit + ')' : ''}</label>
+      <input type="number" step="any" value={value} onChange={(e) => onChange(e.target.value)} className={cellInputCls} />
+    </div>
+  );
+}
+
+function TextCell({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="bg-slate-950 p-2 rounded border border-slate-800">
+      <label className="text-[10px] text-slate-400 block mb-1">{label}</label>
+      <input type="text" value={value} onChange={(e) => onChange(e.target.value)} className={cellInputCls} />
+    </div>
+  );
+}
+
 interface FunctionalSafetyReliabilityViewProps {
   context: ProjectContext;
   issue: IssueInput;
@@ -62,6 +84,19 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
     setCapParams(derivedCapDefaults);
   }, [derivedCapDefaults]);
 
+  // 二供/PCN/ESD/BCI 页内交互参数：优先从当前工况 measuredValues 同步，页内可直接改（实时重算）。
+  const [fsrInputs, setFsrInputs] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const mv = issue.measuredValues || {};
+    const next: Record<string, string> = {};
+    for (const k of FSR_INPUT_KEYS) {
+      const v = mv[k];
+      next[k] = v === undefined || v === null ? '' : String(v);
+    }
+    setFsrInputs(next);
+  }, [issue.measuredValues]);
+  const setF = (k: string) => (v: string) => setFsrInputs((p) => ({ ...p, [k]: v }));
+
   const capLifeResult = calculateCapacitorLife(
     capParams.nominalHours,
     capParams.ratedTempC,
@@ -76,8 +111,8 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
     const isHv = /(?:400V|800V|高压|400\s*V|800\s*V)/i.test(text);
     const isEmc = domain === 'EMC_BCI' || domain === 'EMC_ESD' || domain === 'EMC_RE_CE';
     const isBldc = domain === 'BLDC';
-    const num = (k: string): number | undefined => { const v = Number(issue.measuredValues?.[k]); return Number.isFinite(v) ? v : undefined; };
-    const str = (k: string): string => { const v = issue.measuredValues?.[k]; return v === undefined || v === null ? '' : String(v); };
+    const num = (k: string): number | undefined => { const raw = fsrInputs[k]; if (raw === undefined || raw === '') return undefined; const v = Number(raw); return Number.isFinite(v) ? v : undefined; };
+    const str = (k: string): string => fsrInputs[k] || '';
     const primary = isHv ? '当前高压主功率器件（Primary）' : isBldc ? '当前 3 相逆变功率管（Primary）' : `${context.productType} 关键器件（Primary）`;
     const secondary = isHv ? '候选高压二供器件（Secondary）' : isBldc ? '候选 Gate Driver / MOSFET 二供（Secondary）' : `${context.productType} 候选二供器件（Secondary）`;
     const source = compareSecondSource(primary, secondary, {
@@ -123,7 +158,7 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
       bci,
       provenanceNote: issue.measuredValueSource === 'BENCHMARK' ? '当前安全/可靠性页面中的演示数值仅用于验证界面与规则链，正式项目必须用器件 Safety Manual / FMEDA / 测试数据覆盖。' : '当前页面计算优先使用项目输入与当前域规则。',
     };
-  }, [context, issue, result]);
+  }, [context, issue, result, fsrInputs]);
 
   const secondSourceResult = safetyBenchmarks.secondSource;
   const pcnResult = safetyBenchmarks.pcn;
@@ -518,8 +553,24 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
       {/* 5. 供应商二供与 PCN 评估 */}
       {activeSubTab === 'SECOND_SOURCE_PCN' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="md:col-span-2 bg-blue-950/30 border border-blue-800/50 rounded-lg p-3 text-[11px] text-slate-300">
-            参数输入口：在「1. 统一工程输入」→「实测参数回填」里，把当前域切到 <span className="font-mono text-cyan-300">器件替代 (COMPONENT)</span>，填入 一供/二供 的 Rds(on)/Qg/Qrr/Rth(j-c) 与 器件型号/供应商/PCN变更内容。未填时本页显示「待输入」，不再用历史示例数字冒充。
+          <div className="md:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200 mb-3"><Sliders className="w-4 h-4 text-blue-400" /> 二供 / PCN 参数（页内直接输入，实时重算）</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+              <NumCell label="一供 Rds(on)" unit="mΩ" value={fsrInputs.primaryRdsOnMilliOhm || ''} onChange={setF('primaryRdsOnMilliOhm')} />
+              <NumCell label="二供 Rds(on)" unit="mΩ" value={fsrInputs.secondaryRdsOnMilliOhm || ''} onChange={setF('secondaryRdsOnMilliOhm')} />
+              <NumCell label="一供 Qg" unit="nC" value={fsrInputs.primaryQgNc || ''} onChange={setF('primaryQgNc')} />
+              <NumCell label="二供 Qg" unit="nC" value={fsrInputs.secondaryQgNc || ''} onChange={setF('secondaryQgNc')} />
+              <NumCell label="一供 Qrr" unit="nC" value={fsrInputs.primaryQrrNc || ''} onChange={setF('primaryQrrNc')} />
+              <NumCell label="二供 Qrr" unit="nC" value={fsrInputs.secondaryQrrNc || ''} onChange={setF('secondaryQrrNc')} />
+              <NumCell label="一供 Rth(j-c)" unit="℃/W" value={fsrInputs.primaryRthJcCPerW || ''} onChange={setF('primaryRthJcCPerW')} />
+              <NumCell label="二供 Rth(j-c)" unit="℃/W" value={fsrInputs.secondaryRthJcCPerW || ''} onChange={setF('secondaryRthJcCPerW')} />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+              <TextCell label="器件型号" value={fsrInputs.componentPartNumber || ''} onChange={setF('componentPartNumber')} />
+              <TextCell label="供应商" value={fsrInputs.supplierName || ''} onChange={setF('supplierName')} />
+              <TextCell label="PCN变更内容" value={fsrInputs.pcnChangeDescription || ''} onChange={setF('pcnChangeDescription')} />
+            </div>
+            <div className="text-[10px] text-slate-500 mt-2">未填项显示「待输入」；页内改动即时重算，并会随「1. 统一工程输入」回填的参数自动同步。</div>
           </div>
           {/* 二供多维等价性对比 */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
@@ -594,8 +645,18 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
       {/* 6. ESD 防护与 BCI 大电流注入 */}
       {activeSubTab === 'EMC_IMMUNITY' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="md:col-span-2 bg-blue-950/30 border border-blue-800/50 rounded-lg p-3 text-[11px] text-slate-300">
-            参数输入口：在「1. 统一工程输入」→「实测参数回填」里，把当前域切到 <span className="font-mono text-cyan-300">EMC_ESD / EMC_BCI</span>，填入 ESD放电等级/TVS钳位残压/受扰端口、BCI注入电流/敏感频点/线束长度/恢复时间等。未填时本页显示「待输入」。
+          <div className="md:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200 mb-3"><Sliders className="w-4 h-4 text-emerald-400" /> ESD / BCI 参数（页内直接输入，实时重算）</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <NumCell label="ESD放电等级" unit="kV" value={fsrInputs.esdLevelKv || ''} onChange={setF('esdLevelKv')} />
+              <NumCell label="TVS钳位残压" unit="V" value={fsrInputs.tvsClampingVoltageV || ''} onChange={setF('tvsClampingVoltageV')} />
+              <TextCell label="受扰端口" value={fsrInputs.affectedPort || ''} onChange={setF('affectedPort')} />
+              <NumCell label="BCI注入电流" unit="mA" value={fsrInputs.bciInjectionMa || ''} onChange={setF('bciInjectionMa')} />
+              <NumCell label="敏感频点" unit="MHz" value={fsrInputs.bciSensitiveFreqMhz || ''} onChange={setF('bciSensitiveFreqMhz')} />
+              <NumCell label="线束长度" unit="m" value={fsrInputs.harnessLengthM || ''} onChange={setF('harnessLengthM')} />
+              <NumCell label="恢复时间" unit="ms" value={fsrInputs.recoveryTimeMs || ''} onChange={setF('recoveryTimeMs')} />
+            </div>
+            <div className="text-[10px] text-slate-500 mt-2">未填项显示「待输入」；页内改动即时重算，并会随「1. 统一工程输入」回填的参数自动同步。</div>
           </div>
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
             <h2 className="text-xs font-bold text-white flex items-center gap-1.5">

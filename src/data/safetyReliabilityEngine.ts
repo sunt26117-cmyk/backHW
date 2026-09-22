@@ -344,7 +344,7 @@ export function compareSecondSource(
     thermalEquivalence: { rthJcDeltaPct: rth ?? 0, tjMaxSame: true },
     switchingEquivalence: {
       dvDtImpact: qg !== undefined ? '按实测 Qg 差异 ' + sign(qg) + qg + '% 评估开通速度变化（需在相同 Rg 下复核，不得沿用历史示例）' : '待输入：需填两只器件 Qg/Qgd 后才能评估 dv/dt 影响',
-      ringingRisk: qrr !== undefined ? '按 Qrr 差异 ' + sign(qrr) + qrr + '% 评估关断振铃与反向恢复尖峰（具体频点/幅值必须实测，不得套用历史 48MHz/3.8V 示例）' : '待输入：需填两只器件 Qrr 后才能评估关断振铃风险',
+      ringingRisk: qrr !== undefined ? '按 Qrr 差异 ' + sign(qrr) + qrr + '% 评估关断振铃与反向恢复尖峰（具体频点/幅值必须实测，不得套用历史示例数值）' : '待输入：需填两只器件 Qrr 后才能评估关断振铃风险',
     },
     safetyEmcEquivalence: {
       emcRisk: '替代料 EMC 影响必须通过同一暗室 A/B 对比实测确认，不得用经验值判定',
@@ -393,7 +393,7 @@ export function evaluateEsdProtection(input: EsdInput = {}): EsdAnalysis {
   const port = (input.affectedPort || '').trim();
   return {
     dischargePath: port ? port + ' 端子 → 内部走线 → TVS/共模电容 → 金属外壳 → 车身搭铁地' : '待输入：未提供受扰端口，放电路径需按实际连接器与搭铁设计确认',
-    tvsModel: tvs !== undefined ? '项目 TVS 器件（钳位残压 ' + tvs + 'V，按实际器件规格）' : '待输入：未提供 TVS 钳位残压/型号（不套用历史 SMCJ24CA）',
+    tvsModel: tvs !== undefined ? '项目 TVS 器件（钳位残压 ' + tvs + 'V，按实际器件规格）' : '待输入：未提供 TVS 钳位残压/型号（不套用历史型号）',
     clampingVoltageV: clamping,
     connectorGroundReturn: '待确认：连接器屏蔽环 360° 压接金属机壳与搭铁阻抗需按实际结构测量',
     chassisCapacitancePf: fin(input.harnessLengthM) !== undefined ? Math.max(100, Math.round((fin(input.harnessLengthM) as number) * 100)) : 0,
@@ -415,10 +415,10 @@ export function evaluateBciImmunity(input: BciInput = {}): BciAnalysis {
   return {
     harnessCouplingLoopCm2: loop !== undefined ? Number((loop * 2).toFixed(1)) : 0,
     susceptibleBandMhz: freq !== undefined ? freq + ' MHz（实测敏感频点，以其倍频/共模谐振边界为验证中心）' : '待输入：未提供实测敏感频点',
-    injectionPointRecommended: inj !== undefined ? '按实测注入电流 ' + inj + 'mA，注入点距控制器端线束连接器 150mm 处（以实际标定为准）' : '待输入：未提供注入电流，注入点需按 ISO 11452-4 标定位置确认',
+    injectionPointRecommended: inj !== undefined ? '按实测注入电流 ' + inj + 'mA，注入点按 ISO 11452-4 标定位置执行（具体距离以实际标定为准，不预设数值）' : '待输入：未提供注入电流，注入点需按 ISO 11452-4 标定位置确认',
     measurementPointRecommended: (err !== undefined || node !== undefined) ? ('运放采样差分输入端与 MCU ADC 输入管脚（受扰节点' + (node !== undefined ? '噪声 ' + node + 'V' : '') + (err !== undefined ? '、采样误差 ' + err + '%' : '') + '）') : '运放采样差分输入端与 MCU ADC 输入管脚（受扰节点需实测确认）',
     filteringMeasures: [
-      '检流差分信号线并联 100pF NPO 共模与 470pF 差模滤波电容（容值需按实测敏感频点重新核算，不套用示例）',
+      '检流差分信号线并联 共模/差模 滤波电容（容值需按实测敏感频点重新核算，不预设数值）',
       '电源与电机相线在进板端增加差模π型 LC 滤波网络',
     ],
     verificationMethod: 'ISO 11452-4 大电流注入 (BCI) 法，等级 Class A（全功能正常运行）；恢复时间' + (rec !== undefined ? ' ' + rec + 'ms' : ' 待实测') + (cm !== undefined ? '，共模电流 ' + cm + 'mA' : ''),
