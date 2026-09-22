@@ -14,6 +14,7 @@ import { recalculateStandardWeightedScore } from '../src/utils/scoringWeights';
 import { assessDomainClassificationAmbiguity } from '../src/utils/scenarioDomainEngine';
 import { GOLD_STANDARD_CASES, runGoldStandardCaseRegression } from '../src/data/goldStandardCases';
 import { evaluateAllBldcPatterns } from '../src/data/bldcPatternEngine';
+import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput, type RobotJointEvaluationInput } from '../src/data/robotJointPatternEngine';
 import type { IssueInput, ProjectContext } from '../src/types';
 
 let failures = 0;
@@ -244,4 +245,96 @@ check('急停高速工况应触发 P001，温和工况不应', () => {
 });
 
 console.log(`\n${failures === 0 ? '全部通过' : `共 ${failures} 项失败`}`);
+
+console.log('\n=== 机器人关节模式 J001~J007：健康工况不得一票否决 + 关键失效闭锁 ===');
+
+const quietJointInput: RobotJointEvaluationInput = {
+  gearRatio: 100,
+  backlashArcmin: 0.5,
+  requiredPositionAccuracyArcmin: 10,
+  outputTorqueNm: 20,
+  torsionalStiffnessNmPerRad: 18000,
+  velocityLoopBandwidthHz: 40,
+  motorInertiaKgm2: 0.00012,
+  loadInertiaKgm2: 0.05,
+  encoderType: 'MULTI_TURN_ABS_BATTERYLESS',
+  encoderBatteryVoltageV: 3.0,
+  encoderBatteryMinVoltageV: 2.6,
+  regenPowerPeakW: 100,
+  dutyCycleDecelPct: 10,
+  brakingResistorRatedContinuousW: 50,
+  brakingResistorRatedPeakW: 400,
+  hasDedicatedTorqueSensor: true,
+  gearboxEfficiencyMinPct: 70,
+  gearboxEfficiencyMaxPct: 90,
+  collaborativeSafetyRequired: false,
+  stoImplementation: 'DUAL_CHANNEL_HW_STO',
+  requiredPerformanceLevel: 'PLd',
+  stoCategory: '3',
+  mttfdYears: 50,
+  dcAvgPct: 90,
+  ccfScorePoints: 70,
+  stoResponseTimeMs: 5,
+  requiredResponseTimeMs: 20,
+  busProtocol: 'ETHERCAT_CoE',
+  busCycleTimeUs: 250,
+  localPositionLoopCycleUs: 125,
+  hasLocalInterpolation: true,
+  busLossFallbackStrategy: 'RAMP_TO_ZERO',
+};
+
+function jointVetoIds(input: RobotJointEvaluationInput): string[] {
+  return evaluateAllRobotJointPatterns(input).filter((p) => p.vetoTriggered).map((p) => p.id);
+}
+
+check('健康关节工况 J001~J007 全部不得一票否决（vetoTriggered 全 false）', () => {
+  assert.deepEqual(jointVetoIds(quietJointInput), [], '健康工况不应有任何 J 模式一票否决，实际=' + jointVetoIds(quietJointInput).join(','));
+});
+
+check('J006 未声明性能等级(UNDECLARED)必须一票否决——不能默认当作不需要安全等级放行', () => {
+  const veto = jointVetoIds({ ...quietJointInput, requiredPerformanceLevel: 'UNDECLARED' });
+  assert.equal(veto.includes('J006'), true, 'UNDECLARED 应触发 J006 否决，实际=' + veto.join(','));
+});
+
+check('J006 声明 PLd 但仅软件禁止 PWM -> 通道独立性违规，一票否决', () => {
+  const veto = jointVetoIds({ ...quietJointInput, stoImplementation: 'SOFTWARE_PWM_DISABLE_ONLY' });
+  assert.equal(veto.includes('J006'), true, '软件STO+PLd 应触发 J006 否决，实际=' + veto.join(','));
+});
+
+check('J004 泄放电阻连续功率不足 -> 一票否决', () => {
+  const veto = jointVetoIds({ ...quietJointInput, brakingResistorRatedContinuousW: 5 });
+  assert.equal(veto.includes('J004'), true, '连续功率 5W < 平均回馈 10W 应触发 J004 否决，实际=' + veto.join(','));
+});
+
+check('J007 未定义总线丢包降级策略 -> 一票否决', () => {
+  const veto = jointVetoIds({ ...quietJointInput, busLossFallbackStrategy: 'NONE' });
+  assert.equal(veto.includes('J007'), true, '无降级策略应触发 J007 否决，实际=' + veto.join(','));
+});
+
+check('J002 电池型多圈编码器电压裕量跌破阈值 -> 一票否决', () => {
+  const veto = jointVetoIds({ ...quietJointInput, encoderType: 'MULTI_TURN_ABS_BATTERY', encoderBatteryVoltageV: 2.6, encoderBatteryMinVoltageV: 2.6 });
+  assert.equal(veto.includes('J002'), true, '电压裕量 0V 应触发 J002 否决，实际=' + veto.join(','));
+});
+
+check('J001 背隙+柔性误差超出规格 -> 一票否决', () => {
+  const veto = jointVetoIds({ ...quietJointInput, requiredPositionAccuracyArcmin: 1 });
+  assert.equal(veto.includes('J001'), true, '总误差约4.3arcmin > 规格1arcmin 应触发 J001 否决，实际=' + veto.join(','));
+});
+
+check('J003 健康工况应触发(有谐振频率)但不否决，且频率在合理区间', () => {
+  const j3 = evaluateAllRobotJointPatterns(quietJointInput).find((p) => p.id === 'J003')!;
+  assert.equal(j3.triggered, true, 'J003 应给出谐振频率');
+  assert.equal(j3.vetoTriggered, false, '健康工况 J003 不应否决');
+  const freqRaw = j3.calculatedValues['估算机械谐振频率 f_res (Hz)'];
+  assert.equal(typeof freqRaw, 'number', 'J003 应给出数值频率');
+  assert.equal((freqRaw as number) > 3 && (freqRaw as number) < 300, true, '谐振频率应落在合理区间(3~300Hz)，实际=' + freqRaw);
+});
+
+check('deriveRobotJointEvaluationInput 缺省时 PL=UNDECLARED -> J006 fail-closed（不能默认 NONE）', () => {
+  const derived = deriveRobotJointEvaluationInput(issue({ issueCategories: ['Robot Joint Drive'] }));
+  assert.equal(derived.requiredPerformanceLevel, 'UNDECLARED');
+  const veto = evaluateAllRobotJointPatterns(derived).filter((p) => p.vetoTriggered).map((p) => p.id);
+  assert.equal(veto.includes('J006'), true, '缺省输入应触发 J006 否决，实际=' + veto.join(','));
+});
+
 process.exit(failures === 0 ? 0 : 1);
