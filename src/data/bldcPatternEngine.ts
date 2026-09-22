@@ -669,9 +669,12 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   // ----------------------------------------------------
   const p008Assumptions: string[] = [];
   const harnessLength = input.harnessLengthM !== undefined && input.harnessLengthM > 0 ? input.harnessLengthM : 1.8;
-  if (input.harnessLengthM === undefined || input.harnessLengthM <= 0) p008Assumptions.push('线束长度未提供，假设1.8m');
+  if (!Number.isFinite(input.harnessLengthM) || input.harnessLengthM <= 0) p008Assumptions.push('线束长度未提供，假设1.8m');
   const harnessInductanceUh = harnessLength * 1.2; // 1.2uH/m，回路几何假设，需结合去回线间距核实
-  const p008Triggered = harnessLength >= 1.2;
+  // [FIX] 缺线束长度输入时 harnessLength 缺省 1.8m，天然 >=1.2m 阈值会让几乎所有未填线束的 case
+  // 触发。现在只有当工程师显式提供了线束长度(Number.isFinite 且 >0)且确实 >=1.2m 时才触发，
+  // 与 P013/P014 的"缺输入不触发"口径一致。
+  const p008Triggered = Number.isFinite(input.harnessLengthM) && input.harnessLengthM > 0 && harnessLength >= 1.2;
   // [FIX-5] 谐振频率原来是与线束长度完全脱节的字面量(48.5MHz)。现在真正由估算电感
   // 与寄生电容算出：f = 1/(2π√(L·C))。寄生电容未知时给出典型量级假设并标注。
   const parasiticCapPf = input.parasiticCapPf !== undefined ? input.parasiticCapPf : 100;

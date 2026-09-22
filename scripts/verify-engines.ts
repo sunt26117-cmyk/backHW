@@ -213,6 +213,11 @@ check('缺母线电容实测值(cbusUf=NaN)时 P013 不得触发——修复默�
   assert.equal(noCbus.includes('P013'), false, '缺母线电容实测值时不应触发 P013，实际=' + noCbus.join(','));
 });
 
+check('缺线束长度输入(harnessLengthM=NaN)时 P008 不得触发——修复默认1.8m越阈值问题', () => {
+  const noHarness = evaluateAllBldcPatterns({ ...quietBldcInput, harnessLengthM: NaN }).filter((p) => p.triggered).map((p) => p.id);
+  assert.equal(noHarness.includes('P008'), false, '缺线束长度输入时不应触发 P008，实际=' + noHarness.join(','));
+});
+
 check('缺母线实测峰值(vbusMeasuredPeak 未提供)时 P014 不得触发——修复双层假设叠加问题', () => {
   const noVbusMeasured = evaluateAllBldcPatterns({ ...quietBldcInput }).filter((p) => p.triggered).map((p) => p.id);
   assert.equal(noVbusMeasured.includes('P014'), false, '缺母线实测峰值时不应触发 P014，实际=' + noVbusMeasured.join(','));

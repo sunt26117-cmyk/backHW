@@ -82,7 +82,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '48MHz 开关节点高频振铃与 CISPR 25 超标',
     category: 'EMC / Radiated & Conducted',
     input: {
-      issue: { failurePhenomenon: 'CISPR 25 传导发射测试中，48.5MHz 频点超标 6.8dB' },
+      issue: { failurePhenomenon: 'CISPR 25 传导发射测试中，48.5MHz 频点超标 6.8dB', measuredValues: { harnessLengthM: 1.5 } },
     },
     expectedPattern: 'P008',
     expectedCalculation: { '超标幅度 (dBμV)': '+6.8 dB', '振铃频率 (MHz)': 48.5 },
@@ -166,7 +166,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: 'BCI 大电流注入射频共模抗扰度',
     category: 'EMC / RF Immunity',
     input: {
-      issue: { failurePhenomenon: 'ISO 11452-4 BCI 测试中，在 45MHz 注入 100mA 时相电流采样报异常超差' },
+      issue: { failurePhenomenon: 'ISO 11452-4 BCI 测试中，在 45MHz 注入 100mA 时相电流采样报异常超差', measuredValues: { harnessLengthM: 1.5 } },
     },
     expectedPattern: 'P008',
     expectedCalculation: { '敏感频段': '20MHz ~ 80MHz', '注入点位置': '线束 150mm 处' },
