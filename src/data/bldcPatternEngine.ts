@@ -35,7 +35,6 @@
 import {
   BldcPatternId,
   PatternOutputItem,
-  UnifiedEngineeringModel,
   EvidenceType,
   ConfidenceLevel,
 } from '../types';

@@ -20,49 +20,30 @@ export function isMeasuredValuePresent(issue: IssueInput, key: string): boolean 
   return !isNaN(num);
 }
 
-// 正则提取辅助函数
-function extractNumber(text: string, patterns: RegExp[], fallback: number | null = null): number | null {
-  for (const p of patterns) {
-    const m = text.match(p);
-    if (m && m[1]) {
-      const val = parseFloat(m[1]);
-      if (!isNaN(val)) return val;
-    }
-  }
-  return fallback;
-}
-
-// 统一的状态提取器
+// 统一的状态提取器：只读 issue.measuredValues 结构化输入，不做正则文本兜底。
+// 文本推断(如从"3800rpm"提取转速)由 pattern 引擎的 deriveBldcEvaluationInput 单独负责，
+// 这里是确定性引擎的"结构化事实"来源，二者各司其职、不再各写一套正则互相分叉。
 export function extractUnifiedEngineeringModel(context: ProjectContext, issue: IssueInput): UnifiedEngineeringModel {
-  const fullText = [
-    issue.requirement,
-    issue.actualMeasurement,
-    issue.testCondition,
-    issue.environment,
-    issue.failurePhenomenon,
-    issue.engineeringConcern,
-  ].join('\n');
-
-  // Helper function to safely get from measuredValues or fallback to regex extraction
-  const getNum = (key: string, patterns: RegExp[], fallback: number | null = null): number => {
+  // [统一修复] 这里只读 issue.measuredValues 结构化输入，不再做正则文本兜底、也不再写死默认值。
+  // 缺输入时返回 0 / undefined，由下游引擎用 isMeasuredValuePresent() 判断 INSUFFICIENT_INPUT。
+  // 之前这里用正则 + 写死默认值(如 vbusNominal=12、cbusUf=1000、rpm=3000、rdsOn=2.5)，
+  // 既和 pattern 引擎的 deriveBldcEvaluationInput 分叉，还会把自由文本里的"37.8V"误读成标称电压。
+  const getNum = (key: string, _patterns?: RegExp[], _fallback?: number | null): number => {
     const raw = issue.measuredValues?.[key];
     if (raw !== undefined && raw !== null && raw !== '') {
       const parsed = Number(raw);
       if (!isNaN(parsed)) return parsed;
     }
-    // If structured input is missing, attempt to extract from text
-    const extracted = extractNumber(fullText, patterns, fallback);
-    return extracted !== null ? extracted : (fallback !== null ? fallback : 0); // defaulting to 0 for strict types, though missing values will fail checks later
+    return 0;
   };
   
-  const getOptionalNum = (key: string, patterns: RegExp[], fallback: number | null = null): number | undefined => {
+  const getOptionalNum = (key: string, _patterns?: RegExp[], _fallback?: number | null): number | undefined => {
     const raw = issue.measuredValues?.[key];
     if (raw !== undefined && raw !== null && raw !== '') {
       const parsed = Number(raw);
       if (!isNaN(parsed)) return parsed;
     }
-    const extracted = extractNumber(fullText, patterns, fallback);
-    return extracted !== null ? extracted : undefined;
+    return undefined;
   };
 
   return {
