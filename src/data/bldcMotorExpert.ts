@@ -38,6 +38,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
   if (millerMarginV !== undefined && millerMarginV < 0.5) riskSeverity = Math.max(riskSeverity, 85);
   const daysFactor = typeof daysRemaining === 'number' && daysRemaining <= 7 ? 1 : 0;
   const clamp = (v: number) => Math.max(15, Math.min(98, Math.round(v)));
+  const severityLevel = (s: number): 'Low' | 'Medium' | 'Medium-High' | 'High' => (s >= 85 ? 'High' : s >= 70 ? 'Medium-High' : s >= 50 ? 'Medium' : 'Low');
   const scoreA = { T: clamp(88 + (riskSeverity - 50) * 0.3), S: clamp(88 - daysFactor * 6), C: 80, Q: 90, L: 88 };
   const scoreB = { T: clamp(74 + (riskSeverity - 50) * 0.3), S: clamp(40 - daysFactor * 20), C: 40, Q: 80, L: 60 };
   const scoreC = { T: 35, S: clamp(96 + daysFactor * 2), C: 98, Q: 30, L: 30 };
@@ -73,9 +74,9 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       verificationCost: '约为阻容贴片打样 + 示波器高频双探头实测工时（按当前项目资源核算）',
       timeCost: `约 3 天（剩余 ${daysRemaining} 天节点内，以当前项目门禁为准）`,
       failureConsequence: '若实测下桥制动发热偏大，可切换为分段斩波 PWM 能耗制动，技术路径平滑。',
-      preconditions: 'MCU 驱动固件支持底层刹车中断，MOSFET 脉冲电流 SOA 满足 >= 50A。',
+      preconditions: 'MCU 驱动固件支持底层刹车中断，MOSFET 脉冲电流 SOA 需依据当前器件数据手册与实际制动电流确认（缺电流输入时保持 UNKNOWN，不预设 50A）。',
       verificationMethod: `在电机台架以 ${rpm !== undefined ? rpm : '目标/最高'}rpm 转速触发急停，高阻差分探头捕捉母线电压与 Vgs/Vds 瞬态波形。`,
-      planB: '若整车超长线束反射仍偶发尖峰，在输入端预留贴装一颗 SMCJ24CA 600W TVS 作为二级兜底。',
+      planB: '若整车超长线束反射仍偶发尖峰，在输入端预留一颗车规级双向 TVS（按当前母线电压等级与瞬态能量选型，不套用历史型号）作为二级兜底。',
     },
     {
       id: 'Option B',
@@ -175,11 +176,11 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       reasonSummary: `本地确定性计算是当前 BLDC 数值锚点：${bus?.status === 'CALCULATED' ? `Bus Pumping=${dynamicBus}，耐压裕量=${bus.safetyMargin?.toFixed(2) ?? 'UNKNOWN'}V。` : `Bus Pumping=${bus?.directiveForAi || 'INSUFFICIENT_INPUT'} `}${miller?.status === 'CALCULATED' ? `Miller=${dynamicMiller}，阈值裕量=${miller.safetyMargin?.toFixed(2) ?? 'UNKNOWN'}V。` : `Miller=${miller?.directiveForAi || 'INSUFFICIENT_INPUT'}`}整改后的绝对数值必须由验证数据确认。`,
     },
     riskRatings: {
-      overallRisk: 'High',
-      overallRiskScore: 92,
-      technicalRisk: 'High',
-      qualityRisk: 'High',
-      scheduleRisk: 'High',
+      overallRisk: severityLevel(riskSeverity),
+      overallRiskScore: Math.round(riskSeverity),
+      technicalRisk: severityLevel(riskSeverity),
+      qualityRisk: 'Medium',
+      scheduleRisk: daysRemaining <= 7 ? 'High' : daysRemaining <= 14 ? 'Medium-High' : 'Medium',
       costRisk: 'Low',
       reliabilityRisk: 'High',
       functionalSafetyRisk: 'High',
@@ -271,12 +272,12 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       commutationRisk: {
         controlMode: 'hall_six_step',
         controlModeLabel: '六步方波有感换相 (集成自适应前馈角补偿算法)',
-        speedRangeRpm: [800, 3800],
-        speedOffsetDeg: 6.5,
-        torqueRippleEstimatePct: 18.5,
+        speedRangeRpm: rpm !== undefined ? [Math.round(rpm * 0.2), rpm] : [0, 0],
+        speedOffsetDeg: rpm !== undefined ? 6.5 : 0,
+        torqueRippleEstimatePct: rpm !== undefined ? 18.5 : 0,
         stallOutProbability: 'medium',
-        stallOutReason: '高速 3800rpm 急刹重载时，由于传感器安装公差累积产生 6.5° 换相提前角，引起 18.5% 转矩纹波，座舱机械机构有微弱振颤风险。',
-        degradationAction: 'MCU 在线加载前馈角补偿 LUT 表；当转矩纹波过大时，平滑切入限速 2500rpm 与限流保护。',
+        stallOutReason: rpm !== undefined ? `高速 ${rpm}rpm 急刹重载时，由于传感器安装公差累积产生换相提前角与转矩纹波，座舱机械机构有微弱振颤风险（具体提前角/纹波数值需实测标定，不得沿用历史模板数字）。` : '缺转速输入(rpm)，无法评估高速换相失步风险；请补充结构化转速后重新评估。',
+        degradationAction: rpm !== undefined ? `MCU 在线加载前馈角补偿 LUT 表；当转矩纹波过大时，平滑切入限速 ${Math.round(rpm * 0.6)}rpm 与限流保护。` : '待输入转速后给出限速与限流建议。',
       },
       positionSensorDegradation: {
         sensorType: 'hall_triple',
@@ -307,7 +308,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
           timingCompliance: 'PASS',
         },
         asilDecomposition: {
-          overallLevel: 'ASIL B',
+          overallLevel: context.asilLevel,
           mcuSubsystem: 'ASIL D(B) (具备硬双核锁步与硬件看门狗窗口)',
           gateDriverSubsystem: 'ASIL B (集成欠压保护、过流去饱和及门极米勒钳位)',
           positionSensorSubsystem: 'ASIL B / QM(B) (满足单点故障度量 SPFM > 90%)',

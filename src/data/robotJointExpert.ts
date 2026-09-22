@@ -416,10 +416,12 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
 }
 
 export function getRobotJointPillars(context: ProjectContext, issue: IssueInput) {
+  const hasMeasured = Boolean((issue.actualMeasurement || '').trim());
+  const hasSpec = Boolean((issue.requirement || '').trim());
   return {
     classifiedInfo: [
-      { id: 'FACT-01', tag: 'MEASURED' as const, title: '末端重复定位精度实测', content: issue.actualMeasurement || '实测背隙与柔性形变折算达 5.2 arcmin (超差 73%)', sourceOrBasis: '激光干涉仪/高精度编码器实测', confidenceLevel: 95, verificationMethod: '激光干涉仪正反向重复打靶' },
-      { id: 'FACT-02', tag: 'SPEC' as const, title: '客户产线工艺与安规门限', content: issue.requirement || '末端重复定位精度 <= ±3 arcmin；STO 双通道满足 Cat 3 PLd', sourceOrBasis: '客户技术协议与 IEC 61800-5-2 标准', confidenceLevel: 98 },
+      { id: 'FACT-01', tag: (hasMeasured ? 'MEASURED' : 'UNKNOWN') as 'MEASURED' | 'UNKNOWN', title: '末端重复定位精度实测', content: hasMeasured ? issue.actualMeasurement! : '待输入：工程师尚未提供实测结果，本工具不会用模板数字代替实测数值。', sourceOrBasis: hasMeasured ? '激光干涉仪/高精度编码器实测' : '尚未提供实测来源', confidenceLevel: hasMeasured ? 95 : 0, verificationMethod: '激光干涉仪正反向重复打靶' },
+      { id: 'FACT-02', tag: (hasSpec ? 'SPEC' : 'UNKNOWN') as 'SPEC' | 'UNKNOWN', title: '客户产线工艺与安规门限', content: hasSpec ? issue.requirement! : '待输入：客户/标准/设计规格尚未提供。', sourceOrBasis: hasSpec ? '客户技术协议与 IEC 61800-5-2 标准' : '尚未提供规格来源', confidenceLevel: hasSpec ? 98 : 0 },
       { id: 'FACT-03', tag: 'CALCULATED' as const, title: '动能回馈与热阻核算', content: '点位往复搬运单次减速回馈峰值约 180W，连续均方根功率 45W 超过紧凑腔体电阻 25W 额定散热', sourceOrBasis: '机电能量守恒与热阻模型', confidenceLevel: 88, verificationMethod: '热电偶表面测温与功率分析仪' },
     ],
     multiRiskBreakdown: {

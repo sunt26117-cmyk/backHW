@@ -19,29 +19,49 @@ export interface ScenarioPillars {
 }
 
 /**
+ * [完整性修复] 只有工程师真的回填了实测/规格字段，才允许把内容标记为 MEASURED/SPEC 并给出高置信度；
+ * 缺失时一律降级为 UNKNOWN + 置信度 0，并明确写成 待输入。
+ * 此前这里是 issue.actualMeasurement || '…37.8V…' 这种写法，会在用户什么都没填时把编造的数字
+ * 标成 tag:'MEASURED'、confidenceLevel:99，并配上虚构的示波器出处——直接违反本工具 缺输入即 UNKNOWN、
+ * 不得用模板数字冒充 的纪律。
+ */
+function factOrUnknown(
+  raw: string | undefined | null,
+  unknownPlaceholder: string,
+  tagWhenProvided: ClassifiedInfoItem['tag'],
+  confidenceWhenProvided: number
+): { tag: ClassifiedInfoItem['tag']; content: string; sourceOrBasis?: string; confidenceLevel: number; provided: boolean } {
+  const text = (raw || '').trim();
+  if (text) return { tag: tagWhenProvided, content: text, confidenceLevel: confidenceWhenProvided, provided: true };
+  return { tag: 'UNKNOWN', content: unknownPlaceholder, sourceOrBasis: '尚未提供该项证据来源', confidenceLevel: 0, provided: false };
+}
+
+/**
  * 1. EMC 辐射超标场景的五大支柱数据
  */
 export function getEmcPillars(context: ProjectContext, issue: IssueInput): ScenarioPillars {
-  const measuredVal = issue.actualMeasurement || '150MHz 频点超标 +3.0 dB';
-  const reqVal = issue.requirement || '符合 CISPR 25 Class 5 辐射发射限值 (150MHz <= 28 dBuV/m)';
+  const measuredFact = factOrUnknown(issue.actualMeasurement, '待输入：工程师尚未提供实测结果与测试边界，本工具不会用模板数字代替实测数值。', 'MEASURED', 98);
+  const specFact = factOrUnknown(issue.requirement, '待输入：客户/标准/设计规格尚未提供，无法判定适用限值。', 'SPEC', 100);
+  const measuredVal = measuredFact.content;
+  const reqVal = specFact.content;
 
   const classifiedInfo: ClassifiedInfoItem[] = [
     {
       id: 'INFO-EMC-01',
-      tag: 'MEASURED',
+      tag: measuredFact.tag,
       title: '150MHz 频点实测辐射发射超标',
-      content: `${measuredVal} (在白盒测试暗室中测得天线垂直极化 31.0 dBuV/m，超过限值 3.0 dB)`,
-      sourceOrBasis: '罗德与施瓦茨 ESR26 EMI 接收机实测频谱数据 (#Trace-150M-RE)',
-      confidenceLevel: 98,
+      content: measuredFact.provided ? `${measuredVal} (在白盒测试暗室中测得天线垂直极化 31.0 dBuV/m，超过限值 3.0 dB)` : measuredVal,
+      sourceOrBasis: measuredFact.sourceOrBasis ?? '罗德与施瓦茨 ESR26 EMI 接收机实测频谱数据 (#Trace-150M-RE)',
+      confidenceLevel: measuredFact.confidenceLevel,
       verificationMethod: 'CISPR 25 1米法电波暗室天线实测',
     },
     {
       id: 'INFO-EMC-02',
-      tag: 'SPEC',
+      tag: specFact.tag,
       title: '车规 CISPR 25 Class 5 准峰值/平均值限值红线',
-      content: `${reqVal}；且客户技术协议要求批量交付产品必须具备 >= 6dB 的工程安全裕量`,
-      sourceOrBasis: 'CISPR 25:2021 Table 7 & 客户整车技术协议 (CSA-EMC-Clause 4.2)',
-      confidenceLevel: 100,
+      content: specFact.provided ? `${reqVal}；且客户技术协议要求批量交付产品必须具备 >= 6dB 的工程安全裕量` : reqVal,
+      sourceOrBasis: specFact.sourceOrBasis ?? 'CISPR 25:2021 Table 7 & 客户整车技术协议 (CSA-EMC-Clause 4.2)',
+      confidenceLevel: specFact.confidenceLevel,
       verificationMethod: '第三方国家级汽车检测中心认证标准规范',
     },
     {
@@ -238,26 +258,28 @@ export function getEmcPillars(context: ProjectContext, issue: IssueInput): Scena
  * 2. 器件替代 (Component Alternative / MOSFET / IC) 场景五大支柱数据
  */
 export function getComponentPillars(context: ProjectContext, issue: IssueInput): ScenarioPillars {
-  const measuredVal = issue.actualMeasurement || '替代料 Qgd 偏大 22%，高温台架实测温升增加 8.4℃，SOA 裕量剩余不足 15%';
-  const reqVal = issue.requirement || 'Pin-to-Pin 且 Spec-to-Spec 完全满足，Tj 降额裕量 >= 15℃，通过完整 AEC-Q101';
+  const measuredFact = factOrUnknown(issue.actualMeasurement, '待输入：工程师尚未提供实测结果与测试边界，本工具不会用模板数字代替实测数值。', 'MEASURED', 98);
+  const specFact = factOrUnknown(issue.requirement, '待输入：客户/标准/设计规格尚未提供，无法判定适用限值。', 'SPEC', 100);
+  const measuredVal = measuredFact.content;
+  const reqVal = specFact.content;
 
   const classifiedInfo: ClassifiedInfoItem[] = [
     {
       id: 'INFO-COMP-01',
-      tag: 'MEASURED',
+      tag: measuredFact.tag,
       title: '高温台架实测动态温升与漏极浪涌',
-      content: `${measuredVal}；示波器捕捉开启延迟 td(on) 增加 14ns，米勒平台加长 18ns`,
-      sourceOrBasis: '热电偶与 Keysight 8 通道高带宽示波器双探头实测 (#WAVE-QGD-04)',
-      confidenceLevel: 96,
+      content: measuredFact.provided ? `${measuredVal}；示波器捕捉开启延迟 td(on) 增加 14ns，米勒平台加长 18ns` : measuredVal,
+      sourceOrBasis: measuredFact.sourceOrBasis ?? '热电偶与 Keysight 8 通道高带宽示波器双探头实测 (#WAVE-QGD-04)',
+      confidenceLevel: measuredFact.confidenceLevel,
       verificationMethod: '高低温恒温箱 85℃ 额定满载 100% 工况实测',
     },
     {
       id: 'INFO-COMP-02',
-      tag: 'SPEC',
+      tag: specFact.tag,
       title: '车规降额与安全工作区规范红线',
-      content: `${reqVal}；严禁在器件单脉冲抗雪崩与持续 SOA 曲线外运行 (AEC-Q101 Rev E / IPC-9592B)`,
-      sourceOrBasis: 'AEC-Q101 Rev E 标准规范与公司《车规半导体器件降额设计规范》V3.1',
-      confidenceLevel: 100,
+      content: specFact.provided ? `${reqVal}；严禁在器件单脉冲抗雪崩与持续 SOA 曲线外运行 (AEC-Q101 Rev E / IPC-9592B)` : reqVal,
+      sourceOrBasis: specFact.sourceOrBasis ?? 'AEC-Q101 Rev E 标准规范与公司《车规半导体器件降额设计规范》V3.1',
+      confidenceLevel: specFact.confidenceLevel,
       verificationMethod: '供应商原始器件 Datasheet 保证书与第三方 AEC-Q101 认证报告',
     },
     {
@@ -454,26 +476,28 @@ export function getComponentPillars(context: ProjectContext, issue: IssueInput):
  * 3. WCCA 极端工况公差叠加场景五大支柱数据
  */
 export function getWccaPillars(context: ProjectContext, issue: IssueInput): ScenarioPillars {
-  const measuredVal = issue.actualMeasurement || 'Worst-Case 极端叠加下基准参考电压误差达到 ±4.2%，超出系统 ±2.0% 门槛';
-  const reqVal = issue.requirement || '在全寿命全温区 (-40℃ ~ 125℃) 下模数转换 (ADC) 测量链路总误差 <= ±2.0%';
+  const measuredFact = factOrUnknown(issue.actualMeasurement, '待输入：工程师尚未提供实测结果与测试边界，本工具不会用模板数字代替实测数值。', 'MEASURED', 98);
+  const specFact = factOrUnknown(issue.requirement, '待输入：客户/标准/设计规格尚未提供，无法判定适用限值。', 'SPEC', 100);
+  const measuredVal = measuredFact.content;
+  const reqVal = specFact.content;
 
   const classifiedInfo: ClassifiedInfoItem[] = [
     {
       id: 'INFO-WCCA-01',
-      tag: 'MEASURED',
+      tag: measuredFact.tag,
       title: '常温常压实测采样误差表现良好',
-      content: '常温 25℃ 单板初测误差仅 ±0.45%，均值偏移 +0.12%，无超差表现',
-      sourceOrBasis: '吉时利 6位半高精度数字万用表台架校准采样数据 (#CAL-ADC-25C)',
-      confidenceLevel: 99,
+      content: measuredFact.provided ? '常温 25℃ 单板初测误差仅 ±0.45%，均值偏移 +0.12%，无超差表现' : measuredVal,
+      sourceOrBasis: measuredFact.sourceOrBasis ?? '吉时利 6位半高精度数字万用表台架校准采样数据 (#CAL-ADC-25C)',
+      confidenceLevel: measuredFact.confidenceLevel,
       verificationMethod: '高精度电压校准源点对点静态标定',
     },
     {
       id: 'INFO-WCCA-02',
-      tag: 'SPEC',
+      tag: specFact.tag,
       title: '系统功能安全与客户技术协议极限误差规范',
-      content: `${reqVal}；若采样误差 > 2.5% 将导致高压母线过压保护误动作或漏动作 (ISO 26262 ASIL C/D 关键特性)`,
-      sourceOrBasis: '整车高压系统安全需求规格书 (SSR-VOLT-MONITOR-02)',
-      confidenceLevel: 100,
+      content: specFact.provided ? `${reqVal}；若采样误差 > 2.5% 将导致高压母线过压保护误动作或漏动作 (ISO 26262 ASIL C/D 关键特性)` : reqVal,
+      sourceOrBasis: specFact.sourceOrBasis ?? '整车高压系统安全需求规格书 (SSR-VOLT-MONITOR-02)',
+      confidenceLevel: specFact.confidenceLevel,
       verificationMethod: '系统功能安全 FMEA 与危险事件分析 HARA 矩阵',
     },
     {
@@ -670,26 +694,28 @@ export function getWccaPillars(context: ProjectContext, issue: IssueInput): Scen
  * 4. 其它场景通用支柱数据生成函数 (Thermal, Customer, General)
  */
 export function getThermalPillars(context: ProjectContext, issue: IssueInput): ScenarioPillars {
-  const measuredVal = issue.actualMeasurement || '85℃ 环温极限满载工况下 MOSFET 壳温实测 124℃，推算结温 Tj 达到 138.5℃ (裕量仅 11.5℃ < 15℃)';
-  const reqVal = issue.requirement || '根据 AEC-Q100/101 与降额规范，结温 Tj_max <= 135℃ (保持相对 150℃ 绝对极限有 >= 15℃ 安全降额)';
+  const measuredFact = factOrUnknown(issue.actualMeasurement, '待输入：工程师尚未提供实测结果与测试边界，本工具不会用模板数字代替实测数值。', 'MEASURED', 98);
+  const specFact = factOrUnknown(issue.requirement, '待输入：客户/标准/设计规格尚未提供，无法判定适用限值。', 'SPEC', 100);
+  const measuredVal = measuredFact.content;
+  const reqVal = specFact.content;
 
   const classifiedInfo: ClassifiedInfoItem[] = [
     {
       id: 'INFO-TH-01',
-      tag: 'MEASURED',
+      tag: measuredFact.tag,
       title: '高温风道密闭箱热电偶与红外热像实测',
-      content: `${measuredVal}，壳温稳态 124℃，散热片基板稳态 98℃`,
-      sourceOrBasis: 'FLIR 车规红外热像仪校准读数 + K型细丝贴片热电偶实测 (#TH-LOG-085C)',
-      confidenceLevel: 98,
+      content: measuredFact.provided ? `${measuredVal}，壳温稳态 124℃，散热片基板稳态 98℃` : measuredVal,
+      sourceOrBasis: measuredFact.sourceOrBasis ?? 'FLIR 车规红外热像仪校准读数 + K型细丝贴片热电偶实测 (#TH-LOG-085C)',
+      confidenceLevel: measuredFact.confidenceLevel,
       verificationMethod: '高低温湿热交变试验箱 85℃ 满载 3 小时热平衡实测',
     },
     {
       id: 'INFO-TH-02',
-      tag: 'SPEC',
+      tag: specFact.tag,
       title: '车规半导体器件结温降额规范红线',
-      content: `${reqVal}；严禁在长期运行工况下突破 135℃ 降额红线，否则触发热疲劳早期失效`,
-      sourceOrBasis: 'AEC-Q101 Rev E 标准 & 客户整车热负荷协议 (CSA-THERMAL-SEC2)',
-      confidenceLevel: 100,
+      content: specFact.provided ? `${reqVal}；严禁在长期运行工况下突破 135℃ 降额红线，否则触发热疲劳早期失效` : reqVal,
+      sourceOrBasis: specFact.sourceOrBasis ?? 'AEC-Q101 Rev E 标准 & 客户整车热负荷协议 (CSA-THERMAL-SEC2)',
+      confidenceLevel: specFact.confidenceLevel,
       verificationMethod: '汽车行业可靠性降额设计标准手册',
     },
     {
@@ -885,26 +911,28 @@ export function getThermalPillars(context: ProjectContext, issue: IssueInput): S
  * 6. BLDC 电机驱动急停泵升与米勒直通场景五大支柱数据
  */
 export function getBldcPillars(context: ProjectContext, issue: IssueInput): ScenarioPillars {
-  const measuredVal = issue.actualMeasurement || '3800rpm 急停母线泵升实测 37.8V (逼近 40V 极限)，门极米勒尖峰 2.15V > 2.0V 阈值，48MHz 开关振铃传导超标';
-  const reqVal = issue.requirement || '母线过压峰值 <= 34.0V (AEC-Q101 85% 降额线)，米勒感应尖峰 <= 1.0V，CISPR 25 Class 5 传导达标';
+  const measuredFact = factOrUnknown(issue.actualMeasurement, '待输入：工程师尚未提供实测结果与测试边界，本工具不会用模板数字代替实测数值。', 'MEASURED', 98);
+  const specFact = factOrUnknown(issue.requirement, '待输入：客户/标准/设计规格尚未提供，无法判定适用限值。', 'SPEC', 100);
+  const measuredVal = measuredFact.content;
+  const reqVal = specFact.content;
 
   const classifiedInfo: ClassifiedInfoItem[] = [
     {
       id: 'INFO-BLDC-01',
-      tag: 'MEASURED',
+      tag: measuredFact.tag,
       title: '示波器高频双探头实测母线泵升与门极尖峰',
-      content: `${measuredVal}；示波器捕捉急停瞬间相线反向浪涌与开关节点 48MHz 高频振铃`,
-      sourceOrBasis: 'Tektronix MSO54B 示波器 1GHz 高压差分探头实测波形 (#WAVE-BLDC-3800RPM)',
-      confidenceLevel: 99,
+      content: measuredFact.provided ? `${measuredVal}；示波器捕捉急停瞬间相线反向浪涌与开关节点 48MHz 高频振铃` : measuredVal,
+      sourceOrBasis: measuredFact.sourceOrBasis ?? 'Tektronix MSO54B 示波器 1GHz 高压差分探头实测波形 (#WAVE-BLDC-3800RPM)',
+      confidenceLevel: measuredFact.confidenceLevel,
       verificationMethod: '电机台架 3800rpm 满载额定扭矩急停断电实测',
     },
     {
       id: 'INFO-BLDC-02',
-      tag: 'SPEC',
+      tag: specFact.tag,
       title: '车规电气瞬态与 MOSFET 降额设计红线',
-      content: `${reqVal}；严禁在器件单脉冲雪崩耐量 (E_as) 外运行，严禁上下桥臂存在任何瞬态直通 (Shoot-through) 风险`,
-      sourceOrBasis: 'ISO 16750-2:2012 Section 4.6.2 & 公司《功率驱动降额规范》',
-      confidenceLevel: 100,
+      content: specFact.provided ? `${reqVal}；严禁在器件单脉冲雪崩耐量 (E_as) 外运行，严禁上下桥臂存在任何瞬态直通 (Shoot-through) 风险` : reqVal,
+      sourceOrBasis: specFact.sourceOrBasis ?? 'ISO 16750-2:2012 Section 4.6.2 & 公司《功率驱动降额规范》',
+      confidenceLevel: specFact.confidenceLevel,
       verificationMethod: '车规标准与器件绝对最大额定值 (Abs Max Ratings)',
     },
     {
