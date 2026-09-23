@@ -1,4 +1,4 @@
-import { CopilotAnalysisResult, IssueInput, ProjectContext } from '../types';
+import { CopilotAnalysisResult, IssueInput, ProjectContext, RaciItem, DFMEAView, DualTimelineActionPlan } from '../types';
 import { buildScenarioPassFailCriteria, getDomainPhysics, resolveEngineeringDomain, resolveEngineeringDomains } from './scenarioDomainEngine';
 import { getCrossDomainCouplings } from './crossDomainCouplingMatrix';
 import { recalculateStandardWeightedScore } from './scoringWeights';
@@ -195,6 +195,125 @@ function buildDynamicCandidateActions(context: ProjectContext, issue: IssueInput
   ];
 }
 
+// ==========================================
+// [输入驱动] 以下三块此前是死模板（同域内无论输入怎么变都一字不动）：
+//   raciMatrix（RACI 责任矩阵）/ dfmeaItems（DFMEA 多条目）/ dualTimeline（双层时间轴）
+// 现在改为依据当前工况输入、领域物理画像与候选方案排序动态生成。
+// ==========================================
+function buildDynamicRaciMatrix(context: ProjectContext, issue: IssueInput, domain: string, best: any, ranked: any[], riskScore: number): RaciItem[] {
+  const days = context?.daysRemaining ?? 14;
+  const dayOf = (offset: number) => 'Day ' + Math.max(1, Math.min(offset, Math.max(1, days)));
+  const bestName = best?.name || '当前首选方案';
+  const req = issue.requirement || '当前项目规格';
+  const rows: RaciItem[] = [
+    { role: 'HW', raciType: 'R', owner: '硬件负责人 (HW Lead)', action: '落实首选方案「' + bestName + '」的硬件侧改动与台架复测；验证项：' + (issue.testCondition || '按当前工况边界定义'), output: domain + ' 硬件整改与实测数据包', dueDate: dayOf(3), decisionGate: '硬件门禁' },
+    { role: 'SW', raciType: 'R', owner: '底层软件工程师 (SW Lead)', action: '实现并刷写与本方案对应的固件保护/补偿逻辑，并提供诊断支持', output: '固件补丁与刷写自检记录', dueDate: dayOf(2), decisionGate: '软件门禁' },
+    { role: 'System', raciType: 'C', owner: '系统负责人 (System Lead)', action: '确认 ' + domain + ' 的边界条件、接口约束与系统级影响；依据：' + req, output: '系统边界与接口影响说明', dueDate: dayOf(2), decisionGate: '系统门禁' },
+    { role: 'PM', raciType: 'A', owner: '项目经理 (PM)', action: '管控距「' + (context?.nextMilestone || '下一里程碑') + '」剩余 ' + days + ' 天的节点，协调台架/试验箱/暗室排期', output: '节点推进跟踪表', dueDate: dayOf(1), decisionGate: '项目里程碑' },
+    { role: 'Quality', raciType: 'A', owner: '质量经理 (QA)', action: '审核实测证据闭环完整性（当前风险评分 ' + Math.round(riskScore) + '/100），并同步更新 DFMEA 与控制计划', output: '质量审核报告', dueDate: dayOf(5), decisionGate: '质量门禁' },
+    { role: 'Safety', raciType: context?.asilLevel && context.asilLevel !== 'QM' ? 'C' : 'I', owner: '功能安全代表 (Safety)', action: '评估本方案对 ' + (context?.asilLevel || 'ASIL') + ' 安全目标与安全机制的影响', output: '安全影响评估', dueDate: dayOf(4), decisionGate: '功能安全' },
+    { role: 'Sourcing', raciType: 'I', owner: '采购 (Buyer)', action: '评估本方案涉及物料的交期、二供可用性与成本影响', output: '物料交期与替代清单', dueDate: dayOf(3), decisionGate: '采购门禁' },
+  ];
+  const vetoed = (ranked || []).filter((a: any) => a?.veto?.rejection_veto);
+  if (vetoed.length > 0) {
+    const names = vetoed.map((v: any) => v?.name).filter(Boolean).join('、') || '被否决方案';
+    rows.push({ role: 'Customer', raciType: 'Approval', owner: '客户 (OEM) 代表', action: '审批对「' + names + '」的不推荐结论与首选方案放行', output: '客户放行/让步签核单', dueDate: dayOf(Math.max(1, days - 1)), decisionGate: '客户门禁' });
+  }
+  return rows;
+}
+
+function buildDynamicDfmeaItems(context: ProjectContext, issue: IssueInput, domain: string, profile: any, riskScore: number, best: any): DFMEAView[] {
+  const sev = riskScore >= 80 ? 8 : riskScore >= 65 ? 6 : 4;
+  const occ = riskScore >= 75 ? 6 : 4;
+  const saf = context?.asilLevel ? context.asilLevel !== 'QM' : false;
+  const phenomenon = (issue.failurePhenomenon || issue.engineeringConcern || (domain + ' 指标超差')).slice(0, 80);
+  const req = (issue.requirement || '设计指标').slice(0, 60);
+  const items: DFMEAView[] = [
+    {
+      failureMode: phenomenon,
+      failureCause: (profile?.question || (domain + ' 物理链路')) + '；根因：' + (issue.testCondition || '当前工况边界') + ' 下的机理异常（待实测确认）',
+      localEffect: '受测单元性能未达 [' + req + '] 要求',
+      systemEffect: 'ECU 控制系统存在功能降级、误动作或保护误触发风险',
+      vehicleEffect: '整车/系统集成质量门禁阻断风险，可能影响节点交付',
+      severity: sev, occurrence: occ, detection: 4,
+      safetyImpact: saf,
+      regulatoryImpact: domain.startsWith('EMC'),
+      massProductionImpact: true,
+      degradationAction: best ? ('控制措施：启用「' + best.name + '」；量产前完成永久纠正并闭合验证。') : '按首选方案实施控制措施，量产前完成永久纠正。',
+    },
+    {
+      failureMode: domain + ' 次级失效模式：' + ((profile?.outputs && profile.outputs[0]) || '边界条件恶化') + ' 未闭环',
+      failureCause: '关键参数未在极限工况下验证，或缺少全温区/全寿命证据',
+      localEffect: '局部性能边界不清，保护阈值与实际不符',
+      systemEffect: '系统级保护可能误动作或漏动作',
+      vehicleEffect: '批量一致性与售后风险',
+      severity: Math.max(3, sev - 2), occurrence: 4, detection: 5,
+      safetyImpact: false, regulatoryImpact: false, massProductionImpact: true,
+      degradationAction: '补齐全温区/全寿命实测证据后复算并闭环。',
+    },
+  ];
+  const missing = (profile?.measurements || []).filter((f: any) => f?.required && (issue.measuredValues?.[f.key] === undefined || issue.measuredValues?.[f.key] === ''));
+  if (missing.length > 0) {
+    items.push({
+      failureMode: '关键判据证据缺口：' + missing.map((f: any) => f.label).join('、'),
+      failureCause: '上述必填实测参数未回填，当前结论只能基于规则推导与工程假设',
+      localEffect: '无法判定该失效模式是否已消除',
+      systemEffect: '放行决策缺乏最小必要证据',
+      vehicleEffect: '存在漏判风险',
+      severity: 5, occurrence: 5, detection: 7,
+      safetyImpact: saf, regulatoryImpact: false, massProductionImpact: true,
+      degradationAction: '在下一门禁前补齐缺失参数并重新判定。',
+    });
+  }
+  return items;
+}
+
+function buildDynamicDualTimeline(context: ProjectContext, issue: IssueInput, domain: string, cfg: any, best: any, ranked: any[], prefix: string): DualTimelineActionPlan {
+  const days = context?.daysRemaining ?? 14;
+  const projectPhase = context?.projectPhase || 'DV';
+  const verify: string[] = (cfg?.verify && cfg.verify.length) ? cfg.verify : ['补齐当前工况关键实测证据'];
+  const rankedList: any[] = (ranked && ranked.length) ? ranked : (best ? [best] : []);
+  // 排除被一票否决的方案：应急遏制/永久纠正计划里不得出现 VETO 方案。
+  const notVetoed = rankedList.filter((a: any) => !a?.veto?.rejection_veto);
+  const pool = notVetoed.length ? notVetoed : rankedList;
+  const quick = pool.filter((a: any) => !/conservative/i.test(String(a?.category || '')));
+  const conservative = pool.filter((a: any) => /conservative/i.test(String(a?.category || '')));
+  const containmentSrc = (quick.length ? quick : pool).slice(0, 3);
+  const permanentSrc = (conservative.length ? conservative : pool).slice(0, 3);
+  const stepOf = (a: any, i: number, src: string[]) => ({
+    step: (i + 1) + '. ' + (a?.name || '措施'),
+    detail: String(a?.description || '').replace(/\s+/g, ' ').slice(0, 160) + '｜验证：' + src[i % src.length],
+    owner: i === 0 ? '硬件负责人 (HW Lead)' : '验证测试工程师 (TE)',
+    duration: ([4, 8, 12][i] ?? 8) + ' 小时',
+    hardwareImpact: /conservative/i.test(String(a?.category || '')) ? '需硬件改版/物料变更' : '不改板卡（样件级/固件级）',
+    deliverable: String(a?.output || '改制样件与验证记录'),
+  });
+  return {
+    containmentPhase: {
+      phaseTag: 'T_PLUS_24H_CONTAINMENT',
+      timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+      title: containmentSrc.map((a: any) => a?.name).filter(Boolean).join(' + ') || '应急遏制措施',
+      objective: '在 ' + days + ' 天节点内不改板卡地遏制「' + (issue.failurePhenomenon || issue.engineeringConcern || (domain + ' 问题')) + '」的流出风险，取得最小必要证据。',
+      hardwareImpact: '样件级/固件级临时改动，不等待 PCB 改版。',
+      responsibilityRole: '硬件负责人 (HW Lead) & 验证测试工程师 (TE)',
+      actions: containmentSrc.map((a: any, i: number) => stepOf(a, i, verify)),
+      verificationCriteria: verify.join('；') + '；结果必须标注 MEASURED / CALCULATED / SPEC。',
+      exitCriteria: '取得实测证据并完成 Go/No-Go 判定，准予进入当前阶段后续验证。',
+    },
+    permanentPhase: {
+      phaseTag: 'NEXT_PHASE_PERMANENT',
+      timeWindow: projectPhase === 'DV' ? '下一轮 C 样改版 / PV 模具样件' : '下一代硬件改版 / SOP 封样',
+      title: permanentSrc.map((a: any) => a?.name).filter(Boolean).join(' + ') || '永久纠正措施',
+      objective: '从物理机理上消除 ' + domain + ' 的根因，完成全温区/全寿命验证与量产固化。',
+      hardwareImpact: '需 PCB 改版/结构改模与全套回归验证。',
+      responsibilityRole: '硬件架构师 (HW Architect) & 质量经理 (QA)',
+      actions: permanentSrc.map((a: any, i: number) => stepOf(a, i, verify)),
+      verificationCriteria: '全温区与全寿命工况下 ' + domain + ' 关键指标满足规格；回归矩阵覆盖全部已知失效模式。',
+      exitCriteria: '完成量产件全项验证并归档 EDR，关闭本次偏差。',
+    },
+    strategicTradeoff: prefix + ' 以样件级/固件级应急措施换取节点，同时以硬改版永久纠正根因；两者必须共用同一套判定证据，避免临时措施长期化。',
+  };
+}
 export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context: ProjectContext, issue: IssueInput): CopilotAnalysisResult {
   const domain = resolveEngineeringDomain(issue);
   const text = `${issue.actualMeasurement || ''} ${issue.testCondition || ''} ${issue.failurePhenomenon || ''} ${issue.requirement || ''}`;
@@ -325,6 +444,10 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
     dynamic.coreConclusion = { ...dynamic.coreConclusion, problemSummary: replaceLegacy(dynamic.coreConclusion.problemSummary), reasonSummary: replaceLegacy(dynamic.coreConclusion.reasonSummary) };
   }
   void overDb; void errPct;
+  // [输入驱动] 供后面统一生成 raciMatrix / dfmeaItems / dualTimeline 使用
+  let dynRanked: any[] = [];
+  let dynBest: any = undefined;
+  let dynRiskScore = dynamic.riskRatings?.overallRiskScore ?? 60;
   // BLDC 也重建通用支柱(classifiedInfo/multiRiskBreakdown/redTeamChallenge/edrRecord/whyNotComparison/next24HourPlan)，
   // 避免 decisionPillars.getBldcPillars 里 3800rpm/48MHz/37.8V 等参考案例数字泄漏进结果。
   if (domain === 'BLDC') {
@@ -355,6 +478,7 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
     };
     const ranked = [...(dynamic.candidateActions || [])].sort((a: any, b: any) => (b.scores?.total || 0) - (a.scores?.total || 0));
     const best = ranked[0];
+    dynRanked = ranked; dynBest = best; dynRiskScore = riskScore;
     if (best) {
       dynamic.whyNotComparison = dynamic.candidateActions.map((a: any, idx: number) => ({
         optionId: a.id, optionName: a.name, categoryLabel: a.categoryLabel, isRecommended: a.id === best.id,
@@ -443,6 +567,7 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
     dynamic.riskRatings = { ...dynamic.riskRatings, overallRiskScore: nativeRiskScore, overallRisk: nativeRisk as any, technicalRisk: nativeRisk as any };
     const ranked = [...dynamic.candidateActions].sort((a,b) => b.scores.total - a.scores.total);
     const best = ranked[0];
+    dynRanked = ranked; dynBest = best; dynRiskScore = nativeRiskScore;
     if (best) {
       const bestIndex = dynamic.candidateActions.findIndex(a => a.id === best.id);
       dynamic.finalRecommendation = {
@@ -563,6 +688,30 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
       }
     }
   }
+
+  // [输入驱动] 这三块此前是死模板（同域内输入怎么变都不动），现按当前输入+候选方案排序生成。
+  dynamic.raciMatrix = buildDynamicRaciMatrix(context, issue, domain, dynBest, dynRanked, dynRiskScore);
+  dynamic.dfmeaItems = buildDynamicDfmeaItems(context, issue, domain, profile, dynRiskScore, dynBest);
+  dynamic.dualTimeline = buildDynamicDualTimeline(context, issue, domain, cfg, dynBest, dynRanked, prefix);
+  if (dynamic.dfmeaItems.length > 0) dynamic.dfmeaView = { ...dynamic.dfmeaItems[0], ...dynamic.dfmeaView, failureMode: dynamic.dfmeaItems[0].failureMode, failureCause: dynamic.dfmeaItems[0].failureCause };
+
+  // [输入驱动] containment / capa 此前同样是死模板。
+  const missingForPlan = (profile?.measurements || []).filter((f: any) => f?.required && (issue.measuredValues?.[f.key] === undefined || issue.measuredValues?.[f.key] === ''));
+  dynamic.containment = {
+    shortTermMeasure: dynBest
+      ? '在受控样件上先执行「' + dynBest.name + '」的应急措施：' + String(dynBest.description || '').replace(/\s+/g, ' ').slice(0, 140)
+      : '在受控样件上执行应急遏制措施，取得最小必要证据。',
+    validityScope: '仅限当前 ' + (context.projectPhase || 'DV') + ' 阶段、距「' + (context.nextMilestone || '下一里程碑') + '」' + (context.daysRemaining ?? 14) + ' 天窗口内的样件验证；严禁带入量产。',
+    responsibleParty: '硬件负责人 (HW Lead) & 验证测试工程师 (TE)',
+    timeline: (context.daysRemaining ?? 14) + ' 天节点内完成改制与自检。',
+  };
+  dynamic.capa = {
+    rootCauseAction: '围绕 ' + domain + ' 的根因补充最小验证：' + cfg.verify.join('；') + '。',
+    preventiveMeasure: '把本次判定所需的实测字段（' + (missingForPlan.map((f: any) => f.label).join('、') || '当前域必填参数') + '）固化进设计评审与 EOL 检查表，避免再次缺证据放行。',
+    lessonsLearned: '不能在缺少「' + (issue.requirement || '规格门限') + '」对应实测证据时把结论写成 PASS；临时措施必须有期限与关闭条件。',
+    verificationTarget: '在 ' + (context.projectPhase || 'DV') + ' 门禁前取得满足「' + (issue.requirement || '当前规格') + '」的 MEASURED 证据并复算。',
+  };
+
   const measuredInputs = Object.entries(issue.measuredValues || {}).filter(([,v]) => v !== '' && v !== null && v !== undefined).map(([k,v]) => `${k}=${v}`);
   const priorAnalysisBasis = dynamic.analysisBasis;
   dynamic.analysisBasis = {
