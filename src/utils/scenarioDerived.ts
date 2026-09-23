@@ -148,8 +148,9 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   ], isBenchmark ? 3.5 : NaN);
   rdsOnMilliOhm = preferMeasured(issue, 'rdsOnMilliOhm', rdsOnMilliOhm);
 
-  const jInertiaEstimate = Number.isFinite(rpm) ? 0.00015 * (rpm / 3800) ** 0.15 : NaN;
-  const jInertia = preferMeasured(issue, 'rotorInertiaKgm2', jInertiaEstimate);
+  // [输入驱动] 不再用转速反推惯量（0.00015·(rpm/3800)^0.15 是无出处的自造公式）；
+  // 缺 rotorInertiaKgm2 时保持 NaN，交由引擎按“缺输入”处理，而不是伪造一个惯量值。
+  const jInertia = preferMeasured(issue, 'rotorInertiaKgm2', NaN);
 
   // 从器件库读取当前选中器件，提取曲线用于按工况插值（无选中器件时退回写死默认值）
   const selectedDeviceId = (context as any).selectedDeviceId;

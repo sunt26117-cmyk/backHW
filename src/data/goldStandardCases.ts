@@ -40,7 +40,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     category: 'BLDC Motor Drive',
     input: {
       context: { projectName: '座椅大扭矩 BLDC 调节控制器', projectPhase: 'DVT' },
-      issue: { failurePhenomenon: '3800rpm BLDC 急停时 VBUS 泵升至 37.8V，MOSFET 是 40V 耐压，目前只有 15 天' },
+      issue: { failurePhenomenon: '3800rpm BLDC 急停时 VBUS 泵升至 37.8V，MOSFET 是 40V 耐压，目前只有 15 天', measuredValues: { rotorInertiaKgm2: 5.33e-6, busVoltageNominalV: 13.5 } },
     },
     expectedPattern: 'P001',
     expectedCalculation: { '理论泵升峰值 Vbus_theo (V)': 39.1, '实测峰值 (V)': 37.8, '耐压裕量 (V)': 2.2 },
@@ -223,7 +223,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     category: 'Robot Joint / Position Accuracy',
     input: {
       context: { projectName: '协作机器人六轴手臂 · 肩关节模组', projectPhase: 'DVT' },
-      issue: { failurePhenomenon: '肩关节谐波减速器输出端实测背隙 4.5arcmin，35Nm额定扭矩工况下末端定位精度客户规格要求 ±3arcmin，产线抽检批量超差' },
+      issue: { failurePhenomenon: '肩关节谐波减速器输出端实测背隙 4.5arcmin，35Nm额定扭矩工况下末端定位精度客户规格要求 ±3arcmin，产线抽检批量超差', measuredValues: { backlashArcmin: 4.5, requiredPositionAccuracyArcmin: 3.0, outputTorqueNm: 35, torsionalStiffnessNmPerRad: 15000 } },
     },
     expectedPattern: 'J001',
     expectedCalculation: { '背隙 (arcmin)': 4.5, '扭转柔性附加误差 (arcmin)': 8.02, '输出端运动学总误差估算 (arcmin)': 12.52, '规格要求 (arcmin)': 3.0, '精度裕量 (arcmin)': -9.52 },
