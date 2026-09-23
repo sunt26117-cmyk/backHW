@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CopilotAnalysisResult, RaciItem, IssueInput, ProjectContext } from '../types';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+import { toStringArray } from '../utils/decisionFrame';
 import {
   CheckCircle2,
   ShieldAlert,
@@ -85,7 +86,7 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
 
   const { finalRecommendation, raciMatrix, containment, capa, riskRatings } = result;
   const calculatedEvidence = result.analysisBasis?.calculatedOutputEvidence || [];
-  const unknownsBlockingDecision = result.decisionFrame?.unknownsBlockingDecision || [];
+  const unknownsBlockingDecision = toStringArray(result.decisionFrame?.unknownsBlockingDecision);
   const domainAssessments = result.multiDomainAnalysis?.domainAssessments || [];
   const insufficientEvidenceCount = calculatedEvidence.filter((e) => e.status === 'INSUFFICIENT_INPUT').length;
   const lowEvidenceDomains = domainAssessments.filter((d) => /LOW|低|不足/i.test(d.evidenceLevel || ''));

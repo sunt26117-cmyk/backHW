@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ResultProvenance } from '../types';
+import { toStringArray } from '../utils/decisionFrame';
 import {
   ShieldCheck,
   Sparkles,
@@ -222,10 +223,10 @@ export const ResultProvenanceBanner: React.FC<ResultProvenanceBannerProps> = ({
                   </span>
                   <span className="text-[10px] font-mono text-cyan-400">{integrity.gradeLabel}</span>
                 </div>
-                {integrity.missingRequiredFields.length > 0 && (
+                {toStringArray(integrity.missingRequiredFields).length > 0 && (
                   <div className="text-[11px] text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-800/40">
                     <strong>⚠️ 未填写的必填实测参数：</strong>
-                    <span className="ml-1 font-mono">{integrity.missingRequiredFields.join('、')}</span>
+                    <span className="ml-1 font-mono">{toStringArray(integrity.missingRequiredFields).join('、')}</span>
                     <p className="text-[10px] text-slate-400 mt-1">
                       * 模型已被强制禁止虚构上述参数，推演已自动降级为待实测工程假设。
                     </p>

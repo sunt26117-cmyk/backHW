@@ -28,6 +28,7 @@ import {
 import { CopilotAnalysisResult, ProjectContext, IssueInput } from '../types';
 import { TemplateContentNotice } from './TemplateContentNotice';
 import { calculateDomainMetrics, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+import { toStringArray } from '../utils/decisionFrame';
 
 interface FirstScreen10sProps {
   context: ProjectContext;
@@ -79,6 +80,9 @@ export const FirstScreen10sView: React.FC<FirstScreen10sProps> = ({
   const gateDetail = gate ? `绿色：${gate.greenCriteria}；黄色：${gate.yellowCriteria}；红色：${gate.redCriteria}` : '必须以实测证据判定 Pass / Fail，不能用模型计算值替代实测。';
   const categoryText = Array.isArray(issue.issueCategories) ? issue.issueCategories.join(' / ') : 'Other';
   const whatWouldProveIt = `【${context.projectName} / ${categoryText}】在 ${issue.environment || '当前环境'}、${issue.testCondition || '当前测试条件'} 下验证：${scenarioGate}。${gateDetail}`;
+  // [健壮性] decisionFrame 的数组字段可能被 AI / 导入 JSON 写成字符串，渲染前统一成 string[]
+  const reversalCriteria = toStringArray(result.decisionFrame?.reversalCriteria);
+  const unknownsBlockingDecision = toStringArray(result.decisionFrame?.unknownsBlockingDecision);
 
   return (
     <div className="space-y-6">
@@ -144,12 +148,12 @@ export const FirstScreen10sView: React.FC<FirstScreen10sProps> = ({
             </div>
             <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-3">
               <div className="text-[10px] text-slate-500 mb-1">什么证据会推翻当前方案</div>
-              <div className="text-xs text-amber-300 leading-relaxed">{result.decisionFrame.reversalCriteria.slice(0, 2).join('；') || '暂未定义，需补充验证触发条件。'}</div>
+              <div className="text-xs text-amber-300 leading-relaxed">{reversalCriteria.slice(0, 2).join('；') || '暂未定义，需补充验证触发条件。'}</div>
             </div>
           </div>
-          {result.decisionFrame.unknownsBlockingDecision.length > 0 && (
+          {unknownsBlockingDecision.length > 0 && (
             <div className="mt-3 text-[11px] text-slate-400">
-              <span className="text-rose-300 font-semibold">当前阻塞未知量：</span> {result.decisionFrame.unknownsBlockingDecision.slice(0, 4).join('；')}
+              <span className="text-rose-300 font-semibold">当前阻塞未知量：</span> {unknownsBlockingDecision.slice(0, 4).join('；')}
             </div>
           )}
         </div>

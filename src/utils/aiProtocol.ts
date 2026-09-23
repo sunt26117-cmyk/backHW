@@ -6,6 +6,7 @@ import { getDomainMeasurementFields, resolveEngineeringDomain, resolveEngineerin
 import { buildDualTimelinePlan } from './dualTimelineEngine';
 import { auditAiResult } from './aiResultAuditor';
 import { validateAiResultStructure } from './aiResultSchema';
+import { normalizeDecisionFrame } from './decisionFrame';
 
 // ---- 协议层（原 server.ts，现搬到前端共享，供在线/离线双模式复用） ----
 const s = (description: string) => ({ type: 'string', description });
@@ -106,7 +107,18 @@ export function validateAndEnrichAiResult(parsed: any, baseline: any, modelName:
     md.crossDomainVetoes = Array.isArray(md.crossDomainVetoes) ? md.crossDomainVetoes : [];
   }
   parsed.dualTimeline = parsed.dualTimeline || baseline.dualTimeline || buildDualTimelinePlan(parsed, context, issue);
-  parsed.decisionFrame = parsed.decisionFrame || { decisionQuestion: (context?.nextMilestone || '下一工程门禁') + ' 前是否具备继续推进的证据条件', currentDecisionGate: context?.nextMilestone || '当前工程门禁', decisionWindow: '剩余 ' + (context?.daysRemaining ?? 14) + ' 天', bestNextAction: parsed.finalRecommendation?.immediateSteps?.[0]?.action || '先完成当前关键未知量的最小验证', minimumEvidenceToProceed: [parsed.finalRecommendation?.preconditions?.[0] || '关键实测证据达到项目规范门槛'], unknownsBlockingDecision: Array.isArray(parsed.unknowns) ? parsed.unknowns.slice(0, 5) : ['关键输入数据不足'], reversalCriteria: Array.isArray(parsed.finalRecommendation?.reEvaluationTriggers) ? parsed.finalRecommendation.reEvaluationTriggers.slice(0, 5) : ['关键实测证据与当前物理假设不一致'] };
+  const dfDefaults = {
+    decisionQuestion: (context?.nextMilestone || '下一工程门禁') + ' 前是否具备继续推进的证据条件',
+    currentDecisionGate: context?.nextMilestone || '当前工程门禁',
+    decisionWindow: '剩余 ' + (context?.daysRemaining ?? 14) + ' 天',
+    bestNextAction: parsed.finalRecommendation?.immediateSteps?.[0]?.action || '先完成当前关键未知量的最小验证',
+    minimumEvidenceToProceed: [parsed.finalRecommendation?.preconditions?.[0] || '关键实测证据达到项目规范门槛'],
+    unknownsBlockingDecision: Array.isArray(parsed.unknowns) ? parsed.unknowns.slice(0, 5) : ['关键输入数据不足'],
+    reversalCriteria: Array.isArray(parsed.finalRecommendation?.reEvaluationTriggers) ? parsed.finalRecommendation.reEvaluationTriggers.slice(0, 5) : ['关键实测证据与当前物理假设不一致'],
+  };
+  // [健壮性收口] AI 常把 string[] 字段回灌成单个字符串；在此统一归一化，
+  // 否则前端 result.decisionFrame.reversalCriteria.slice(...).join() 会抛 join is not a function 而白屏。
+  parsed.decisionFrame = normalizeDecisionFrame(parsed.decisionFrame, dfDefaults);
   parsed.provenance = { executionMode: 'ONLINE_AI_INFERRED', engineName: '云端大模型 (' + modelName + ') 工况强定锚推理', isAiInferred: true, isDeterministicRule: false, generatedAt: new Date().toLocaleTimeString(), modelIdentifier: modelName, transparencyNote: '本分析由云端大模型 [' + modelName + '] 严格限定在当前项目工况与实测数据下推演生成，严禁脱离实际作答。' };
   const { sanitizedResult } = auditAiResult(parsed, baseline, context, issue, integrityAssessment);
   return sanitizedResult;

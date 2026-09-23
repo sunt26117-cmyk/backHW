@@ -18,6 +18,7 @@ import { buildDualTimelinePlan } from './src/utils/dualTimelineEngine';
 import { assessInputIntegrity, generatePromptIntegrityDirectives } from './src/utils/inputIntegrityEngine';
 import { auditAiResult } from './src/utils/aiResultAuditor';
 import { getCrossDomainCouplings } from './src/utils/crossDomainCouplingMatrix';
+import { normalizeDecisionFrame } from './src/utils/decisionFrame';
 import { runDeterministicPrecomputations } from './src/utils/deterministicPrecomputation';
 import { buildGroundingText, findSimilarGoldCases } from './src/utils/aiGrounding';
 import { CopilotAnalysisResult, DebugSnapshot } from './src/types';
@@ -752,7 +753,7 @@ function validateAndEnrichAiResult(
   }
 
   parsed.dualTimeline = parsed.dualTimeline || baseline.dualTimeline || buildDualTimelinePlan(parsed, context, issue);
-  parsed.decisionFrame = parsed.decisionFrame || {
+  parsed.decisionFrame = normalizeDecisionFrame(parsed.decisionFrame, {
     decisionQuestion: `${context?.nextMilestone || '下一工程门禁'} 前是否具备继续推进的证据条件`,
     currentDecisionGate: context?.nextMilestone || '当前工程门禁',
     decisionWindow: `剩余 ${context?.daysRemaining ?? 14} 天`,
@@ -762,7 +763,7 @@ function validateAndEnrichAiResult(
     reversalCriteria: Array.isArray(parsed.finalRecommendation?.reEvaluationTriggers)
       ? parsed.finalRecommendation.reEvaluationTriggers.slice(0, 5)
       : ['关键实测证据与当前物理假设不一致'],
-  };
+  });
 
   parsed.provenance = {
     executionMode: 'ONLINE_AI_INFERRED',
@@ -1206,8 +1207,10 @@ ${couplingText}
     // strict 模式收口：前面各分支都会给 finalData 赋值，这里做一次编译期收口，避免 possibly null。
     finalData = finalData ?? runExpertAnalysis(context, issue);
 
-    if (!finalData.decisionFrame) {
-      finalData.decisionFrame = {
+    // [健壮性收口] 无论是缺省、还是 AI / 缓存回灌的畸形结构（数组字段被写成字符串），
+    // 统一在此归一化，保证下游 UI 的 .slice().join() / .map() 不会崩溃。
+    {
+      const dfDefaults = {
         decisionQuestion: `${context?.nextMilestone || '下一工程门禁'} 前是否具备继续推进的证据条件`,
         currentDecisionGate: context?.nextMilestone || '当前工程门禁',
         decisionWindow: `剩余 ${context?.daysRemaining ?? 14} 天`,
@@ -1218,6 +1221,7 @@ ${couplingText}
           ? finalData.finalRecommendation.reEvaluationTriggers.slice(0, 5)
           : ['关键实测证据与当前物理假设不一致'],
       };
+      finalData.decisionFrame = normalizeDecisionFrame(finalData.decisionFrame, dfDefaults);
     }
     if (finalData.coreConclusion && !finalData.coreConclusion.coreRiskGrade) {
       finalData.coreConclusion.coreRiskGrade = finalData.riskRatings?.overallRisk || 'Medium';

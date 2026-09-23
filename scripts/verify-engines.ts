@@ -17,6 +17,7 @@ import { evaluateAllBldcPatterns } from '../src/data/bldcPatternEngine';
 import { calculateBusPumping } from '../src/utils/motorPhysicsEngine';
 import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput, type RobotJointEvaluationInput } from '../src/data/robotJointPatternEngine';
 import type { IssueInput, ProjectContext } from '../src/types';
+import { normalizeDecisionFrame, toStringArray } from '../src/utils/decisionFrame';
 
 let failures = 0;
 function check(label: string, fn: () => void) {
@@ -346,4 +347,51 @@ check('deriveRobotJointEvaluationInput 缺省时 PL=UNDECLARED -> J006 fail-clos
   assert.equal(veto.includes('J006'), true, '缺省输入应触发 J006 否决，实际=' + veto.join(','));
 });
 
+// ---- AI 回灌健壮性：decisionFrame 的 string[] 字段被写成字符串时不得崩溃 ----
+// 现场故障：result.decisionFrame.reversalCriteria.slice(...).join is not a function（整个结果页白屏）。
+const DF_DEFAULTS = {
+  decisionQuestion: '是否继续推进',
+  currentDecisionGate: '当前工程门禁',
+  decisionWindow: '剩余 14 天',
+  bestNextAction: '先完成最小验证',
+  minimumEvidenceToProceed: ['默认最小证据'],
+  unknownsBlockingDecision: ['默认阻塞未知量'],
+  reversalCriteria: ['默认反转条件'],
+};
+
+check('decisionFrame 归一化：AI 把 string[] 回灌成字符串 -> 归一化为数组且可安全 slice/join', () => {
+  const one = normalizeDecisionFrame({ ...DF_DEFAULTS, reversalCriteria: '实测母线电压超过 60V' }, DF_DEFAULTS);
+  assert.equal(Array.isArray(one.reversalCriteria), true, 'reversalCriteria 必须是数组');
+  assert.deepEqual(one.reversalCriteria, ['实测母线电压超过 60V']);
+  assert.equal(one.reversalCriteria.slice(0, 2).join('；'), '实测母线电压超过 60V', '必须能安全 slice/join');
+});
+
+check('decisionFrame 归一化：带分隔符的字符串 -> 拆分为多条', () => {
+  const many = normalizeDecisionFrame({ ...DF_DEFAULTS, reversalCriteria: '条件A；条件B;条件C' }, DF_DEFAULTS);
+  assert.deepEqual(many.reversalCriteria, ['条件A', '条件B', '条件C']);
+});
+
+check('decisionFrame 归一化：空数组/畸形类型回落到默认值，不静默成空', () => {
+  const weird = normalizeDecisionFrame(
+    { ...DF_DEFAULTS, reversalCriteria: [], unknownsBlockingDecision: 42, minimumEvidenceToProceed: null },
+    DF_DEFAULTS,
+  );
+  assert.deepEqual(weird.reversalCriteria, ['默认反转条件'], '空数组必须回落默认');
+  assert.deepEqual(weird.minimumEvidenceToProceed, ['默认最小证据'], 'null 必须回落默认');
+  assert.deepEqual(weird.unknownsBlockingDecision, ['42'], '数字必须转成字符串数组');
+  const absent = normalizeDecisionFrame(undefined, DF_DEFAULTS);
+  assert.deepEqual(absent, DF_DEFAULTS, '整体缺省 -> 全默认');
+});
+
+check('decisionFrame 归一化：对已合规对象幂等（可重复调用）', () => {
+  const once = normalizeDecisionFrame({ ...DF_DEFAULTS, reversalCriteria: 'A；B' }, DF_DEFAULTS);
+  assert.deepEqual(normalizeDecisionFrame(once, DF_DEFAULTS), once);
+});
+
+check('toStringArray 对非字符串元素不抛错（UI 渲染的最后一道防线）', () => {
+  assert.deepEqual(toStringArray([{ a: 1 }, 5, null, '  文本  ']), ['{"a":1}', '5', '文本']);
+  assert.deepEqual(toStringArray('  '), []);
+  assert.deepEqual(toStringArray(undefined), []);
+  assert.deepEqual(toStringArray('单条'), ['单条']);
+});
 process.exit(failures === 0 ? 0 : 1);
