@@ -109,14 +109,14 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     // 这 5 大块（+classifiedInfo 第3条起）来自工程域通用模板，不是 case 专属分析。
     const templateBlocks = ['multiRiskBreakdown', 'whyNotComparison', 'next24HourPlan', 'edrRecord', 'redTeamChallenge', 'classifiedInfo(第3条起)'];
     // BLDC / 机器人关节域的主报告内容（DFMEA 条目、候选方案、最终推荐、RACI、受控文档等）
-    // 同样由该域的通用模板生成器产出，带着历史示例数字（如 16.2nH / 1360pF / $0.12 / 15台），
+    // 同样由该域的通用模板生成器产出，可能带着历史示例数字，
     // 必须与上面 5 大块一并提示，否则用户会以为这些是当前 case 的分析结果。
     if (isBldc || isRobotJoint) {
       templateBlocks.push('dfmeaItems', 'candidateActions', 'finalRecommendation', 'raciMatrix', 'engineeringDocs', 'containment', 'capa');
     }
     result.templateContentNotice = {
       blocks: templateBlocks,
-      message: '本页含内置通用模板内容：多维度风险分解、方案“为什么不选”、24小时验证计划、EDR 记录、红队挑战这几大块由工程域模板生成；BLDC / 机器人关节域还会用同一套模板产出 DFMEA 条目、候选方案、最终推荐、RACI 与受控文档。其中的具体数值/工期/样本数/器件参数（如 16.2nH、1360pF、$0.12、15 台）是模板示例，不是当前 case 的实测或计算结果——禁止直接引用到 EDR、设计评审或客户文档。请以「本地确定性预核算事实」与实测数据为准。',
+      message: '本页含内置通用模板内容：多维度风险分解、方案“为什么不选”、24小时验证计划、EDR 记录、红队挑战这几大块由工程域模板生成；BLDC / 机器人关节域还会用同一套模板产出 DFMEA 条目、候选方案、最终推荐、RACI 与受控文档。其中的具体数值/工期/样本数/器件参数是模板示例，不是当前 case 的实测或计算结果——禁止直接引用到 EDR、设计评审或客户文档。请以「本地确定性预核算事实」与实测数据为准。',
     };
     if (result.engineeringDocs && !result.engineeringDocs.edrRecord) {
       result.engineeringDocs.edrRecord = result.edrRecord;
