@@ -423,7 +423,7 @@ export function auditAiResult(
         autoFixApplied: true,
       });
 
-      sanitized.dualTimeline = buildDualTimelinePlan(sanitized, context, issue);
+      sanitized.dualTimeline = buildDualTimelinePlan(sanitized, context ?? ({} as ProjectContext), issue ?? ({} as IssueInput));
       autoFixSummary.push(`已自动为倒计时紧迫工况生成 T+24h 应急临时遏制 (Containment) 协同时间轴`);
     }
   }
@@ -495,7 +495,7 @@ export function auditAiResult(
 
   // 8. 双层时间轴完整性兜底
   if (!sanitized.dualTimeline || !sanitized.dualTimeline.containmentPhase) {
-    sanitized.dualTimeline = baseline.dualTimeline || buildDualTimelinePlan(sanitized, context, issue);
+    sanitized.dualTimeline = baseline.dualTimeline || buildDualTimelinePlan(sanitized, context ?? ({} as ProjectContext), issue ?? ({} as IssueInput));
   }
 
   // 9b. 确定性判据硬约束 (RULE_13_DETERMINISTIC_VETO_FLOOR)

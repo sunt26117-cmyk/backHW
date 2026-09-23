@@ -1,4 +1,5 @@
 import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } from '../types';
+import type { ScenarioPillars } from './decisionPillars';
 import { recalculateStandardWeightedScore } from '../utils/scoringWeights';
 
 function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): number {
@@ -415,7 +416,7 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
   };
 }
 
-export function getRobotJointPillars(context: ProjectContext, issue: IssueInput) {
+export function getRobotJointPillars(context: ProjectContext, issue: IssueInput): ScenarioPillars {
   const hasMeasured = Boolean((issue.actualMeasurement || '').trim());
   const hasSpec = Boolean((issue.requirement || '').trim());
   return {
@@ -471,21 +472,36 @@ export function getRobotJointPillars(context: ProjectContext, issue: IssueInput)
         { timeWindow: '16:00 - 24:00', phase: '连续满载热测试与纪要', task: '加减速 S 曲线优化，运行 2 小时满载往复节拍，监测泄放电阻温度', owner: 'Test Lead', deliverable: '温升曲线与评审纪要签署' },
       ],
       passFailCriteria: [
-        { parameter: '末端重复定位精度', specLimit: '按客户规格（模板不预填）', measuredOrEstimated: '待实测', margin: '待计算', verdict: 'PASS' as const, note: '激光干涉仪多点打靶验证' },
-        { parameter: 'STO 切断硬件独立性', specLimit: 'IEC 61800-5-2 Cat 3 PLd', measuredOrEstimated: '外置双通道干簧隔离', margin: '合规', verdict: 'PASS' as const, note: '单通道失效不影响另一通道断转矩' },
-        { parameter: '泄放电阻稳态温升', specLimit: '按器件降额规范（模板不预填）', measuredOrEstimated: '待实测', margin: '待计算', verdict: 'PASS' as const, note: 'S 曲线优化削减峰值功率' },
+        { parameter: '末端重复定位精度', greenCriteria: '实测重复定位精度满足客户规格并留有工程裕量 ➔ 判定达标，准予放行', yellowCriteria: '实测值接近规格上限 ➔ 需扩大样本并复核标定有效性', redCriteria: '实测值超出客户规格 ➔ 立即中止放行，启动机械预紧/改版方案' },
+        { parameter: 'STO 切断硬件独立性', greenCriteria: 'IEC 61800-5-2 Cat 3 PLd 通道独立性通过故障注入验证 ➔ 判定达标', yellowCriteria: '需补充共因失效(CCF)与诊断覆盖率证据 ➔ 受控推进', redCriteria: '任一通道失效导致无法独立切断转矩 ➔ 立即中止，不得进入现场' },
+        { parameter: '泄放电阻稳态温升', greenCriteria: '稳态温升满足器件降额规范 ➔ 判定达标', yellowCriteria: '温升接近降额红线 ➔ 需优化 S 曲线或加大散热', redCriteria: '稳态温升突破器件降额红线 ➔ 立即中止并重新选型' },
       ],
     },
+    // [strict 修复] 这里原来用的是 id/projectName/problemSummary/chosenOption/keyTradeoffs/vetoedOptions/approver
+    // 等自定义字段名，与 EngineeringDecisionRecord 完全对不上——UI 读 edrRecord.edrId / coreProblem /
+    // chosenOptionTitle / defenseBasis / signOffSignatures 时全是 undefined。现按类型定义修正。
     edrRecord: {
-      id: 'EDR-ROBOT-（按项目编号规则生成）',
-      projectName: context.projectName,
-      timestamp: new Date().toISOString(),
-      problemSummary: '协作机器人一体化关节末端精度超差与 STO 通道独立性不达标（具体数值以实测与本地确定性计算为准）',
-      deterministicFact: '激光干涉仪实测背隙与 STO 通道共用情况需按本项目实测/设计数据填写（模板不预填数值）',
-      chosenOption: 'Option B (激光干涉仪标定补偿 + 外置冗余安全继电器盒过渡)',
-      keyTradeoffs: '以短周期软件标定与外置安全盒换取保住当前 DVT 节点，量产同步改板彻底根除（工期按项目排期核算）',
-      vetoedOptions: ['Option C (严重违背产线节拍与安全法规，强制一票否决)'],
-      approver: 'Motion Lead & Safety Lead & PM',
+      edrId: `EDR-ROBOT-${Date.now().toString().slice(-6)}`,
+      projectCode: context.projectName || 'ROBOT-JOINT',
+      decisionDate: new Date().toISOString().split('T')[0],
+      decisionMaker: 'Motion Lead & Safety Lead & PM',
+      coreProblem: '协作机器人一体化关节末端精度超差与 STO 通道独立性不达标（具体数值以实测与本地确定性计算为准）。',
+      measuredSnapshot: hasMeasured ? issue.actualMeasurement! : '待输入：工程师尚未提供实测结果。',
+      specThreshold: hasSpec ? issue.requirement! : '待输入：客户/标准/设计规格尚未提供。',
+      engineeringAssumptions: [
+        '假设外置安全继电器过渡盒在产线现场不会被误拔或旁路',
+        '假设软件补偿标定在量产前可由 PCB 板级双通道隔离取代',
+      ],
+      chosenOptionId: 'Option B',
+      chosenOptionTitle: '激光干涉仪正反向滞环实测标定 + 软件反向间隙动态补偿 + 外置冗余安全继电器盒过渡',
+      rejectedOptionsSummary: 'Option C (严重违背产线节拍与安全法规，强制一票否决)。',
+      defenseBasis: '依据 IEC 61800-5-2 Cat 3 PLd 通道独立性与伺服运动学补偿机理：外置双通道安全继电器通过故障注入验证通道独立性，软件补偿在标定后经激光干涉仪复测闭环。',
+      signOffSignatures: [
+        { role: '运动控制负责人', name: 'Motion Lead', status: 'Signed', signDate: new Date().toISOString().split('T')[0] },
+        { role: '功能安全负责人', name: 'Safety Lead', status: 'Pending', signDate: '-' },
+        { role: '项目经理 (PM)', name: 'Project Director', status: 'Pending', signDate: '-' },
+      ],
+      localHashDigest: 'PENDING_CALCULATION',
     },
     redTeamChallenge: {
       auditVerdict: '方案 B 具有高可行性，但必须紧密监控机械磨损对补偿表的长期影响，且量产 PCB 改版不得停滞。',

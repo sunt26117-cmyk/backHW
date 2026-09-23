@@ -1203,6 +1203,9 @@ ${couplingText}
       }
     }
 
+    // strict 模式收口：前面各分支都会给 finalData 赋值，这里做一次编译期收口，避免 possibly null。
+    finalData = finalData ?? runExpertAnalysis(context, issue);
+
     if (!finalData.decisionFrame) {
       finalData.decisionFrame = {
         decisionQuestion: `${context?.nextMilestone || '下一工程门禁'} 前是否具备继续推进的证据条件`,

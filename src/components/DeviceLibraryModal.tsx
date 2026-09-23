@@ -34,7 +34,7 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
     }
     if (r.device) {
       setDevices(saveDevice(r.device));
-      setImportResult({ ok: '已导入器件：' + r.device.partNumber, warnings: r.warnings });
+      setImportResult({ ok: '已导入器件：' + r.device.partNumber, warnings: r.warnings || [] });
       setImportText('');
     }
   };

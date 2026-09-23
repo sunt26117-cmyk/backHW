@@ -30,7 +30,7 @@ export const OscilloscopeImportModal: React.FC<OscilloscopeImportModalProps> = (
     setFileName(file.name);
     const text = await file.text();
     const r = parseScopeCsv(text);
-    if (!r.ok) {
+    if (!r.ok || !r.data) {
       setError(r.error || '解析失败');
       setParsed(null);
       return;

@@ -46,7 +46,7 @@ import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 interface RecommendationRaciViewProps {
   result: CopilotAnalysisResult | null;
   context?: ProjectContext;
-  issue?: IssueInput;
+  issue: IssueInput; // 必填：组件起始处即调用 resolveEngineeringDomain(issue)，缺了会直接崩
   onGoToDocs: () => void;
 }
 

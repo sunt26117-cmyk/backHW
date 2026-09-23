@@ -87,6 +87,9 @@ export const EngineeringDocsView: React.FC<EngineeringDocsViewProps> = ({ result
       setFingerprint(null);
       return;
     }
+    // strict 模式：把已判空的局部量固化下来，因为 TS 不会把 narrowing 带进下面的 async 闭包。
+    const resultSafe = result;
+    const finalRecommendationSafe = finalRecommendation;
     async function computeHash() {
       const owners = raciMatrix.map((r) => `${r.role}:${r.owner}(${r.raciType})`);
       const fp = await generateDigitalFingerprint({
@@ -95,12 +98,12 @@ export const EngineeringDocsView: React.FC<EngineeringDocsViewProps> = ({ result
         asilLevel: context.asilLevel,
         ecuType: context.ecuType,
         timestampIso: new Date().toISOString(),
-        finalRecommendedOption: finalRecommendation.recommendedOptionName,
-        recommendationGrade: finalRecommendation.recommendationGrade,
+        finalRecommendedOption: finalRecommendationSafe.recommendedOptionName,
+        recommendationGrade: finalRecommendationSafe.recommendationGrade,
         raciSignOffs: owners,
         keyRisks: [
-          result.riskRatings.overallRisk,
-          `Score:${result.riskRatings.overallRiskScore}`,
+          resultSafe.riskRatings.overallRisk,
+          `Score:${resultSafe.riskRatings.overallRiskScore}`,
         ],
       });
       setFingerprint(fp);

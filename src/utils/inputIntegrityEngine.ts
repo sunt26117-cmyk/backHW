@@ -25,7 +25,8 @@ export function assessInputIntegrity(
   context: ProjectContext | undefined,
   issue: IssueInput | undefined
 ): InputIntegrityAssessment {
-  const domain = resolveEngineeringDomain(issue);
+  const safeIssue = issue ?? ({} as IssueInput);
+  const domain = resolveEngineeringDomain(safeIssue);
   const domainLabel = getEngineeringDomainLabel(domain);
 
   const missingContextFields: string[] = [];
@@ -111,7 +112,7 @@ export function assessInputIntegrity(
   }
 
   // 3. 领域实测参数字段核验 (总分权重 40)
-  const expectedFields: DomainMeasurementField[] = getDomainMeasurementFields(issue);
+  const expectedFields: DomainMeasurementField[] = getDomainMeasurementFields(safeIssue);
   const measuredValues: Record<string, any> = issue?.measuredValues || {};
 
   let filledCount = 0;
