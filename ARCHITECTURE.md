@@ -265,6 +265,11 @@ scripts/verify-engines.ts (342行, tsx 直跑, 无测试框架)
   · 16 个金标准验收 case（真实调模式引擎，不是照抄期望值）
   · P001 必须走共享物理核心（防公式再次分叉）
   · J 模式健康工况零否决 + 关键失效闭锁（含 PL 未声明 fail-closed）
+  · decisionFrame 归一化 5 条（字符串/分隔符/空数组/畸形类型/幂等）
+
+scripts/smoke-decisionframe-render.tsx (渲染层冒烟, react-dom/server 真渲染)
+  · 畸形 decisionFrame 下 FirstScreen10sView 不得抛错（旧代码在此精确复现
+    "reversalCriteria.slice(...).join is not a function"）
 ```
 
 ## 12. 被依赖最多的模块（改动的爆炸半径）

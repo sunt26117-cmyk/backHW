@@ -24,7 +24,7 @@ jobs:
       - name: Type-check (tsc --noEmit)
         run: npm run lint
 
-      - name: Run deterministic-engine + pattern regression (P001-P018 + J001-J007)
+      - name: Run deterministic-engine + pattern regression (P001-P018 + J001-J007) + render smoke
         run: npm test
 
       - name: Build offline single-file bundle
