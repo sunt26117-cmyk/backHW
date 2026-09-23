@@ -39,7 +39,7 @@ import {
   ConfidenceLevel,
 } from '../types';
 import { linearInterp } from '../utils/deviceLibrary';
-import { calculateBusPumping } from '../utils/motorPhysicsEngine';
+import { calculateBusPumping, checkMillerRisk } from '../utils/motorPhysicsEngine';
 import { sanitizePatternOutput } from '../utils/nanGuard';
 
 export interface BldcEvaluationInput {
@@ -356,25 +356,33 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     ? linearInterp(input.vthCurve, 25).value
     : input.vthMinV;
 
-  const imiller = (cgdPfEff * 1e-12) * (input.dvDtVns * 1e9); // A
-  const vgateInducedResistiveBound = imiller * input.rgOffOhm; // V，阻性上界
-  let vgateInducedCapacitiveBound: number | undefined;
-  if (input.cgsPf !== undefined && input.cgsPf > 0) {
-    vgateInducedCapacitiveBound = (cgdPfEff / (cgdPfEff + input.cgsPf)) * vbusNominalSafe;
-  }
-  // [FIX] 真实感应电压是两个界的较小值：开关沿很短时容性分压界更紧，阻性上界会显著高估。
+  // [统一共享核心] 原先这里是 P003 自己写的一份"阻性界 + 容性分压界 + 源极电感过冲 + 实测优先"
+  // 米勒模型；现已把该模型提升进 motorPhysicsEngine.checkMillerRisk（共享核心），P003 与
+  // bldcDeterministicEngine 走同一份实现，避免两处各自维护、各错一次。
+  // 器件库的曲线插值仍留在本引擎（共享核心不应依赖器件库）。
+  const millerShared = checkMillerRisk({
+    V_th_min: vthMinVEff,
+    C_gd_pF: cgdPfEff,
+    C_gs_pF: input.cgsPf,
+    R_g_pulldown_ohm: input.rgOffOhm,
+    dv_dt_V_per_ns: input.dvDtVns,
+    V_bus_V: vbusNominalSafe,
+    L_source_nH: input.sourceInductanceNh,
+    di_dt_A_per_ns: input.diDtANs,
+    V_gs_measured_V: input.gateSpikeMeasuredV,
+  });
+  const imiller = millerShared.millerCurrentA; // A
+  const vgateInducedResistiveBound = millerShared.vGateInducedResistiveV!; // V，阻性上界
+  const vgateInducedCapacitiveBound = millerShared.vGateInducedCapacitiveV;
   const vgateInduced = vgateInducedCapacitiveBound !== undefined
     ? Math.min(vgateInducedResistiveBound, vgateInducedCapacitiveBound)
     : vgateInducedResistiveBound;
-  // 源极寄生电感 di/dt 过冲：V_L = L_source · di/dt（nH·A/ns = V，无需换算）
-  const inductiveVgsSpike = (input.sourceInductanceNh ?? 0) * (input.diDtANs ?? 0);
-  const vgateInducedTheoreticalTotal = vgateInduced + inductiveVgsSpike;
-  // [本次修复] 有示波器实测 Vgs 尖峰时，优先采用实测值判定风险/裕量——实测天然涵盖理论模型
-  // 未覆盖的寄生路径，比任何理论估算都更可信；没有实测时才退回理论估算。
-  const hasGateSpikeMeasured = input.gateSpikeMeasuredV !== undefined;
-  const vgateInducedTotal = hasGateSpikeMeasured ? input.gateSpikeMeasuredV! : vgateInducedTheoreticalTotal;
-  const millerMargin = vthMinVEff - vgateInducedTotal;
-  const p003ShootThroughRisk = vgateInducedTotal >= vthMinVEff;
+  const inductiveVgsSpike = millerShared.inductiveOvershootV!;
+  const vgateInducedTheoreticalTotal = millerShared.theoreticalVGateV!;
+  const hasGateSpikeMeasured = millerShared.modelUsed === 'MEASURED';
+  const vgateInducedTotal = millerShared.vGateInducedV;
+  const millerMargin = millerShared.safetyMarginV;
+  const p003ShootThroughRisk = millerShared.isRiskOfShootThrough;
 
   const p003CalculatedValues: Record<string, string | number> = {
     '开关节点电压变化率 dv/dt (V/ns)': input.dvDtVns,

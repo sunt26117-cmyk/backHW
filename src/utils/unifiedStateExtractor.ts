@@ -46,6 +46,19 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
     return undefined;
   };
 
+  // 多个候选 key 中取第一个「真的填了」的值（按顺序）。
+  // 用途：同一个工程量在目录/历史版本里可能有两个 key（如 ambientTempC vs tAmbientC），
+  // 用 || 会吞掉合法的 0 值（0℃ 是真实环境温度），所以必须判断「是否填写」而不是「是否非零」。
+  const firstPresent = (...keys: string[]): number => {
+    for (const k of keys) {
+      const raw = issue.measuredValues?.[k];
+      if (raw === undefined || raw === null || raw === '') continue;
+      const parsed = Number(raw);
+      if (!isNaN(parsed)) return parsed;
+    }
+    return 0;
+  };
+
   return {
     project: {
       projectName: context.projectName,
@@ -104,11 +117,11 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
       adcResolutionBits: getNum('adcResolutionBits', [/ADC分辨率\s*([0-9.]+)\s*位/i], 12),
     },
     environment: {
-      tAmbientC: getNum('tAmbientC', [/环温\s*([0-9.]+)\s*℃/i, /环境温度\s*([0-9.]+)\s*℃/i, /Ta\s*=\s*([0-9.]+)\s*℃/i], 85),
+      tAmbientC: firstPresent('ambientTempC', 'tAmbientC'), // 目录规范 key 是 ambientTempC
       tCaseC: getNum('tCaseC', [/焊盘温度(?:达|=)?\s*([0-9.]+)\s*℃/i, /T_pad\s*=\s*([0-9.]+)\s*℃/i, /Tc\s*=\s*([0-9.]+)\s*℃/i], 105),
       tjMaxC: getNum('tjMaxC', [/Tj_max\s*([0-9.]+)\s*℃/i], 150),
       cooling: 'NATURAL_CONVECTION',
-      harnessLengthMeters: getNum('harnessLengthMeters', [/线束长度\s*([0-9.]+)\s*m/i], 1.5),
+      harnessLengthMeters: firstPresent('harnessLengthM', 'harnessLengthMeters'), // 目录规范 key 是 harnessLengthM
       connectorType: 'Unknown',
     },
     mechanical: {

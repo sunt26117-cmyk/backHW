@@ -74,6 +74,13 @@ export interface MillerRiskResult {
   isRiskOfShootThrough: boolean; // 是否存在同桥臂直通击穿风险
   riskLevel: 'SAFE' | 'WARNING' | 'CRITICAL_SHOOT_THROUGH';
   recommendation: string;        // 对策（如外加米勒钳位、减小Rg_off、调整死区等）
+  // ---- [先进模型] 以下分项由 bldcPatternEngine P003 的模型提升而来，供调用方展示各分项 ----
+  vGateInducedResistiveV?: number;    // 阻性上界 Im·Rg (V)
+  vGateInducedCapacitiveV?: number;   // 容性分压界 Cgd/(Cgd+Cgs)·Vbus (V)；未提供 Cgs/Vbus 时为 undefined
+  inductiveOvershootV?: number;       // 源极电感 di/dt 过冲 L_source·di/dt (V)
+  theoreticalVGateV?: number;         // 理论估算总值 = 两界较小值 + 电感过冲 (V)
+  modelUsed?: 'MEASURED' | 'THEORETICAL'; // 判据取用值来源：实测优先，否则理论估算
+  hasCapacitiveBound?: boolean;       // 是否启用了容性分压界
 }
 
 export interface SnubberCalcResult {
