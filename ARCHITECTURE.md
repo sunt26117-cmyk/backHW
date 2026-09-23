@@ -193,7 +193,21 @@ V4 的选择是**让两条路径并存、各司其职**（A 管"给一段文本�
 ```
 在线态走 `server.ts /api/copilot/analyze`（Gemini / OpenAI 兼容），**同一套协议**在 `utils/aiProtocol` 共享。
 
-## 8. 服务端接口（`server.ts` 1426 行）
+**边界收口（防外部 JSON 打崩 UI）**：AI / 手工编辑 / 离线导入的 JSON 不受我们控制——schema 声明为
+`string[]` 的字段（`decisionFrame.reversalCriteria` / `unknownsBlockingDecision` / `minimumEvidenceToProceed`）
+经常被模型返回成**单个字符串**；字符串有 `.slice()` 却没有 `.join()` / `.map()`，视图一渲染就抛
+`xxx.reversalCriteria.slice(...).join is not a function`，整个结果页白屏。
+所有入口统一收口：
+
+- 前端共享协议 `utils/aiProtocol.validateAndEnrichAiResult()`
+- 服务端合并 `server.ts`（提示词路径 + 确定性回退路径 **两处**）
+- 归一化实现 `utils/decisionFrame.ts`：`normalizeDecisionFrame()` / `toStringArray()`
+  （字符串→数组并按 `；`/`;`/换行拆分；空数组/畸形类型回落默认值；对合规对象幂等）
+- 视图层（`FirstScreen10sView` / `RecommendationRaciView` / `ResultProvenanceBanner`）再用 `Array.isArray` 兜底
+
+`verify-engines` 有 5 条回归断言锁住这个故障（字符串 / 带分隔符 / 空数组与畸形类型 / 幂等 / 非字符串元素）。
+
+## 8. 服务端接口（`server.ts` 1433 行）
 
 | 接口 | 作用 |
 |---|---|

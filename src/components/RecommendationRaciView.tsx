@@ -85,9 +85,12 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
   }
 
   const { finalRecommendation, raciMatrix, containment, capa, riskRatings } = result;
-  const calculatedEvidence = result.analysisBasis?.calculatedOutputEvidence || [];
+  // [健壮性] 这几个字段可能被 AI / 离线导入 JSON 写成字符串或对象，直接 .filter/.map 会崩，先收口成数组
+  const rawCalculatedEvidence = result.analysisBasis?.calculatedOutputEvidence;
+  const calculatedEvidence = Array.isArray(rawCalculatedEvidence) ? rawCalculatedEvidence : [];
   const unknownsBlockingDecision = toStringArray(result.decisionFrame?.unknownsBlockingDecision);
-  const domainAssessments = result.multiDomainAnalysis?.domainAssessments || [];
+  const rawDomainAssessments = result.multiDomainAnalysis?.domainAssessments;
+  const domainAssessments = Array.isArray(rawDomainAssessments) ? rawDomainAssessments : [];
   const insufficientEvidenceCount = calculatedEvidence.filter((e) => e.status === 'INSUFFICIENT_INPUT').length;
   const lowEvidenceDomains = domainAssessments.filter((d) => /LOW|低|不足/i.test(d.evidenceLevel || ''));
   const safeWhyReason = Array.isArray(finalRecommendation?.whyReason) ? finalRecommendation.whyReason : finalRecommendation?.whyReason ? [String(finalRecommendation.whyReason)] : [];
