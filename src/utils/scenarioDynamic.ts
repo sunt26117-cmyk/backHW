@@ -1,4 +1,7 @@
 import { CopilotAnalysisResult, IssueInput, ProjectContext, RaciItem, DFMEAView, DualTimelineActionPlan } from '../types';
+import { evaluateAllBldcPatterns } from '../data/bldcPatternEngine';
+import { deriveBldcEvaluationInput } from './scenarioDerived';
+import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput } from '../data/robotJointPatternEngine';
 import { buildScenarioPassFailCriteria, getDomainPhysics, resolveEngineeringDomain, resolveEngineeringDomains } from './scenarioDomainEngine';
 import { getCrossDomainCouplings } from './crossDomainCouplingMatrix';
 import { recalculateStandardWeightedScore } from './scoringWeights';
@@ -92,6 +95,23 @@ function deriveScenarioRiskScore(issue: IssueInput, context: ProjectContext, dom
   return Math.max(10, Math.min(98, Math.round(score)));
 }
 
+// [输入驱动] 取「当前实际触发」的物理模式（P001~P018 / J001~J007）。
+// 每个模式自带 candidateMeasures(措施) / verificationItems(验证方法) / sideEffects(副作用)，
+// 直接作为候选方案的内容来源，替代按域写死的模板方案。
+function collectTriggeredPatterns(domain: string, context: ProjectContext, issue: IssueInput): any[] {
+  try {
+    if (domain === 'BLDC') {
+      return evaluateAllBldcPatterns(deriveBldcEvaluationInput(context, issue)).filter((p) => p.triggered) as any[];
+    }
+    if (domain === 'ROBOT_JOINT') {
+      return evaluateAllRobotJointPatterns(deriveRobotJointEvaluationInput(issue)).filter((p) => p.triggered) as any[];
+    }
+  } catch {
+    // 模式引擎异常时退回按域模板，绝不让动态层崩掉整次分析
+  }
+  return [];
+}
+
 function buildDynamicCandidateActions(context: ProjectContext, issue: IssueInput, domain: string, riskScore: number): CopilotAnalysisResult['candidateActions'] {
   const days = context.daysRemaining;
   const cats = issue.issueCategories || [];
@@ -178,11 +198,68 @@ function buildDynamicCandidateActions(context: ProjectContext, issue: IssueInput
     ];
   }
 
+  // [输入驱动] BLDC / ROBOT_JOINT：候选方案由「当前实际触发的物理模式」生成，
+  // 而不是按域写死的一套模板；方案名/措施/验证方法全部来自触发模式。
+  if (domain === 'BLDC' || domain === 'ROBOT_JOINT') {
+    const pats = collectTriggeredPatterns(domain, context, issue);
+    if (pats.length > 0) {
+      const lvlRank: Record<string, number> = { High: 0, 'Medium-High': 1, Medium: 2, Low: 3 };
+      const sorted = [...pats].sort((a, b) => {
+        const ra = (a.vetoTriggered ? -1 : 0) + (lvlRank[String(a.riskLevel)] ?? 3);
+        const rb = (b.vetoTriggered ? -1 : 0) + (lvlRank[String(b.riskLevel)] ?? 3);
+        return ra - rb;
+      });
+      const p0 = sorted[0];
+      const p1 = sorted[1] || sorted[0];
+      const vetoPat = sorted.find((p) => p.vetoTriggered);
+      const toResidual = (lvl: string): any => (lvl === 'High' ? 'High' : lvl === 'Medium-High' ? 'Medium' : 'Low');
+      const measures = (p: any) => safeStringArray(p?.candidateMeasures).slice(0, 2).join('；') || String(p?.corePhysicalChain || '').slice(0, 90);
+      const verify = (p: any) => safeStringArray(p?.verificationItems).slice(0, 2).join('；') || '按当前工况补充最小实测证据';
+      const sides = (p: any) => safeStringArray(p?.sideEffects).slice(0, 2).join('；') || '需评估本措施对相邻指标（EMC/热/寿命）的影响';
+      const idName = (p: any) => (String(p?.id || '') + ' ' + String(p?.name || '').split('(')[0].trim()).trim();
+      const r0 = String(p0?.riskLevel || 'Medium');
+      const list: any[] = [
+        mk('Option A', 'conservative', '根治已触发模式 ' + String(p0?.id || ''),
+          '针对「' + idName(p0) + '」的根治措施',
+          measures(p0),
+          '直接消除当前已触发的主要物理风险（' + String(p0?.id || '') + '，风险等级 ' + r0 + '）。',
+          baseScores(26, 60, 48, 92, 90), toResidual(r0),
+          '残余风险来自 ' + String(p0?.id || '') + ' 未覆盖的边界条件，必须按验证项闭环后才算消除。',
+          sides(p0), '按当前项目排期核算', verify(p0),
+          '若根治受结构/成本限制，切换为 Option B 的联合治理方案。'),
+        mk('Option B', 'balanced', '多风险联合治理',
+          '联合治理「' + [p0, p1].filter(Boolean).map((p: any) => p?.id).filter(Boolean).join(' + ') + '」',
+          measures(p1),
+          '同时压制当前已触发的 ' + sorted.slice(0, 2).length + ' 项主要风险，改动幅度与工期更均衡。',
+          baseScores(22, 90, 80, 88, 88), 'Medium',
+          '联合方案需要逐项验证，任一模式未闭环则残余风险上升。',
+          sides(p1), '按当前项目排期核算', verify(p0) + '；' + verify(p1),
+          '若联合验证失败，回到 Option A 的单点根治路径。'),
+        mk('Option C', 'schedule_priority', '临时缓解（不得关闭根因）',
+          '仅做软件/限值侧临时缓解（不改变物理根因）',
+          '针对 ' + String(vetoPat?.id || p0?.id || '') + '：不改变物理根因，仅以软件/限值侧缓解争取节点时间。',
+          '以最小改动争取节点时间，但不能作为关闭根因问题的证据。',
+          baseScores(6, 96, 92, 42, 33), 'High',
+          '物理根因（' + String(vetoPat?.id || p0?.id || '') + '）未被消除，量产与平台迁移风险高。',
+          '可能掩盖真实硬件应力，必须设置失效日期与关闭条件', '1~2 天',
+          '必须保留未缓解前的原始物理证据，并要求后续硬件闭环',
+          '到期仍未闭环即升级为 Option A。'),
+      ];
+      // 方案层 veto 跟随模式层 veto：存在 vetoTriggered 模式时，临时缓解方案必须被一票否决。
+      if (vetoPat) {
+        list[2].veto = {
+          rejection_veto: true,
+          veto_reason: '模式 ' + String(vetoPat.id || '') + ' 已触发一票否决：' + String(vetoPat.vetoReason || '根因未闭环') + '——本方案只是临时缓解，不得作为放行依据。',
+        };
+      }
+      return list;
+    }
+  }
   if (domain === 'ROBOT_JOINT') {
     return [
-      mk('Option A', 'conservative', '物理硬件重构', 'PCB Layout 双通道 STO 物理隔离 + 关节第二编码器全闭环 + 泄放电阻外置散热', '从硬件单板走线、机械测角全闭环与传热路径从源头根治背隙、单点失效与过热。', '彻底达到量产级硬指标，通过正式 TÜV Cat 3 PLd 认证并具备长期运行可靠性。', baseScores(18, 55, 45, 95, 95), 'Low', '需重新投板制作 PCB 并微调机械结构，工期 22~25 天。', 'PCB 投板打样 + 机械小改模', '22~25 天', '激光干涉仪双向定位精度复测 + STO 单通道短路/开路故障注入 + 连续满载温升', '并行推进软件补偿作为过渡，待新硬件归档后完成切换。'),
-      mk('Option B', 'balanced', '双轨推进 (推荐)', '软件反向间隙查表动态补偿 + 外挂独立双通道安全继电器箱过渡 + 加减速 S 曲线回馈削峰', '利用固件反向补偿消除背隙，外设独立安全盒确保 STO 双通道电气隔离，微调加减速保护电阻。', '在不改动板卡 (0天PCB工期) 前提下，将末端精度压入 2.5 arcmin 以内，通过现场符合性预审。', baseScores(25, 92, 90, 88, 88), 'Medium', '软件补偿在磨损老化后可能漂移，外置安全盒不能替代量产单板设计。', '激光干涉仪全行程标定 + 外置安全继电器模块', '3~4 天', '激光干涉仪 10 次往复测量重复定位误差 + STO 故障注入切断时延抓波 + 100% 负荷热电偶温升', '若精度离散度超出 2.5 arcmin，立即降速运行并启动 Option A 硬件投板。'),
-      mk('Option C', 'schedule_priority', '高风险放行 (一票否决)', '仅在上位机单边调大目标误差容限，不对硬件与安全机制做任何整改', '直接放宽重复定位精度指标至 4.5 arcmin，并出具免责说明申请现场免检。', '眼前不改动任何软硬件，但直接违反 ISO 13849-1 及合同技术规格。', baseScores(0, 98, 98, 20, 10), 'High', '面临客户拒收退货索赔，且 STO 单点共地共因失效触碰产品责任法规红线。', '无法通过验收', '0 天', '无法通过', '无')
+      mk('Option A', 'conservative', '物理硬件重构', 'PCB Layout 双通道 STO 物理隔离 + 关节第二编码器全闭环 + 泄放电阻外置散热', '从硬件单板走线、机械测角全闭环与传热路径从源头根治背隙、单点失效与过热。', '彻底达到量产级硬指标，通过正式 TÜV Cat 3 PLd 认证并具备长期运行可靠性。', baseScores(18, 55, 45, 95, 95), 'Low', '需重新投板制作 PCB 并微调机械结构，工期按项目排期核算。', 'PCB 投板打样 + 机械小改模', '按项目排期', '激光干涉仪双向定位精度复测 + STO 单通道短路/开路故障注入 + 连续满载温升', '并行推进软件补偿作为过渡，待新硬件归档后完成切换。'),
+      mk('Option B', 'balanced', '双轨推进 (推荐)', '软件反向间隙查表动态补偿 + 外挂独立双通道安全继电器箱过渡 + 加减速 S 曲线回馈削峰', '利用固件反向补偿消除背隙，外设独立安全盒确保 STO 双通道电气隔离，微调加减速保护电阻。', '在不改动板卡（0 天 PCB 工期）前提下把末端精度收敛到客户规格以内，并通过现场符合性预审（具体收敛值须实测确认）。', baseScores(25, 92, 90, 88, 88), 'Medium', '软件补偿在磨损老化后可能漂移，外置安全盒不能替代量产单板设计。', '激光干涉仪全行程标定 + 外置安全继电器模块', '3~4 天', '激光干涉仪 10 次往复测量重复定位误差 + STO 故障注入切断时延抓波 + 100% 负荷热电偶温升', '若精度离散度超出规格，立即降速运行并启动 Option A 硬件投板。'),
+      mk('Option C', 'schedule_priority', '高风险放行 (一票否决)', '仅在上位机单边调大目标误差容限，不对硬件与安全机制做任何整改', '直接放宽重复定位精度指标并出具免责说明申请现场免检。', '眼前不改动任何软硬件，但直接违反 ISO 13849-1 及合同技术规格。', baseScores(0, 98, 98, 20, 10), 'High', '面临客户拒收退货索赔，且 STO 单点共地共因失效触碰产品责任法规红线。', '无法通过验收', '0 天', '无法通过', '无')
     ];
   }
 
@@ -452,6 +529,8 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
   // 避免 decisionPillars.getBldcPillars 里 3800rpm/48MHz/37.8V 等参考案例数字泄漏进结果。
   if (domain === 'BLDC') {
     const riskScore = dynamic.riskRatings?.overallRiskScore ?? 60;
+    // [输入驱动] 用「当前实际触发的 P 模式」重建候选方案，替换 bldcMotorExpert 里写死的 Option A/B/C。
+    dynamic.candidateActions = buildDynamicCandidateActions(context, issue, domain, riskScore);
     const presentInputs = Object.entries(issue.measuredValues || {})
       .filter(([, v]) => v !== '' && v !== null && v !== undefined)
       .map(([k, v]) => k + '=' + v);
