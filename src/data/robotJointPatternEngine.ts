@@ -39,6 +39,7 @@ import { RiskLevel } from '../types';
 import { EvidenceType, ConfidenceLevel, RobotJointPatternId } from '../types/v4Models';
 import { IssueInput } from '../types';
 import { calculateTwoMassResonance } from '../utils/robotJointResonance';
+import { sanitizePatternOutput } from '../utils/nanGuard';
 
 export type { RobotJointPatternId };
 
@@ -717,5 +718,5 @@ export function evaluateAllRobotJointPatterns(input: RobotJointEvaluationInput):
     unknownsToTest: ['多关节级联总线拓扑下，单一关节通信异常是否会通过总线反向影响其余关节的实时性'],
   });
 
-  return patterns;
+  return patterns.map((p) => sanitizePatternOutput(p));
 }

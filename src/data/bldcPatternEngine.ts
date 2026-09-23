@@ -40,6 +40,7 @@ import {
 } from '../types';
 import { linearInterp } from '../utils/deviceLibrary';
 import { calculateBusPumping } from '../utils/motorPhysicsEngine';
+import { sanitizePatternOutput } from '../utils/nanGuard';
 
 export interface BldcEvaluationInput {
   vbusNominal: number;      // V
@@ -1227,5 +1228,5 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     unknownsToTest: ['零下 40℃ 润滑脂凝固导致的冷态假堵转与真实硬限位碰撞的区别特征提取'],
   });
 
-  return patterns;
+  return patterns.map((p) => sanitizePatternOutput(p));
 }
