@@ -446,7 +446,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
         nominalSpecification: '母线瞬态吸收电压限值按当前器件额定耐压与降额规范定义（模板不预填）',
         interimSpecification: `三相下桥制动后的母线峰值与 Miller 感应峰值目标需依据当前基线（Bus Pumping=${dynamicBus}；Miller=${dynamicMiller}）和项目规格定义，再由实测确认。`,
         processPhase: 'B 样试验件试制与 DV 试验准入批次',
-        inspectionFrequency: '每批 100% 执行 3800rpm 急停示波器双通道波形抓取，数据直传 MES',
+        inspectionFrequency: '每批 100% 执行最高工作转速急停的示波器双通道波形抓取，数据直传 MES',
         containmentMethod: '刷写含过压与直通硬件比较器锁死的固件；加装 RC Snubber（容值/阻值按实测振铃频率计算）',
         reactionPlan: '若急停峰值或相电流突破当前项目规定的门限值，立即熔断停机并隔离待查（门限按实测基线与器件规格定义）',
         effectiveBatchOrVinRange: '当前 B 样试制批次（批次范围按实际试制记录填写）',
