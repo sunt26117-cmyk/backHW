@@ -1,0 +1,93 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#020617}</style></head><body><svg xmlns="http://www.w3.org/2000/svg" width="1560" height="1448" viewBox="0 0 1560 1448">
+<rect width="1560" height="1448" fill="#020617"/>
+<text x="44" y="52" font-size="34" font-weight="700" fill="#f8fafc" font-family="Microsoft YaHei, Segoe UI, sans-serif">backHW (ecu-hardware-copilot) · 分层架构框图</text>
+<text x="44" y="84" font-size="18" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">离线优先的车规硬件风险决策副驾 — 输入经「共享物理核心 + 25 个车规判据模式」→ 可追溯结论 / 候选方案 / 受控文档</text>
+<text x="44" y="112" font-size="15" fill="#475569" font-family="Microsoft YaHei, Segoe UI, sans-serif">L3 是最终内容来源（覆盖 L2/L1 的模板骨架）；L1 有两条输入派生路径 A/B 并存</text>
+<rect x="44" y="130" width="1472" height="158" rx="16" fill="#0f172a" stroke="#38bdf8" stroke-width="2"/>
+<rect x="44" y="130" width="6" height="158" rx="3" fill="#38bdf8"/>
+<rect x="70" y="156" width="82" height="38" rx="10" fill="#38bdf8" fill-opacity="0.18" stroke="#38bdf8"/>
+<text x="111" y="182" font-size="22" font-weight="700" fill="#38bdf8" text-anchor="middle" font-family="Microsoft YaHei, Segoe UI, sans-serif">L5</text>
+<text x="172" y="178" font-size="26" font-weight="700" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">视图层</text>
+<text x="172" y="206" font-size="16" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">src/components</text>
+<text x="74" y="238" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• 13 个 tab + 7 个弹窗</text>
+<text x="74" y="262" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• 🌟第一屏 · 0工作流 · 1输入 · 2事实 · 3模式 · 4方案 · 5驾驶舱</text>
+<text x="74" y="286" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• 6验证闭环 · 7功能安全 · 8评审回归 · 9RACI · 10受控文档 · 11计算器</text>
+<rect x="1186" y="154" width="300" height="110" rx="12" fill="#020617" stroke="#1e293b"/>
+<text x="1202" y="182" font-size="16" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">components/*.tsx</text>
+<text x="1202" y="206" font-size="15" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">约 15000 行</text>
+<line x1="780" y1="296" x2="780" y2="330" stroke="#475569" stroke-width="2"/>
+<polygon points="772,324 788,324 780,336" fill="#475569"/>
+<text x="800" y="316" font-size="14" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">数据上行 / 调用下行</text>
+<rect x="44" y="340" width="1472" height="158" rx="16" fill="#0f172a" stroke="#a78bfa" stroke-width="2"/>
+<rect x="44" y="340" width="6" height="158" rx="3" fill="#a78bfa"/>
+<rect x="70" y="366" width="82" height="38" rx="10" fill="#a78bfa" fill-opacity="0.18" stroke="#a78bfa"/>
+<text x="111" y="392" font-size="22" font-weight="700" fill="#a78bfa" text-anchor="middle" font-family="Microsoft YaHei, Segoe UI, sans-serif">L4</text>
+<text x="172" y="388" font-size="26" font-weight="700" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">编排层</text>
+<text x="172" y="416" font-size="16" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">App.tsx · data/expertEngine</text>
+<text x="74" y="448" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• App.tsx：activeTab 状态机（841 行）</text>
+<text x="74" y="472" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• runExpertAnalysis() 五步出结果：</text>
+<text x="74" y="496" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• ①域判定 → ②域专家 → ③pillars兜底 → ④动态层 → ⑤多域基线</text>
+<rect x="1186" y="364" width="300" height="110" rx="12" fill="#020617" stroke="#1e293b"/>
+<text x="1202" y="392" font-size="16" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">expertEngine.ts</text>
+<text x="1202" y="416" font-size="15" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">422 行</text>
+<line x1="780" y1="506" x2="780" y2="540" stroke="#475569" stroke-width="2"/>
+<polygon points="772,534 788,534 780,546" fill="#475569"/>
+<text x="800" y="526" font-size="14" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">数据上行 / 调用下行</text>
+<rect x="44" y="550" width="1472" height="158" rx="16" fill="#0f172a" stroke="#34d399" stroke-width="2"/>
+<rect x="44" y="550" width="6" height="158" rx="3" fill="#34d399"/>
+<rect x="70" y="576" width="82" height="38" rx="10" fill="#34d399" fill-opacity="0.18" stroke="#34d399"/>
+<text x="111" y="602" font-size="22" font-weight="700" fill="#34d399" text-anchor="middle" font-family="Microsoft YaHei, Segoe UI, sans-serif">L3</text>
+<text x="172" y="598" font-size="26" font-weight="700" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">内容生成层</text>
+<text x="172" y="626" font-size="16" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">utils/scenarioDynamic</text>
+<text x="74" y="658" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• applyScenarioDynamicLayer()：按【当前输入 + 触发的模式】重建内容</text>
+<text x="74" y="682" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• candidateActions · raciMatrix · dfmeaItems · dualTimeline</text>
+<text x="74" y="706" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• containment · capa · 5大块 · engineeringDocs</text>
+<rect x="1186" y="574" width="300" height="110" rx="12" fill="#020617" stroke="#1e293b"/>
+<text x="1202" y="602" font-size="16" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">scenarioDynamic.ts 836</text>
+<text x="1202" y="626" font-size="15" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">decisionPillars.ts 1144</text>
+<line x1="780" y1="716" x2="780" y2="750" stroke="#475569" stroke-width="2"/>
+<polygon points="772,744 788,744 780,756" fill="#475569"/>
+<text x="800" y="736" font-size="14" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">数据上行 / 调用下行</text>
+<rect x="44" y="760" width="1472" height="158" rx="16" fill="#0f172a" stroke="#fbbf24" stroke-width="2"/>
+<rect x="44" y="760" width="6" height="158" rx="3" fill="#fbbf24"/>
+<rect x="70" y="786" width="82" height="38" rx="10" fill="#fbbf24" fill-opacity="0.18" stroke="#fbbf24"/>
+<text x="111" y="812" font-size="22" font-weight="700" fill="#fbbf24" text-anchor="middle" font-family="Microsoft YaHei, Segoe UI, sans-serif">L2</text>
+<text x="172" y="808" font-size="26" font-weight="700" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">判据层（确定性）</text>
+<text x="172" y="836" font-size="16" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">data/*PatternEngine · utils/nanGuard</text>
+<text x="74" y="868" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• bldcPatternEngine P001–P018（18 个 · 逆变桥电气物理）</text>
+<text x="74" y="892" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• robotJointPatternEngine J001–J007（7 个 · 关节机电/安全/总线）</text>
+<text x="74" y="916" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• nanGuard 清洗 NaN · CI 断言覆盖全部 25 个模式</text>
+<rect x="1186" y="784" width="300" height="110" rx="12" fill="#020617" stroke="#1e293b"/>
+<text x="1202" y="812" font-size="16" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">bldcPatternEngine 1240</text>
+<text x="1202" y="836" font-size="15" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">robotJointPattern 722</text>
+<line x1="780" y1="926" x2="780" y2="960" stroke="#475569" stroke-width="2"/>
+<polygon points="772,954 788,954 780,966" fill="#475569"/>
+<text x="800" y="946" font-size="14" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">数据上行 / 调用下行</text>
+<rect x="44" y="970" width="1472" height="158" rx="16" fill="#0f172a" stroke="#f472b6" stroke-width="2"/>
+<rect x="44" y="970" width="6" height="158" rx="3" fill="#f472b6"/>
+<rect x="70" y="996" width="82" height="38" rx="10" fill="#f472b6" fill-opacity="0.18" stroke="#f472b6"/>
+<text x="111" y="1022" font-size="22" font-weight="700" fill="#f472b6" text-anchor="middle" font-family="Microsoft YaHei, Segoe UI, sans-serif">L1</text>
+<text x="172" y="1018" font-size="26" font-weight="700" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">物理计算 / 输入派生</text>
+<text x="172" y="1046" font-size="16" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">utils/motorPhysicsEngine 等</text>
+<text x="74" y="1078" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• 共享物理核心 motorPhysicsEngine（唯一真源，防公式分叉）</text>
+<text x="74" y="1102" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• 确定性引擎 bldcDeterministic · robotJointDeterministic · thermalCascade</text>
+<text x="74" y="1126" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• 输入派生：路径A scenarioDerived ｜ 路径B unifiedStateExtractor</text>
+<rect x="1186" y="994" width="300" height="110" rx="12" fill="#020617" stroke="#1e293b"/>
+<text x="1202" y="1022" font-size="16" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">motorPhysicsEngine 409</text>
+<text x="1202" y="1046" font-size="15" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">unifiedStateExtractor 146</text>
+<line x1="780" y1="1136" x2="780" y2="1170" stroke="#475569" stroke-width="2"/>
+<polygon points="772,1164 788,1164 780,1176" fill="#475569"/>
+<text x="800" y="1156" font-size="14" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">数据上行 / 调用下行</text>
+<rect x="44" y="1180" width="1472" height="158" rx="16" fill="#0f172a" stroke="#94a3b8" stroke-width="2"/>
+<rect x="44" y="1180" width="6" height="158" rx="3" fill="#94a3b8"/>
+<rect x="70" y="1206" width="82" height="38" rx="10" fill="#94a3b8" fill-opacity="0.18" stroke="#94a3b8"/>
+<text x="111" y="1232" font-size="22" font-weight="700" fill="#94a3b8" text-anchor="middle" font-family="Microsoft YaHei, Segoe UI, sans-serif">L0</text>
+<text x="172" y="1228" font-size="26" font-weight="700" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">域注册表 / 静态数据</text>
+<text x="172" y="1256" font-size="16" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">utils/scenarioDomainEngine · types</text>
+<text x="74" y="1288" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• 域判定 · 字段目录 · 物理画像 · 域指标 · 三色门禁</text>
+<text x="74" y="1312" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• types.ts 867 · types/v4Models.ts 556</text>
+<text x="74" y="1336" font-size="17" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">• deviceLibrary · presetScenarios · goldStandardCases(16 验收)</text>
+<rect x="1186" y="1204" width="300" height="110" rx="12" fill="#020617" stroke="#1e293b"/>
+<text x="1202" y="1232" font-size="16" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">scenarioDomainEngine 798</text>
+<text x="1202" y="1256" font-size="15" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">types.ts 867</text>
+</svg></body></html>

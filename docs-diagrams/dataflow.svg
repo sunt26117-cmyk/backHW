@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="1500" viewBox="0 0 1700 1500">
+<rect width="1700" height="1500" fill="#020617"/>
+<text x="56" y="52" font-size="34" font-weight="700" fill="#f8fafc" font-family="Microsoft YaHei, Segoe UI, sans-serif">backHW · 端到端数据流与三条关键支线</text>
+<text x="56" y="84" font-size="18" fill="#64748b" font-family="Microsoft YaHei, Segoe UI, sans-serif">输入 → 域判定 → 域专家 → pillars兜底 → 动态层（★真正内容来源）→ 结果 → 13 tab</text>
+<text x="56" y="112" font-size="15" fill="#475569" font-family="Microsoft YaHei, Segoe UI, sans-serif">底部三面板：输入派生 A/B 路径 ｜ 共享物理核心 ｜ 离线 AI 闭环</text>
+<rect x="56" y="152" width="740" height="76" rx="12" fill="#0f172a" stroke="#38bdf8" stroke-width="1.6"/>
+<rect x="56" y="152" width="5" height="76" rx="2.5" fill="#38bdf8"/>
+<text x="76" y="182" font-size="18" font-weight="700" fill="#38bdf8" font-family="Microsoft YaHei, Segoe UI, sans-serif">输入</text>
+<text x="76" y="210" font-size="19" font-weight="600" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">用户填工况</text>
+<text x="312" y="184" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">tab1 ProjectContextView：自由文本 + measuredV</text>
+<text x="312" y="206" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">alues → localStorage</text>
+<line x1="86" y1="232" x2="86" y2="244" stroke="#38bdf8" stroke-width="2"/>
+<polygon points="80,238 92,238 86,250" fill="#38bdf8"/>
+<rect x="56" y="250" width="740" height="76" rx="12" fill="#0f172a" stroke="#a78bfa" stroke-width="1.6"/>
+<rect x="56" y="250" width="5" height="76" rx="2.5" fill="#a78bfa"/>
+<text x="76" y="280" font-size="18" font-weight="700" fill="#a78bfa" font-family="Microsoft YaHei, Segoe UI, sans-serif">①</text>
+<text x="76" y="308" font-size="19" font-weight="600" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">域判定</text>
+<text x="312" y="282" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">resolveEngineeringDomain()：分类 + 文本关键词 → </text>
+<text x="312" y="304" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">BLDC / 关节 / EMC / WCCA / 热 / 器件…</text>
+<line x1="86" y1="330" x2="86" y2="342" stroke="#a78bfa" stroke-width="2"/>
+<polygon points="80,336 92,336 86,348" fill="#a78bfa"/>
+<rect x="56" y="348" width="740" height="76" rx="12" fill="#0f172a" stroke="#a78bfa" stroke-width="1.6"/>
+<rect x="56" y="348" width="5" height="76" rx="2.5" fill="#a78bfa"/>
+<text x="76" y="378" font-size="18" font-weight="700" fill="#a78bfa" font-family="Microsoft YaHei, Segoe UI, sans-serif">②</text>
+<text x="76" y="406" font-size="19" font-weight="600" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">域专家产主结果</text>
+<text x="312" y="380" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">BLDC→bldcMotorExpert ｜ 关节→robotJointExpe</text>
+<text x="312" y="402" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">rt ｜ 其他→最小骨架</text>
+<line x1="86" y1="428" x2="86" y2="440" stroke="#a78bfa" stroke-width="2"/>
+<polygon points="80,434 92,434 86,446" fill="#a78bfa"/>
+<rect x="56" y="446" width="740" height="76" rx="12" fill="#0f172a" stroke="#f472b6" stroke-width="1.6"/>
+<rect x="56" y="446" width="5" height="76" rx="2.5" fill="#f472b6"/>
+<text x="76" y="476" font-size="18" font-weight="700" fill="#f472b6" font-family="Microsoft YaHei, Segoe UI, sans-serif">③</text>
+<text x="76" y="504" font-size="19" font-weight="600" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">pillars 兜底（②缺字段才用）</text>
+<text x="312" y="478" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">getXxxPillars 6 域模板（仅兜底）+ 打 templateCont</text>
+<text x="312" y="500" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">entNotice 标记</text>
+<line x1="86" y1="526" x2="86" y2="538" stroke="#f472b6" stroke-width="2"/>
+<polygon points="80,532 92,532 86,544" fill="#f472b6"/>
+<rect x="56" y="544" width="740" height="76" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.6"/>
+<rect x="56" y="544" width="5" height="76" rx="2.5" fill="#34d399"/>
+<text x="76" y="574" font-size="18" font-weight="700" fill="#34d399" font-family="Microsoft YaHei, Segoe UI, sans-serif">④</text>
+<text x="76" y="602" font-size="19" font-weight="600" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">动态层 ★ 覆盖 ②③</text>
+<text x="312" y="576" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">★ 按【当前输入 + 触发的模式】重建 方案 / RACI / DFMEA / </text>
+<text x="312" y="598" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">时间轴 / 文档</text>
+<line x1="86" y1="624" x2="86" y2="636" stroke="#34d399" stroke-width="2"/>
+<polygon points="80,630 92,630 86,642" fill="#34d399"/>
+<rect x="56" y="642" width="740" height="76" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="1.6"/>
+<rect x="56" y="642" width="5" height="76" rx="2.5" fill="#34d399"/>
+<text x="76" y="672" font-size="18" font-weight="700" fill="#34d399" font-family="Microsoft YaHei, Segoe UI, sans-serif">⑤</text>
+<text x="76" y="700" font-size="19" font-weight="600" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">多域基线补全</text>
+<text x="312" y="674" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">multiDomainAnalysis + analysisBasis + pr</text>
+<text x="312" y="696" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">ovenance（证据来源 / 执行模式）</text>
+<line x1="86" y1="722" x2="86" y2="734" stroke="#34d399" stroke-width="2"/>
+<polygon points="80,728 92,728 86,740" fill="#34d399"/>
+<rect x="56" y="740" width="740" height="76" rx="12" fill="#0f172a" stroke="#fbbf24" stroke-width="1.6"/>
+<rect x="56" y="740" width="5" height="76" rx="2.5" fill="#fbbf24"/>
+<text x="76" y="770" font-size="18" font-weight="700" fill="#fbbf24" font-family="Microsoft YaHei, Segoe UI, sans-serif">结果</text>
+<text x="76" y="798" font-size="19" font-weight="600" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">CopilotAnalysisResult</text>
+<text x="312" y="772" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">13 个 tab 都消费这一个结果对象</text>
+<line x1="86" y1="820" x2="86" y2="832" stroke="#fbbf24" stroke-width="2"/>
+<polygon points="80,826 92,826 86,838" fill="#fbbf24"/>
+<rect x="56" y="838" width="740" height="76" rx="12" fill="#0f172a" stroke="#fbbf24" stroke-width="1.6"/>
+<rect x="56" y="838" width="5" height="76" rx="2.5" fill="#fbbf24"/>
+<text x="76" y="868" font-size="18" font-weight="700" fill="#fbbf24" font-family="Microsoft YaHei, Segoe UI, sans-serif">渲染</text>
+<text x="76" y="896" font-size="19" font-weight="600" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">13 个 tab 渲染</text>
+<text x="312" y="870" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">🌟第一屏 / 事实 / 模式 / 方案 / 驾驶舱 / RACI / 文档 /</text>
+<text x="312" y="892" font-size="14.5" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"> 计算器</text>
+<rect x="826" y="152" width="818" height="762" rx="14" fill="#0b1220" stroke="#1e293b"/>
+<text x="848" y="190" font-size="17" font-weight="700" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">为什么 L2/L3 看起来像模板</text>
+<text x="848" y="216" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">②③ 返回的是工程域通用模板骨架；④ 才按【当前输入 + 当前触发的模式】重建最终内容。</text>
+<text x="848" y="263" font-size="17" font-weight="700" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">★ 动态层的四个动作</text>
+<text x="848" y="289" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">1) 收触发模式 collectTriggeredPatterns()</text>
+<text x="848" y="312" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">2) 方案 = 触发模式的 candidateMeasures 组装三档</text>
+<text x="848" y="335" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">   （根治 conservative / 联合治理 balanced / 临时缓解）</text>
+<text x="848" y="358" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">3) 方案 veto 跟随模式 vetoTriggered</text>
+<text x="848" y="381" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">4) 同时重建 raciMatrix / dfmeaItems / dualTimeline /</text>
+<text x="848" y="404" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">   containment / capa / engineeringDocs</text>
+<text x="848" y="451" font-size="17" font-weight="700" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">缺失输入的处理纪律</text>
+<text x="848" y="477" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">路径A 缺输入 → NaN（不伪造）</text>
+<text x="848" y="500" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">路径B 缺输入 → 0/undefined → INSUFFICIENT_INPUT</text>
+<text x="848" y="523" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">nanGuard 兜底：引擎返回前把 NaN/Infinity 洗成「缺输入」</text>
+<text x="848" y="570" font-size="17" font-weight="700" fill="#7dd3fc" font-family="Microsoft YaHei, Segoe UI, sans-serif">可信度护栏</text>
+<text x="848" y="596" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">templateContentNotice 提示通用模板</text>
+<text x="848" y="619" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">provenance 标注执行模式（本地规则 / 在线AI / 离线AI）</text>
+<text x="848" y="642" font-size="15" fill="#cbd5e1" font-family="Microsoft YaHei, Segoe UI, sans-serif">analysisBasis 记录每个数值的证据来源</text>
+<rect x="56" y="948" width="512" height="496" rx="14" fill="#0f172a" stroke="#f472b6" stroke-width="1.6"/>
+<text x="76" y="982" font-size="17" font-weight="700" fill="#f472b6" font-family="Microsoft YaHei, Segoe UI, sans-serif">两条输入派生路径（并存 · 已审计一致）</text>
+<text x="76" y="1010" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">路径A（喂模式引擎）</text>
+<text x="76" y="1031" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  deriveBldc / RobotJointEvaluationInput</text>
+<text x="76" y="1052" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  · 自由文本正则推断</text>
+<text x="76" y="1073" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  · 缺输入 → NaN（不伪造）</text>
+<text x="76" y="1094" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  · 扁平 BldcEvaluationInput</text>
+<text x="76" y="1115" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">  消费者：25 个 P/J 模式引擎</text>
+<text x="76" y="1136" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="76" y="1157" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">路径B（喂确定性计算）</text>
+<text x="76" y="1178" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  extractUnifiedEngineeringModel</text>
+<text x="76" y="1199" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  · 只读 measuredValues</text>
+<text x="76" y="1220" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  · 缺输入 → 0 / undefined</text>
+<text x="76" y="1241" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  · 嵌套 UnifiedEngineeringModel</text>
+<text x="76" y="1262" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">  消费者：确定性引擎 / 域指标</text>
+<text x="76" y="1283" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="76" y="1304" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">13 个重叠字段已核对完全一致</text>
+<text x="76" y="1325" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">key 已对齐：harnessLengthM / ambientTempC</text>
+<rect x="594" y="948" width="512" height="496" rx="14" fill="#0f172a" stroke="#fbbf24" stroke-width="1.6"/>
+<text x="614" y="982" font-size="17" font-weight="700" fill="#fbbf24" font-family="Microsoft YaHei, Segoe UI, sans-serif">共享物理核心（唯一真源 · 防公式分叉）</text>
+<text x="614" y="1010" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">motorPhysicsEngine.ts (409 行)</text>
+<text x="614" y="1031" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="614" y="1052" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">calculateBusPumping  母线泵升</text>
+<text x="614" y="1073" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  V_peak = √(V0² + 2·η·Ek/C)</text>
+<text x="614" y="1094" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  （含线束电感储能 0.5·L·I²）</text>
+<text x="614" y="1115" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="614" y="1136" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">checkMillerRisk  米勒直通</text>
+<text x="614" y="1157" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  阻性界 Im·Rg</text>
+<text x="614" y="1178" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  + 容性分压界 Cgd/(Cgd+Cgs)·Vbus</text>
+<text x="614" y="1199" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  + 源极电感过冲 L·di/dt</text>
+<text x="614" y="1220" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  → 两界取小 + 实测尖峰优先</text>
+<text x="614" y="1241" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">  （已由 P003 提升而来 · 向后兼容）</text>
+<text x="614" y="1262" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="614" y="1283" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">calculateSnubberParams  RC 吸收</text>
+<text x="614" y="1304" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="614" y="1325" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">消费者：P001 / P003 · bldcDeterministic</text>
+<text x="614" y="1346" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">· scenarioDomainEngine · UI 工具箱</text>
+<rect x="1132" y="948" width="512" height="496" rx="14" fill="#0f172a" stroke="#34d399" stroke-width="1.6"/>
+<text x="1152" y="982" font-size="17" font-weight="700" fill="#34d399" font-family="Microsoft YaHei, Segoe UI, sans-serif">离线 AI 闭环（数值锚定本地计算）</text>
+<text x="1152" y="1010" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">① buildAnalysisPrompt() 生成提示词</text>
+<text x="1152" y="1031" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">   系统提示（车规首席架构师）</text>
+<text x="1152" y="1052" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">   + 工况 + 本地确定性事实层</text>
+<text x="1152" y="1073" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">   + 输入完整度审计 + JSON 字段清单</text>
+<text x="1152" y="1094" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">   红线：本地数值必须直接引用；</text>
+<text x="1152" y="1115" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">         缺失参数一律 UNKNOWN</text>
+<text x="1152" y="1136" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="1152" y="1157" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">② 复制 → 任意免费 AI → 拿回纯 JSON</text>
+<text x="1152" y="1178" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="1152" y="1199" font-size="14" fill="#e2e8f0" font-family="Microsoft YaHei, Segoe UI, sans-serif">③ 导回：healAndParseJson</text>
+<text x="1152" y="1220" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">   → zod 结构校验 aiResultSchema</text>
+<text x="1152" y="1241" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">   → validateAndEnrichAiResult</text>
+<text x="1152" y="1262" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">   → auditAiResult 反幻觉审计</text>
+<text x="1152" y="1283" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="1152" y="1304" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">④ 渲染 + provenance 标注</text>
+<text x="1152" y="1325" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">   ONLINE_AI_INFERRED</text>
+<text x="1152" y="1346" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif"></text>
+<text x="1152" y="1367" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">在线态走 server.ts /api/copilot/analyze</text>
+<text x="1152" y="1388" font-size="14" fill="#94a3b8" font-family="Microsoft YaHei, Segoe UI, sans-serif">同一套协议 utils/aiProtocol 共享</text>
+</svg>
