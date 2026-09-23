@@ -39,6 +39,7 @@ import {
   ConfidenceLevel,
 } from '../types';
 import { linearInterp } from '../utils/deviceLibrary';
+import { calculateBusPumping } from '../utils/motorPhysicsEngine';
 
 export interface BldcEvaluationInput {
   vbusNominal: number;      // V
@@ -186,20 +187,38 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   if (vbusNominalWasAssumed) {
     p001Assumptions.push('母线标称电压 vbusNominal 未提供（自由文本里只给出了泵升后的峰值，没有说明泵升前的标称值），假设为 13.5V（典型车规12V系统充电态标称电压）——这是本条判据里置信度最低的一个假设，建议优先补充');
   }
-  const omega = (2 * Math.PI * input.rpm) / 60;
-  const kineticEnergy = 0.5 * input.jInertia * omega * omega; // J
+  // [统一共享核心] 母线泵升不再由 P001 自己写一份公式，改为调用全局唯一的物理核心
+  // motorPhysicsEngine.calculateBusPumping()——与 bldcDeterministicEngine / scenarioDomainEngine /
+  // MotorDriveToolbox 走同一份实现，避免“18种模式”tab 与主报告用两套公式算出两个不同峰值。
+  // 该共享实现比原 P001 公式多一项线束电感储能 0.5·L·I²（仅在提供 loopInductanceNh 时计入）。
   const regenEfficiencyTypical = 0.75; // 动能回馈电气转化经验系数（典型值，仅用于展示预期）
   const regenEfficiencyWorstCase = 1.0; // 一票否决判据必须用最坏工况(能量无损耗全部转化)，不能用典型值
+  if (!input.cbusUf || input.cbusUf <= 0) p001Assumptions.push('母线电容 cbusUf 未提供，假设 470μF');
+  const cbusUfEffective = input.cbusUf && input.cbusUf > 0 ? input.cbusUf : 470;
+  const loopInductanceUh = input.loopInductanceNh !== undefined && input.loopInductanceNh > 0
+    ? input.loopInductanceNh / 1000
+    : 0;
+  if (loopInductanceUh === 0) {
+    p001Assumptions.push('未提供回路/线束寄生电感 loopInductanceNh，泵升计算未计入线束电感储能 0.5·L·I²（该项实际存在，会低估尖峰）');
+  }
+  const busPumpingParams = {
+    V_bus_nom: vbusNominalSafe,
+    V_bus_max_rating: input.vdsRating,
+    C_dc_uF: cbusUfEffective,
+    J_kg_m2: input.jInertia,
+    n_rpm: input.rpm,
+    L_harness_uH: loopInductanceUh,
+    // 注意：motorPhysicsEngine 内部是 Math.max(0, I_phase_A)，传 NaN 会让 0.5·L·I² 变成 NaN
+    // 并沿能量链污染整个峰值计算（即使 L=0 也一样）。缺电流输入时传 0，不传 NaN。
+    I_phase_A: Number.isFinite(input.currentPeakA) ? input.currentPeakA : 0,
+  };
+  const busPumpingTypical = calculateBusPumping({ ...busPumpingParams, regenEfficiency: regenEfficiencyTypical });
+  const busPumpingWorstCase = calculateBusPumping({ ...busPumpingParams, regenEfficiency: regenEfficiencyWorstCase });
+  const kineticEnergy = busPumpingWorstCase.kineticEnergyJoules; // J
   const electricalEnergyTypical = kineticEnergy * regenEfficiencyTypical;
   const electricalEnergyWorstCase = kineticEnergy * regenEfficiencyWorstCase;
-  if (!input.cbusUf || input.cbusUf <= 0) p001Assumptions.push('母线电容 cbusUf 未提供，假设 470μF');
-  const cFarads = (input.cbusUf && input.cbusUf > 0 ? input.cbusUf : 470) * 1e-6;
-  const theoreticalVbusPeakTypical = Math.sqrt(
-    Math.pow(vbusNominalSafe, 2) + (2 * electricalEnergyTypical) / cFarads
-  );
-  const theoreticalVbusPeakWorstCase = Math.sqrt(
-    Math.pow(vbusNominalSafe, 2) + (2 * electricalEnergyWorstCase) / cFarads
-  );
+  const theoreticalVbusPeakTypical = busPumpingTypical.V_bus_peak;
+  const theoreticalVbusPeakWorstCase = busPumpingWorstCase.V_bus_peak;
   // [FIX-1] 不再用编造的 37.8V 冒充"实测值"。有实测就用实测；没有实测就用理论最坏值
   // 顶替，并如实标注这是"未实测、按最坏工况理论计算"，而不是伪装成测量数据。
   const hasMeasuredVbus = input.vbusMeasuredPeak !== undefined && input.vbusMeasuredPeak !== null;

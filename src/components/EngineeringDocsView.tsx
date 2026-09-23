@@ -22,6 +22,7 @@ import {
   generateDigitalFingerprint,
   DigitalFingerprintResult,
 } from '../utils/cryptoTraceability';
+import { TemplateContentNotice } from './TemplateContentNotice';
 
 interface EngineeringDocsViewProps {
   result: CopilotAnalysisResult | null;
@@ -58,10 +59,17 @@ export const EngineeringDocsView: React.FC<EngineeringDocsViewProps> = ({ result
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [fingerprint, setFingerprint] = useState<DigitalFingerprintResult | null>(null);
 
+  // 这些受控文档会引用 result 里的通用模板区块（EDR/为什么不选/24小时计划等），
+  // 复制或导出时必须在正文开头带上来源提示，避免模板示例数字被当成项目实测证据对外提交。
+  const templateWarningHeader = result?.templateContentNotice
+    ? '> 通用模板内容提示：本文档含内置工程域模板生成的区块（多维度风险分解、方案为什么不选、24小时验证计划、EDR 记录、红队挑战）。其中的具体数值/工期/样本数/器件参数为模板示例，不是当前 case 的实测或计算结果；对外提交前必须逐条替换为本项目实测/计算证据。\n\n'
+    : '';
+
   const handleDownloadDoc = (content: string, filename: string) => {
+    const body = templateWarningHeader + content;
     const textWithFingerprint = fingerprint
-      ? `${content}\n\n${fingerprint.tamperProofCertificate}`
-      : content;
+      ? `${body}\n\n${fingerprint.tamperProofCertificate}`
+      : body;
     const blob = new Blob([textWithFingerprint], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -101,9 +109,10 @@ export const EngineeringDocsView: React.FC<EngineeringDocsViewProps> = ({ result
   }, [result]);
 
   const handleCopy = (text: string, key: string) => {
+    const body = templateWarningHeader + text;
     const textWithFingerprint = fingerprint
-      ? `${text}\n\n${fingerprint.tamperProofCertificate}`
-      : text;
+      ? `${body}\n\n${fingerprint.tamperProofCertificate}`
+      : body;
     navigator.clipboard.writeText(textWithFingerprint);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
@@ -549,6 +558,9 @@ ${(result.raciMatrix || []).map((r) => `  * [${r.raciType}] ${r.role}: ${r.owner
 
   return (
     <div className="space-y-6">
+      {result.templateContentNotice && (
+        <TemplateContentNotice blocks={result.templateContentNotice.blocks} message={result.templateContentNotice.message} />
+      )}
       <div className="bg-slate-900 border border-cyan-500/30 rounded-xl p-3 text-xs">
         <span className="text-cyan-300 font-semibold">当前工况受控文档：</span>
         <span className="text-white ml-2">{scenarioHeader}</span>
@@ -643,8 +655,8 @@ ${(result.raciMatrix || []).map((r) => `  * [${r.raciType}] ${r.role}: ${r.owner
                   <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-mono font-bold">
                     P0 级核心档案
                   </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
-                    车规专家规则引擎 · 确定性底盘 (非AI生成)
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-600/40 font-normal">
+                    规则引擎 · 工程域通用模板 (非本case专属)
                   </span>
                 </div>
                 <span className="text-[11px] text-slate-400">

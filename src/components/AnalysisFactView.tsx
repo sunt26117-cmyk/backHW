@@ -1,6 +1,7 @@
 import React from 'react';
 import { CopilotAnalysisResult, InformationTag } from '../types';
 import { ResultProvenanceBanner } from './ResultProvenanceBanner';
+import { TemplateContentNotice } from './TemplateContentNotice';
 import {
   CheckCircle2,
   HelpCircle,
@@ -179,7 +180,7 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
                 严谨信息类型分类审查 (P0 级第一原则：绝不把假设当事实)
               </span>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
-                车规专家规则引擎 · 确定性底盘 (非AI生成)
+                规则引擎 · 工程域通用模板 (非本case专属)
               </span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -323,8 +324,8 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
               <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0" />
               <h4 className="text-sm font-bold text-white tracking-wide flex items-center gap-2 flex-wrap">
                 <span>红队逆向质疑与盲区审计 (Red Team Audit Challenge)</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
-                  车规专家规则引擎 · 确定性底盘 (非AI生成)
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-600/40 font-normal">
+                  规则引擎 · 工程域通用模板 (非本case专属)
                 </span>
               </h4>
             </div>
@@ -335,6 +336,12 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
               </span>
             </div>
           </div>
+
+          {result.templateContentNotice && (
+            <div className="mb-3">
+              <TemplateContentNotice blocks={result.templateContentNotice.blocks} message={result.templateContentNotice.message} compact />
+            </div>
+          )}
 
           <div className="p-3 bg-rose-950/30 border border-rose-800/40 rounded-lg mb-3 text-xs text-rose-200 font-medium leading-relaxed">
             {redTeamChallenge.auditVerdict}

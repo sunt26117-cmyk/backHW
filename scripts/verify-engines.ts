@@ -14,6 +14,7 @@ import { recalculateStandardWeightedScore } from '../src/utils/scoringWeights';
 import { assessDomainClassificationAmbiguity } from '../src/utils/scenarioDomainEngine';
 import { GOLD_STANDARD_CASES, runGoldStandardCaseRegression } from '../src/data/goldStandardCases';
 import { evaluateAllBldcPatterns } from '../src/data/bldcPatternEngine';
+import { calculateBusPumping } from '../src/utils/motorPhysicsEngine';
 import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput, type RobotJointEvaluationInput } from '../src/data/robotJointPatternEngine';
 import type { IssueInput, ProjectContext } from '../src/types';
 
@@ -242,6 +243,14 @@ check('急停高速工况应触发 P001，温和工况不应', () => {
   const fast = evaluateAllBldcPatterns({ vbusNominal: 12, vdsRating: 40, rpm: 3800, jInertia: 0.00015, cbusUf: 470, tAmbientC: 25, currentPeakA: 25, harnessLengthM: 0.5, deadTimeNs: 120, rgOffOhm: 4.7, cgdPf: 45, dvDtVns: 6.0, vthMinV: 2.0 }).filter((p) => p.triggered).map((p) => p.id);
   assert.equal(fast.includes('P001'), true, '急停工况应触发 P001，实际=' + fast.join(','));
   assert.equal(quietPatterns.includes('P001'), false, '温和工况不得触发 P001');
+});
+
+check('P001 母线泵升必须走共享物理核心 motorPhysicsEngine（禁止再自写一份公式）', () => {
+  const fixed = { vbusNominal: 13.5, vdsRating: 40, rpm: 3800, jInertia: 0.00015, cbusUf: 470, tAmbientC: 25, currentPeakA: 0, harnessLengthM: 0.5, deadTimeNs: 400, rgOffOhm: 1.0, cgdPf: 45, dvDtVns: 2.0, vthMinV: 2.0 };
+  const p001 = evaluateAllBldcPatterns(fixed).find((p) => p.id === 'P001')!;
+  const shared = calculateBusPumping({ V_bus_nom: 13.5, V_bus_max_rating: 40, C_dc_uF: 470, J_kg_m2: 0.00015, n_rpm: 3800, regenEfficiency: 0.75, L_harness_uH: 0, I_phase_A: 0 });
+  const reported = p001.calculatedValues['理论泵升峰值(典型效率) Vbus_theo_typ (V)'];
+  assert.equal(reported, Number(shared.V_bus_peak.toFixed(1)), 'P001 报告的典型泵升峰值应与 motorPhysicsEngine.calculateBusPumping 完全一致；不一致说明又分叉成两套公式了');
 });
 
 console.log(`\n${failures === 0 ? '全部通过' : `共 ${failures} 项失败`}`);

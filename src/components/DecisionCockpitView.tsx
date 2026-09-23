@@ -5,6 +5,7 @@ import { evaluateLeadershipEconomicRisk } from '../data/safetyReliabilityEngine'
 import { STANDARD_TSCQL_WEIGHTS } from '../utils/scoringWeights';
 import type { TscqlWeights } from '../utils/scoringWeights';
 import { ResultProvenanceBanner } from './ResultProvenanceBanner';
+import { TemplateContentNotice } from './TemplateContentNotice';
 import {
   Sliders,
   ShieldAlert,
@@ -448,6 +449,10 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
         </div>
       </div>
 
+      {result.templateContentNotice && (
+        <TemplateContentNotice blocks={result.templateContentNotice.blocks} message={result.templateContentNotice.message} />
+      )}
+
       {/* P0-2: 去黑箱化多维工程风险解构 (Multi-Dimensional Risk Breakdown) */}
       {result.multiRiskBreakdown && (() => {
         const mb = result.multiRiskBreakdown as any;
@@ -467,7 +472,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                     去黑箱化多维工程风险解构 (5维风险穿透)
                   </span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
-                    车规专家规则引擎 · 确定性底盘 (非AI生成)
+                    规则引擎 · 工程域通用模板 (非本case专属)
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
@@ -925,7 +930,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                     措施决策理由显性化 (为什么推荐 B 而不选 A/C 三栏对比)
                   </span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
-                    车规专家规则引擎 · 确定性底盘 (非AI生成)
+                    规则引擎 · 工程域通用模板 (非本case专属)
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
@@ -1108,7 +1113,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                     未来 24 小时攻关行动时刻表 (量化执行与三色门禁)
                   </span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-normal">
-                    车规专家规则引擎 · 确定性底盘 (非AI生成)
+                    规则引擎 · 工程域通用模板 (非本case专属)
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">

@@ -26,6 +26,7 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import { CopilotAnalysisResult, ProjectContext, IssueInput } from '../types';
+import { TemplateContentNotice } from './TemplateContentNotice';
 import { calculateDomainMetrics, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 
 interface FirstScreen10sProps {
@@ -81,6 +82,9 @@ export const FirstScreen10sView: React.FC<FirstScreen10sProps> = ({
 
   return (
     <div className="space-y-6">
+      {result.templateContentNotice && (
+        <TemplateContentNotice blocks={result.templateContentNotice.blocks} message={result.templateContentNotice.message} />
+      )}
       {/* 顶部醒目标题与项目工况快照 */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950/40 border border-slate-800 rounded-xl p-5 shadow-lg">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

@@ -106,6 +106,11 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     result.next24HourPlan = result.next24HourPlan || pillars.next24HourPlan;
     result.edrRecord = result.edrRecord || pillars.edrRecord;
     result.redTeamChallenge = result.redTeamChallenge || pillars.redTeamChallenge;
+    // 这 5 大块（+classifiedInfo 第3条起）来自工程域通用模板，不是 case 专属分析。
+    result.templateContentNotice = {
+      blocks: ['multiRiskBreakdown', 'whyNotComparison', 'next24HourPlan', 'edrRecord', 'redTeamChallenge', 'classifiedInfo(第3条起)'],
+      message: '本页含内置通用模板内容：多维度风险分解、方案“为什么不选”、24小时验证计划、EDR 记录与红队挑战这几大块由工程域模板生成，其中的具体数值/工期/样本数/器件参数是模板示例，不是当前 case 的实测或计算结果——禁止直接引用到 EDR、设计评审或客户文档。请以「本地确定性预核算事实」与实测数据为准。',
+    };
     if (result.engineeringDocs && !result.engineeringDocs.edrRecord) {
       result.engineeringDocs.edrRecord = result.edrRecord;
     }
