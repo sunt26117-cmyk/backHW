@@ -47,7 +47,7 @@ export function getPhaseReviewChecklist(phase: 'Concept' | 'EVT' | 'DVT' | 'PVT'
           checkpoint: 'MOSFET Vds 标称与极端峰值电压是否在 80% 额定降额线以内',
           standardClause: 'AEC-Q101 Rev E / IPC-9592B 降额指南',
           status: 'CRITICAL_RISK',
-          notes: '急停母线瞬态泵升实测达到 37.8V，严重逼近 40V 耐压上限，必须立即抑制！',
+          notes: '（BLDC 参考模板）需以当前工程的实测峰值与器件耐压规格判定降额裕量，不得沿用历史案例数值。',
         },
         {
           phase: 'EVT',
@@ -137,6 +137,10 @@ export function getPhaseReviewChecklist(phase: 'Concept' | 'EVT' | 'DVT' | 'PVT'
   }
 }
 
+/**
+ * @deprecated 仅为 BLDC 急停案例的 REFERENCE 数据（含 41.2V / 148.5℃ 等历史数值）。
+ * UI 与派生引擎不得调用；当前工况请使用 scenarioDerived.deriveWorstCases()。
+ */
 export function generateWorstCaseCandidates(): WorstCaseCombination[] {
   return [
     {
@@ -184,8 +188,8 @@ export function evaluateComponentChangeImpact(
         controlImpact: '死区裕量需要重新校准，避免高温击穿或低温畸变',
         mandatoryRetests: [
           'CISPR 25 Class 5 传导与辐射发射全项对比测试 (必须重做)',
-          '3800rpm 急停母线泵升与门极米勒尖峰示波器捕获 (必须重做)',
-          '105℃ 满载温箱连续堵转 100 次温升测试 (必须重做)',
+          '按当前项目最高相关工况执行关键开关/瞬态波形捕获 (必须重做)',
+          '按当前项目规定高温边界执行满载/关键故障循环温升测试 (必须重做)',
           '短路关断保护响应时间 vs SOA 时序实测 (必须重做)',
         ],
       };

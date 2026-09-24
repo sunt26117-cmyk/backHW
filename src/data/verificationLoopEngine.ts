@@ -125,12 +125,14 @@ export function generateStructuredVerificationPlan(context?: ProjectContext, iss
       objective: `当前工况首要验证：${problem.slice(0, 80)}`,
       condition: issue?.testCondition || '按当前典型工况执行真实测试',
       method,
-      instrumentation: 'Tektronix MSO 54 示波器 (1GHz 带宽) + IsoVu 光隔离差分探头 + 罗氏线圈电流探头',
+      instrumentation: categories.includes('EMC')
+        ? '接收机/频谱分析仪 + 近场探头 + 线束电流探头（按当前抗扰/发射项选型）'
+        : '示波器/数据采集 + 与当前问题匹配的差分/电流探头（带宽与量程按被测信号确定）',
       measurement: issue?.actualMeasurement || requirement,
       passCriteria: `满足需求：${requirement.slice(0, 100)}；并且不存在关键绝对最大额定值违规。`,
       failCriteria: `实测突破需求或出现当前问题的同类异常：${problem.slice(0, 80)}`,
       sampleSize: 5,
-      owner: '张工 (硬件开发专家)',
+      owner: '硬件开发负责人（待指派）',
       deadline: `${context?.projectPhase || '当前阶段'} / Day-1`,
     },
     {
@@ -142,19 +144,23 @@ export function generateStructuredVerificationPlan(context?: ProjectContext, iss
       passCriteria: `满足当前需求：${requirement.slice(0, 100)}；关键风险项不得突破绝对最大额定边界。`,
       failCriteria: `实测突破需求或复现异常：${problem.slice(0, 80)}`,
       sampleSize: 3,
-      owner: '李工 (驱动与功率硬件工程师)',
+      owner: '功率/驱动硬件负责人（待指派）',
       deadline: `${context?.projectPhase || '当前阶段'} / Day-2`,
     },
     {
       objective: `第三验证项：环境与次生风险｜${context ? `${context.productType} / ${context.projectPhase}` : '目标环境'}`,
       condition: issue?.environment || '目标环境 + 当前问题最不利条件',
       method,
-      instrumentation: '频谱分析仪 + 近场 H-Field 磁场探头 + 接触式点温计',
+      instrumentation: categories.includes('EMC')
+        ? '频谱分析仪 + 近场 H-Field 磁场探头 + 接触式点温计'
+        : categories.includes('Thermal') || categories.includes('Power')
+        ? '温箱 + 热电偶/热像仪 + 电源分析仪（记录温升与功耗）'
+        : '与当前问题匹配的环境应力设备 + 数据采集 + 接触式点温计（按需）',
       measurement: issue?.actualMeasurement || '关键异常指标与温升/频谱变化量',
       passCriteria: `达到当前需求与内部放行门限：${requirement.slice(0, 90)}`,
       failCriteria: `未满足需求或出现明显热/EMC/可靠性异常：${problem.slice(0, 80)}`,
       sampleSize: 5,
-      owner: '王工 (EMC 整改工程师)',
+      owner: 'EMC/可靠性验证负责人（待指派）',
       deadline: `${context?.projectPhase || '当前阶段'} / Day-3`,
     },
   ];

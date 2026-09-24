@@ -2,7 +2,7 @@ import { ProjectContext, IssueInput, CopilotAnalysisResult, ComponentChangeImpac
 import { BldcEvaluationInput } from '../data/bldcPatternEngine';
 import { FmedaRow, FtaNode, SafetyTraceabilityNode, PhaseCheckItem, WorstCaseCombination } from '../types';
 import { SAMPLE_FMEDA_ROWS, SAMPLE_FTA_TREE, SAMPLE_SAFETY_TRACEABILITY_CHAIN } from '../data/safetyReliabilityEngine';
-import { generateWorstCaseCandidates, getPhaseReviewChecklist } from '../data/designReviewEngine';
+import { getPhaseReviewChecklist } from '../data/designReviewEngine';
 import { resolveEngineeringDomain, getDomainPhysics } from './scenarioDomainEngine';
 import { loadDevices, getDeviceCurve } from './deviceLibrary';
 
@@ -445,7 +445,12 @@ function evaluateComponentChangeImpactInternal(category: ComponentChangeImpactIt
 }
 
 export function derivePhaseChecklist(phase: 'Concept' | 'EVT' | 'DVT' | 'PVT' | 'SOP', context: ProjectContext, issue: IssueInput, result?: CopilotAnalysisResult | null): PhaseCheckItem[] {
-  const base = getPhaseReviewChecklist(phase);
+  // 不再把 designReviewEngine 中的历史案例 checklist 当作当前工程事实。
+  // 这里只借用条目数量/阶段结构，所有 checkpoint 与 notes 必须由当前场景重新生成。
+  const base = getPhaseReviewChecklist(phase).map((item) => ({
+    ...item,
+    notes: '模板结构：当前工程证据待确认，不代表当前项目已完成该检查项。',
+  }));
   const score = result?.riskRatings.overallRiskScore ?? 60;
   const domain = resolveEngineeringDomain(issue);
   const category = issue.issueCategories?.[0] || 'Other';
@@ -472,11 +477,32 @@ export function derivePhaseChecklist(phase: 'Concept' | 'EVT' | 'DVT' | 'PVT' | 
     `围绕${category}风险完成关键参数实测与回归`,
     `形成当前工况的证据链、门禁判据与变更追溯`,
   ];
+  // 模板（designReviewEngine）是 BLDC 案例：只借用阶段与条目数量。
+  // category / standardClause / status 一律由当前工况重新生成，禁止继承模板里的 MOSFET/门极/电流采样
+  // 分类、半导体标准条款以及历史案例的 CRITICAL_RISK 判定。BLDC/机器人关节工况才保留模板分类与条款。
+  const keepTemplateLabels = domain === 'BLDC' || domain === 'ROBOT_JOINT';
+  const neutralCategories = ['设计输入与边界', '验证与回归', '证据链与追溯'];
+  const clauseByDomain: Record<string, string> = {
+    EMC_BCI: 'ISO 11452-4（BCI）/ 客户 EMC 规范',
+    EMC_ESD: 'ISO 10605 / 客户 ESD 规范',
+    EMC_RE_CE: 'CISPR 25 / 客户 EMC 规范',
+    POWER_TRANSIENT: 'ISO 7637-2 / ISO 16750-2 / 客户电源规范',
+    SIGNAL: 'ISO 11898-2（CAN/CAN FD 物理层）或对应总线规范',
+    COMPONENT: 'AEC-Q100/Q101 + 器件规格书 + PCN/PPAP 要求',
+    THERMAL: 'JESD51 系列热测试规范 + 器件规格书降额要求',
+    WCCA: '客户/内部 WCCA 与降额规范（待确认）',
+    WCCA_EOL: '客户/内部 WCCA 与 EOL 标定规范（待确认）',
+    SAFETY: 'ISO 26262',
+  };
+  const clause = clauseByDomain[domain] || '依据当前项目适用标准与客户规范（待确认）';
   return base.map((item, idx) => ({
     ...item,
-    category: `${category}｜${item.category}`,
+    category: keepTemplateLabels
+      ? `${category}｜${item.category}`
+      : `${category}｜${neutralCategories[idx % neutralCategories.length]}`,
+    standardClause: keepTemplateLabels ? item.standardClause : clause,
     checkpoint: `${points[idx % points.length]}（${context.productType}）`,
-    status: idx === 0 ? riskTone : (score >= 70 && idx === 1 ? 'NEEDS_ATTENTION' : item.status),
+    status: idx === 0 ? riskTone : (score >= 65 ? 'NEEDS_ATTENTION' : 'COMPLIANT'),
     notes: `当前工程 ${context.projectName}｜${context.projectPhase}｜${context.asilLevel}｜剩余 ${context.daysRemaining} 天。问题：${problem.slice(0, 90)}。${result?.unknowns?.[0] ? `首要未知项：${result.unknowns[0].slice(0, 70)}。` : ''}`,
   }));
 }
@@ -496,7 +522,7 @@ export function deriveWorstCases(context: ProjectContext, issue: IssueInput, res
     rpmCondition: issue.testCondition || '按当前测试条件施加最不利运行边界',
     componentToleranceCondition: `结合 ${context.asilLevel} 与当前风险评分 ${score}/100 识别关键公差项`,
     combinedPeakStress: `风险评分 ${score}/100；当前异常：${problem.slice(0, 100)}`,
-    marginToAbsoluteMax: `必须依据当前器件规格与客户门限重新计算，不能沿用固定 40V/150℃ 基准。`,
+    marginToAbsoluteMax: `必须依据当前器件规格与客户门限重新计算，不能沿用其他典型工况的固定电压/结温基准。`,
     verificationRequired: `验证窗口：${deadline}；优先验证当前问题的最大决策不确定性。`,
   };
   const baseB: WorstCaseCombination = {

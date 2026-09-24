@@ -91,7 +91,7 @@ export const VerificationLoopView: React.FC<VerificationLoopViewProps> = ({
     result: '待实测回填（当前页面不再沿用其他典型工况的固定实测值）',
     passFail: 'PASS',
     evidence: 'MEASURED',
-    engineer: '张工 (主任硬件工程师)',
+    engineer: '待指派（测试责任人）',
     timestamp: new Date().toISOString(),
   });
 
@@ -101,24 +101,37 @@ export const VerificationLoopView: React.FC<VerificationLoopViewProps> = ({
     evidence: EvidenceItem | null;
   } | null>(null);
 
-  // 决策履历记录
-  const [decisionHistory, setDecisionHistory] = useState<LocalDecisionRecord[]>([
-    {
-      id: 'REC-001',
-      timestamp: '2026-09-01 10:15',
+  // 决策履历必须从当前工况生成；禁止把历史 BLDC 案例的方案/人员带入新场景。
+  const scenarioOptions = useMemo(() => {
+    const category = issue.issueCategories?.[0] || '当前场景';
+    const domain = `${category} ${issue.failurePhenomenon || ''} ${issue.engineeringConcern || ''}`.toLowerCase();
+    if (domain.includes('bci')) return ['方案 A: 优化注入回流/屏蔽/滤波物理路径', '方案 B: 建立频点-敏感节点 A/B 定位矩阵', '方案 C: 增加软件诊断与恢复策略'];
+    if (domain.includes('esd')) return ['方案 A: 优化 TVS/壳体/参考地回流路径', '方案 B: 建立端口×等级×功能状态矩阵', '方案 C: 增加软件恢复与诊断策略'];
+    if (domain.includes('wcca')) return ['方案 A: 收紧关键公差/设计中心', '方案 B: Monte Carlo + 极限角验证', '方案 C: 增加 EOL 校准与检测门禁'];
+    if (domain.includes('component') || domain.includes('alternative')) return ['方案 A: 做 Spec-to-Spec 等价性验证', '方案 B: 做 Use-case 全温/动态回归', '方案 C: 暂缓替代并补齐供应链证据'];
+    if (domain.includes('thermal')) return ['方案 A: 优化热路径/散热结构', '方案 B: 降低局部功耗并验证热裕量', '方案 C: 增加高温边界与寿命验证'];
+    return ['方案 A: 物理链路整改', '方案 B: 证据优先的 A/B 定位实验', '方案 C: 软件诊断/恢复作为辅助措施'];
+  }, [issue.issueCategories, issue.failurePhenomenon, issue.engineeringConcern]);
+
+  const [decisionHistory, setDecisionHistory] = useState<LocalDecisionRecord[]>([]);
+
+  React.useEffect(() => {
+    setDecisionHistory([{
+      id: `REC-${Date.now()}`,
+      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
       problemSummary: `${issue.failurePhenomenon || issue.engineeringConcern || '当前工况问题'}｜${context.projectName}`,
-      optionsConsidered: ['方案 A: TVS 硬件钳位', '方案 B: 软件全下桥短接能耗制动', '方案 C: 改板换 60V MOS'],
-      chosenOption: result?.finalRecommendation.recommendedOptionName || '待分析结果生成后确定',
+      optionsConsidered: scenarioOptions,
+      chosenOption: result?.finalRecommendation?.recommendedOptionName || '待当前工况分析结果确定',
       justification: result?.finalRecommendation?.reasonSummary || result?.coreConclusion?.reasonSummary || issue.engineeringConcern || '等待当前工况的分析理由',
       rejectedOptionsReason: {
-        '方案 A': `当前${issue.issueCategories?.[0] || '场景'}下需先验证吸收/钳位网络的热与裕量，不能直接假设有效。`,
-        '方案 C': `当前里程碑为 ${context.nextMilestone}，剩余 ${context.daysRemaining} 天；改版周期必须与该窗口重新核算。`,
+        '方案 A': `必须依据当前 ${issue.issueCategories?.[0] || '场景'} 的实测证据和需求门限验证，不预设历史案例结论。`,
+        '方案 C': `当前里程碑为 ${context.nextMilestone || '未设置'}，剩余 ${context.daysRemaining ?? '未知'} 天；执行窗口需按当前项目重新核算。`,
       },
-      verificationPlan: result?.finalRecommendation.immediateSteps?.[0]?.action || `针对当前工况验证：${issue.requirement}`,
-      owner: '张工 & 李工',
+      verificationPlan: result?.finalRecommendation?.immediateSteps?.[0]?.action || `针对当前工况验证：${issue.requirement || '当前需求门限'}`,
+      owner: '当前项目责任人（待项目数据确认）',
       status: 'OPEN',
-    },
-  ]);
+    }]);
+  }, [context.projectName, context.nextMilestone, context.daysRemaining, context.projectPhase, issue.failurePhenomenon, issue.engineeringConcern, issue.requirement, issue.issueCategories, result?.finalRecommendation?.recommendedOptionName, result?.finalRecommendation?.reasonSummary, result?.coreConclusion?.reasonSummary, scenarioOptions]);
 
   const handleApplyTestFeedback = () => {
     const feedback = executeTestFeedbackLoop(currentRisk, testForm);

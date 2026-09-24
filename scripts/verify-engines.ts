@@ -18,6 +18,12 @@ import { calculateBusPumping } from '../src/utils/motorPhysicsEngine';
 import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput, type RobotJointEvaluationInput } from '../src/data/robotJointPatternEngine';
 import type { IssueInput, ProjectContext } from '../src/types';
 import { normalizeDecisionFrame, toStringArray } from '../src/utils/decisionFrame';
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { PRESET_SCENARIOS } from '../src/data/presetScenarios';
+import * as Derived from '../src/utils/scenarioDerived';
+import * as VerificationLoop from '../src/data/verificationLoopEngine';
+import { findLegacyScenarioLeaks, assertCurrentScenarioEvidence } from '../src/utils/scenarioPurityAudit';
 
 let failures = 0;
 function check(label: string, fn: () => void) {
@@ -394,4 +400,63 @@ check('toStringArray 对非字符串元素不抛错（UI 渲染的最后一道�
   assert.deepEqual(toStringArray(undefined), []);
   assert.deepEqual(toStringArray('单条'), ['单条']);
 });
+
+console.log('\n=== 工况纯净度：历史 BLDC 急停案例不得泄漏到其他典型工况 ===');
+
+// BLDC 家族工况本身就会合法出现 3800rpm / 母线泵升等内容，不参与“泄漏”判定。
+const PURITY_EXEMPT = new Set(['bldc-motor-drive', 'bldc-stall-restart', 'robot-joint-backlash-sto']);
+const PHASES = ['Concept', 'EVT', 'DVT', 'PVT', 'SOP'] as const;
+const NON_BLDC_PRESETS = PRESET_SCENARIOS.filter((s) => !PURITY_EXEMPT.has(s.id));
+
+check('存在可供纯净度审计的非 BLDC 典型工况（防止过滤条件把测试范围悄悄清空）', () => {
+  assert.ok(NON_BLDC_PRESETS.length >= 8, `非 BLDC 工况仅 ${NON_BLDC_PRESETS.length} 个`);
+});
+
+for (const s of NON_BLDC_PRESETS) {
+  check(`纯净度 ${s.id}：派生页面(设计评审/最坏工况/功能安全/验证闭环)不含历史案例指纹`, () => {
+    const c = s.context;
+    const i = s.issue;
+    const outputs: Record<string, unknown> = {
+      worstCases: Derived.deriveWorstCases(c, i, null),
+      componentImpact: Derived.deriveComponentChangeImpact(c, i, null),
+      safetyTrace: Derived.deriveSafetyTraceability(c, i, null),
+      fmeda: Derived.deriveFmedaRows(c, i, null),
+      fta: Derived.deriveFtaTree(c, i, null),
+      collateral: Derived.deriveSafetyCollateral(c, i, null),
+      risk: Derived.deriveVerificationRisk(c, i, null),
+      verificationPlan: VerificationLoop.generateStructuredVerificationPlan(c, i, null),
+      nextBestAction: VerificationLoop.generateNextBestAction(c.daysRemaining, c, i, null),
+      voi: VerificationLoop.calculateVoiTestPriorities(c, i, null),
+    };
+    for (const phase of PHASES) outputs[`checklist-${phase}`] = Derived.derivePhaseChecklist(phase, c, i, null);
+    const dirty = Object.entries(outputs)
+      .map(([k, v]) => [k, assertCurrentScenarioEvidence(v, c, i)] as const)
+      .filter(([, r]) => !r.clean)
+      .map(([k, r]) => `${k}: ${r.leaks.join(' ')}`);
+    assert.deepEqual(dirty, [], `历史案例指纹泄漏 -> ${dirty.join(' | ')}`);
+  });
+
+  check(`纯净度 ${s.id}：阶段检查表不继承 BLDC 模板的 MOSFET/门极/采样分类`, () => {
+    for (const phase of PHASES) {
+      const list = Derived.derivePhaseChecklist(phase, s.context, s.issue, null);
+      const bad = list.filter((x) => /电气应力|门极驱动|电流采样|IEC 60747-8/.test(`${x.category} ${x.standardClause}`));
+      assert.equal(bad.length, 0, `${phase} 阶段仍继承模板分类/条款: ${bad.map((b) => b.category).join(',')}`);
+    }
+  });
+}
+
+check('审计器自检：能识别历史指纹；当前输入自带的数值不算泄漏', () => {
+  assert.ok(findLegacyScenarioLeaks('母线泵升实测 37.8V，负责人 张工').length >= 2);
+  assert.equal(findLegacyScenarioLeaks('耐压 40V / 结温 150℃ / 环境 105℃ / 48MHz').length, 0, '通用数值不应被当成指纹');
+  assert.equal(findLegacyScenarioLeaks('转速 3800rpm', { issue: '用户输入 3800rpm' }).length, 0, '当前输入自带的指纹不算泄漏');
+});
+
+check('UI 组件不得硬编码历史案例人名（张工/李工/王工）', () => {
+  const dir = resolve(process.cwd(), 'src/components');
+  const hits = readdirSync(dir)
+    .filter((f) => f.endsWith('.tsx'))
+    .filter((f) => /张工|李工|王工/.test(readFileSync(resolve(dir, f), 'utf-8')));
+  assert.deepEqual(hits, [], `硬编码人名: ${hits.join(', ')}`);
+});
+
 process.exit(failures === 0 ? 0 : 1);

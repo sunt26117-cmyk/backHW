@@ -7,3 +7,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# 归档包/二进制产物不进仓库（2026-09-24 曾误传 2.3MB zip 到 main）
+*.zip
+*.7z
+*.rar

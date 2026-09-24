@@ -26,59 +26,43 @@ import {
   Activity,
 } from 'lucide-react';
 
-import { AppTheme, ModelApiConfig, PresetScenario } from '../types';
+import { useScenario } from '../contexts/ScenarioContext';
+import { useAnalysis } from '../contexts/AnalysisContext';
+import { useUI } from '../contexts/UIContext';
 
 interface NavbarProps {
-  currentScenarioId: string;
   onSelectScenario: (scenarioId: string) => void;
-  customScenarios?: PresetScenario[];
-  presetScenarios?: PresetScenario[];
-  onOpenScenarioManage: () => void;
-  onDeleteCustomScenario?: (scenarioId: string) => void;
-  isAnalyzing: boolean;
-  onRunAnalysis: () => void;
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
-  theme: AppTheme;
-  setTheme: (theme: AppTheme) => void;
-  modelConfig: ModelApiConfig;
-  onOpenModelSettings: () => void;
+  onDeleteCustomScenario: (scenarioId: string) => void;
   onExportBackup: () => void;
   onImportBackup: (file: File) => void;
   onExportMarkdown: () => void;
   onPrintReport?: () => void;
-  onDownloadOfflineHtml?: () => void;
-  onOpenSourceDownload?: () => void;
-  onOpenDeviceLibrary?: () => void;
-  onOpenAiOffline?: () => void;
-  onOpenOscilloscope?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  currentScenarioId,
   onSelectScenario,
-  customScenarios = [],
-  presetScenarios = [],
-  onOpenScenarioManage,
   onDeleteCustomScenario,
-  isAnalyzing,
-  onRunAnalysis,
-  activeTab,
-  setActiveTab,
-  theme,
-  setTheme,
-  modelConfig,
-  onOpenModelSettings,
   onExportBackup,
   onImportBackup,
   onExportMarkdown,
   onPrintReport,
-  onDownloadOfflineHtml,
-  onOpenSourceDownload,
-  onOpenDeviceLibrary,
-  onOpenAiOffline,
-  onOpenOscilloscope,
 }) => {
+  const {
+    activeTab,
+    setActiveTab,
+    theme,
+    setTheme,
+    modelConfig,
+    showToast,
+    setModelModalOpen,
+    setScenarioManageOpen,
+    setSourceDownloadOpen,
+    setDeviceLibraryOpen,
+    setAiOfflineOpen,
+    setOscilloscopeOpen,
+  } = useUI();
+  const { currentScenarioId, customScenarios, presetScenarios, context, issue } = useScenario();
+  const { isAnalyzing, runAnalysis } = useAnalysis();
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [showBackupMenu, setShowBackupMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -144,6 +128,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           icon: '⚙️',
         };
     }
+  };
+
+  const handleDownloadOfflineHtml = () => {
+    showToast('正在下载纯离线单文件版 HTML，下载后双击即可直接使用！', 'success');
+    const a = document.createElement('a');
+    a.href = '/api/download/offline-html';
+    a.download = 'ECU_Hardware_Copilot_Offline.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   const badgeInfo = getModelBadge();
@@ -218,7 +212,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
               <button
                 id="scenario-manage-btn"
-                onClick={onOpenScenarioManage}
+                onClick={() => setScenarioManageOpen(true)}
                 title="新建空白工况、另存当前或管理自定义工况库"
                 className="flex items-center space-x-1 bg-slate-700/80 hover:bg-slate-600 text-blue-300 hover:text-blue-100 border border-blue-500/30 rounded-lg px-2.5 py-1 text-xs font-medium transition cursor-pointer shrink-0 ml-1"
               >
@@ -248,7 +242,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Model Settings Trigger */}
             <button
               id="model-settings-btn"
-              onClick={onOpenModelSettings}
+              onClick={() => setModelModalOpen(true)}
               title={`当前模型配置: ${badgeInfo.label} (点击切换/配置模型 API)`}
               className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${badgeInfo.color}`}
             >
@@ -478,7 +472,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       download="ECU_Hardware_Copilot_Offline.html"
                       onClick={() => {
                         setShowBackupMenu(false);
-                        if (onDownloadOfflineHtml) onDownloadOfflineHtml();
+                        handleDownloadOfflineHtml();
                       }}
                       className="w-full px-3 py-2.5 flex items-start gap-2.5 text-left hover:bg-slate-800/80 transition cursor-pointer text-slate-200 border-t border-slate-800/60 bg-blue-950/20"
                     >
@@ -499,7 +493,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       id="download-full-source-zip-btn"
                       onClick={() => {
                         setShowBackupMenu(false);
-                        if (onOpenSourceDownload) onOpenSourceDownload();
+                        setSourceDownloadOpen(true);
                       }}
                       className="w-full px-3 py-2.5 flex items-start gap-2.5 text-left hover:bg-slate-800/80 transition cursor-pointer text-slate-200 border-t border-slate-800/60 bg-emerald-950/20"
                     >
@@ -555,62 +549,54 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {/* Quick Source & AI Guide Button */}
-            {onOpenSourceDownload && (
-              <button
-                id="header-open-source-download-btn"
-                onClick={onOpenSourceDownload}
-                className="flex items-center space-x-1.5 bg-emerald-600/20 hover:bg-emerald-600/35 active:bg-emerald-600/40 text-emerald-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-emerald-500/40 transition shadow-sm cursor-pointer shrink-0"
-                title="打开源码下载与 AI 优化指南窗口"
-              >
-                <Download className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">源码与优化指南</span>
-                <span className="sm:hidden">源码包</span>
-              </button>
-            )}
+            <button
+              id="header-open-source-download-btn"
+              onClick={() => setSourceDownloadOpen(true)}
+              className="flex items-center space-x-1.5 bg-emerald-600/20 hover:bg-emerald-600/35 active:bg-emerald-600/40 text-emerald-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-emerald-500/40 transition shadow-sm cursor-pointer shrink-0"
+              title="打开源码下载与 AI 优化指南窗口"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">源码与优化指南</span>
+              <span className="sm:hidden">源码包</span>
+            </button>
 
             {/* Oscilloscope Import Button */}
-            {onOpenOscilloscope && (
-              <button
-                id="header-open-oscilloscope-btn"
-                onClick={onOpenOscilloscope}
-                className="flex items-center space-x-1.5 bg-amber-600/20 hover:bg-amber-600/35 active:bg-amber-600/40 text-amber-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-amber-500/40 transition shadow-sm cursor-pointer shrink-0"
-                title="导入示波器 CSV，自动提取峰值/dv/dt/振铃频率"
-              >
-                <Activity className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden sm:inline">示波器导入</span>
-              </button>
-            )}
+            <button
+              id="header-open-oscilloscope-btn"
+              onClick={() => setOscilloscopeOpen(true)}
+              className="flex items-center space-x-1.5 bg-amber-600/20 hover:bg-amber-600/35 active:bg-amber-600/40 text-amber-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-amber-500/40 transition shadow-sm cursor-pointer shrink-0"
+              title="导入示波器 CSV，自动提取峰值/dv/dt/振铃频率"
+            >
+              <Activity className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">示波器导入</span>
+            </button>
 
             {/* AI Offline Collaboration Button */}
-            {onOpenAiOffline && (
-              <button
-                id="header-open-ai-offline-btn"
-                onClick={onOpenAiOffline}
-                className="flex items-center space-x-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 active:bg-cyan-600/40 text-cyan-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-cyan-500/40 transition shadow-sm cursor-pointer shrink-0"
-                title="离线 AI 协作：导出 Prompt 给免费 AI，再导入结果"
-              >
-                <Bot className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="hidden sm:inline">AI 离线协作</span>
-              </button>
-            )}
+            <button
+              id="header-open-ai-offline-btn"
+              onClick={() => setAiOfflineOpen(true)}
+              className="flex items-center space-x-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 active:bg-cyan-600/40 text-cyan-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-cyan-500/40 transition shadow-sm cursor-pointer shrink-0"
+              title="离线 AI 协作：导出 Prompt 给免费 AI，再导入结果"
+            >
+              <Bot className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">AI 离线协作</span>
+            </button>
 
             {/* Device Library Button */}
-            {onOpenDeviceLibrary && (
-              <button
-                id="header-open-device-library-btn"
-                onClick={onOpenDeviceLibrary}
-                className="flex items-center space-x-1.5 bg-violet-600/20 hover:bg-violet-600/35 active:bg-violet-600/40 text-violet-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-violet-500/40 transition shadow-sm cursor-pointer shrink-0"
-                title="打开车规器件库与参数提取模板"
-              >
-                <Database className="w-3.5 h-3.5 text-violet-400" />
-                <span className="hidden sm:inline">器件库</span>
-              </button>
-            )}
+            <button
+              id="header-open-device-library-btn"
+              onClick={() => setDeviceLibraryOpen(true)}
+              className="flex items-center space-x-1.5 bg-violet-600/20 hover:bg-violet-600/35 active:bg-violet-600/40 text-violet-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-violet-500/40 transition shadow-sm cursor-pointer shrink-0"
+              title="打开车规器件库与参数提取模板"
+            >
+              <Database className="w-3.5 h-3.5 text-violet-400" />
+              <span className="hidden sm:inline">器件库</span>
+            </button>
 
             {/* Run Analysis CTA */}
             <button
               id="run-analysis-btn"
-              onClick={onRunAnalysis}
+              onClick={() => void runAnalysis(context, issue, currentScenarioId)}
               disabled={isAnalyzing}
               className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-medium text-xs sm:text-sm px-3.5 py-2 rounded-lg transition shadow-md shadow-blue-900/30 disabled:opacity-60 cursor-pointer shrink-0"
             >
@@ -662,7 +648,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </optgroup>
             </select>
             <button
-              onClick={onOpenScenarioManage}
+              onClick={() => setScenarioManageOpen(true)}
               title="管理自定义工况库"
               className="flex items-center space-x-1 bg-slate-700/80 hover:bg-slate-600 text-blue-300 border border-blue-500/30 rounded-lg px-2 py-1 text-[11px] font-medium transition cursor-pointer shrink-0 ml-1"
             >

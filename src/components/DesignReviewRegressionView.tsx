@@ -24,10 +24,6 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import {
-  getPhaseReviewChecklist,
-  generateWorstCaseCandidates,
-} from '../data/designReviewEngine';
-import {
   GOLD_STANDARD_CASES,
   runGoldStandardCaseRegression,
 } from '../data/goldStandardCases';
