@@ -841,7 +841,7 @@ export interface VoltageMarginParams {
   minAllowedVoltage: number;
 }
 
-export type AppTheme = 'dark' | 'light' | 'eyecare';
+export type AppTheme = 'dark' | 'light' | 'eyecare' | 'warm';
 
 export type ModelProvider = 
   | 'builtin' 
