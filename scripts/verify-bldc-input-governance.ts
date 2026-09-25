@@ -28,7 +28,7 @@ if (mapMeasurementSourceToTraceSource('DATASHEET') !== 'DATASHEET') throw new Er
 if (mapMeasurementSourceToTraceSource('TEXT_INFERRED') !== 'TEXT_INFERRED') throw new Error('TEXT_INFERRED Trace 来源丢失');
 
 const device: DeviceEntry = {
-  id: 'governance_test', deviceType: 'MOSFET', partNumber: 'TEST', manufacturer: 'T', package: 'QFN', aecqGrade: '', channelType: 'N-CH', createdAt: '', updatedAt: '',
+  id: 'governance_test', deviceType: 'MOSFET', partNumber: 'TEST', manufacturer: 'T', package: 'QFN', aecqGrade: '', channelType: 'N-CH', candidateDecisions: {}, candidateRequests: {}, createdAt: '', updatedAt: '',
   raw: {
     maxRatings: { vds: { value: 40, stat: 'MAX', source: 'Table 1' }, easPulse: { value: 100, stat: 'MAX', source: 'Table 2' } },
     staticParams: { vth: { points: [{x:25,y:2}], stat: 'MIN', sourceType: 'DATASHEET_GRAPH_ESTIMATE', source: 'Fig. 1' } },
@@ -37,10 +37,13 @@ const device: DeviceEntry = {
     switchingParams: { tdOff: { value: 20, stat: 'TYP', source: 'Table 4' }, tf: { value: 10, stat: 'TYP', source: 'Table 4' } },
     thermalParams: { rthJa: { value: 40, stat: 'TYP', source: 'Table 5' } },
     bodyDiode: { vf: { value: 1, stat: 'TYP', source: 'Table 6' }, qrr: { value: 30, stat: 'TYP', source: 'Table 6' } },
+    protectionAndRobustness: { shortCircuitTime: { value: 8, stat: 'MAX', source: 'Table 7' } },
   },
 };
 const candidates = buildDeviceParameterCandidates(device);
 const crssCandidate = candidates.find(c => c.targetKey === 'cgdPf');
 if (!crssCandidate || crssCandidate.sourceType !== 'DERIVED' || crssCandidate.confidence > 0.85) throw new Error('Crss→Cgd 近似候选未被正确降级');
 if (candidates.some(c => c.targetKey === 'junctionTempC')) throw new Error('Tjmax 不应映射为当前工况 junctionTempC');
+const shortCircuit = candidates.find(c => c.rawPath === 'protectionAndRobustness.shortCircuitTime');
+if (!shortCircuit || shortCircuit.targetKey !== 'soaShortCircuitTimeUs') throw new Error('shortCircuitTime → soaShortCircuitTimeUs 映射缺失');
 console.log(`verify-bldc-input-governance: PASS (${candidates.length} device candidates; duplicate groups safely deduped)`);

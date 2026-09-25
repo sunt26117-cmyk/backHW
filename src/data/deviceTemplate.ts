@@ -37,12 +37,13 @@ export const DEVICE_PARAM_PROMPT = [
   '【数据完整性】',
   '每个可提取对象建议包含：value / unit / stat / conditions / source / sourceType / confidence / note。',
   '若一个参数是一条曲线，使用 points 数组，并保留 xAxis、xUnit、yUnit、conditions、source。',
+  'extractionHints.unmappedImportantData 用于承载模板之外但对工程判断有价值的数据；每项建议包含 key、label、value、unit、stat、conditions、source、sourceType、confidence、note。key 必须稳定且唯一，禁止把未映射数据丢掉。',
   '若规格书仅给典型值，不要把 typ 自动写成 max；反之亦然。',
   '若文档出现不同版本/脚注，优先保留原始脚注并放入 note。',
   '',
   '【工程映射】',
-  '请同时在 extractionHints.mapping 中给出该数据最可能支持的工程字段 targetKey（仅从模板列出的 targetKey 中选择），但不要强行映射不能确定的字段。',
-  '可映射字段包括：vdsRatingV、easEnergyMj、rdsOnMilliOhm、vthMinV、cgdPf、cgsPf、gateChargeQgNc、qgdNc、qgsNc、turnOffDelayNs、fallTimeNs、thermalResistanceCPerW、rthCaOrJa、diodeForwardVoltageV、qrrNc、trrNs。',
+  '请同时在 extractionHints.mapping 中给出该数据最可能支持的工程字段 targetKey（仅从模板列出的 targetKey 中选择），但不要强行映射不能确定的字段。无法安全映射的参数必须进入 unmappedImportantData，而不是丢弃。',
+  '可直接安全映射字段包括：vdsRatingV、easEnergyMj、rdsOnMilliOhm、vthMinV、cgdPf、cgsPf、gateChargeQgNc、qgdNc、turnOffDelayNs、fallTimeNs、thermalResistanceCPerW、rthCaOrJa、diodeForwardVoltageV、qrrNc、soaShortCircuitTimeUs。Qgs、trr 等当前工程没有同语义且同单位的输入字段时，必须进入 unmappedImportantData，不得编造 targetKey。',
 ].join('\n');
 
 export const MOSFET_PARAM_TEMPLATE = {
@@ -65,6 +66,7 @@ export const MOSFET_PARAM_TEMPLATE = {
     id: { value: null, unit: 'A', conditions: { tc: null, tj: null }, stat: 'MAX', source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [] },
     idPulse: { value: null, unit: 'A', conditions: { pulseTimeUs: null, tc: null, tj: null }, stat: 'MAX', source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [] },
     tjMax: { value: null, unit: '℃', conditions: {}, stat: 'MAX', source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [] },
+    tstg: { minValue: null, maxValue: null, unit: '℃', conditions: {}, stat: 'MAX', source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [] },
     powerDissipation: { value: null, unit: 'W', conditions: { tc: null, tj: null }, stat: 'MAX', source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [] },
     easPulse: { value: null, unit: 'mJ', conditions: { id: null, vdd: null, l: null, startingTj: null }, stat: 'MAX', source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [] },
     easCurrent: { value: null, unit: 'A', conditions: { pulseTimeUs: null }, stat: 'MAX', source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [] },
@@ -142,7 +144,8 @@ export const MOSFET_TEMPLATE_JSON = JSON.stringify(MOSFET_PARAM_TEMPLATE, null, 
 
 export const DEVICE_FIELD_MEANINGS: Array<{ field: string; engine: string }> = [
   { field: 'maxRatings.vds', engine: 'P001/P014 耐压一票否决；当前工程候选 vdsRatingV' },
-  { field: 'maxRatings.tjMax', engine: 'P006/P007 结温上限；当前工程候选 junctionTempC' },
+  { field: 'maxRatings.tjMax', engine: '器件绝对最大结温边界；当前工程没有同语义输入字段，禁止映射为 junctionTempC（当前工况结温）' },
+  { field: 'maxRatings.tstg', engine: '器件存储温度范围；当前工程无等价单值输入，保留作器件能力边界证据' },
   { field: 'staticParams.rdsOn 曲线', engine: 'P006 结温迭代；完整曲线留在器件库，工程输入可选取 25℃点' },
   { field: 'staticParams.vth 曲线', engine: 'P003 米勒直通裕量；工程输入候选 vthMinV' },
   { field: 'capacitanceParams.crss 曲线', engine: 'P003 米勒位移电流；可作为 cgdPf 候选，原始名称保持 Crss' },
@@ -152,5 +155,5 @@ export const DEVICE_FIELD_MEANINGS: Array<{ field: string; engine: string }> = [
   { field: 'thermalParams.rthJc/zthJc', engine: 'P006/P007 瞬态与稳态结温' },
   { field: 'bodyDiode.qrr/trr/vf', engine: 'P005/P006 反向恢复与二极管损耗' },
   { field: 'soaCurve', engine: 'P016 短路 SOA 能量/安全区复核' },
-  { field: 'protectionAndRobustness', engine: 'P016 短路耐受、Gate 裕量、ESD/可靠性边界' },
+  { field: 'protectionAndRobustness', engine: 'P016 短路耐受、Gate 裕量、ESD/可靠性边界；其中 shortCircuitTime 可映射 soaShortCircuitTimeUs，Gate/ESD 暂无等价工程字段' },
 ];

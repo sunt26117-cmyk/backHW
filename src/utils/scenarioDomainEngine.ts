@@ -628,6 +628,21 @@ export function getDomainMeasurementFields(issue: IssueInput): DomainMeasurement
   return [...merged.values()];
 }
 
+export function getAllEngineeringMeasurementFields(): DomainMeasurementField[] {
+  const merged = new Map<string, DomainMeasurementField>();
+  for (const profile of Object.values(P)) {
+    for (const field of profile.measurements) {
+      const existing = merged.get(field.key);
+      merged.set(field.key, existing ? {
+        ...existing,
+        required: Boolean(existing.required || field.required),
+        description: existing.description || field.description,
+      } : { ...field });
+    }
+  }
+  return [...merged.values()];
+}
+
 export function getDomainDataQuality(issue: IssueInput) {
   const fields = getDomainMeasurementFields(issue);
   const values = issue.measuredValues || {};

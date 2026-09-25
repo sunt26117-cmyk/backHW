@@ -38,6 +38,15 @@ const makeIssue = (mv: MV, category: string): IssueInput => ({
   actualMeasurement: '', engineeringConcern: '', notes: '', measuredValues: mv,
 } as unknown as IssueInput);
 
+/** 同 makeIssue，但给指定字段打上非「决策就绪」来源（如 TEXT_INFERRED），其余字段视为正常实测。 */
+const makeIssueWithLowEvidence = (mv: MV, category: string, lowEvidenceKeys: string[]): IssueInput => ({
+  issueCategories: [category], failurePhenomenon: '', requirement: '', testCondition: '',
+  actualMeasurement: '', engineeringConcern: '', notes: '', measuredValues: mv,
+  measurementProvenance: Object.fromEntries(
+    lowEvidenceKeys.map((k) => [k, { source: 'TEXT_INFERRED', sourceLabel: '自由文本推断，请工程师核实', enteredAt: '', confidencePct: 65 }]),
+  ),
+} as unknown as IssueInput);
+
 interface EngineOutcome {
   status?: string;
   /** 引擎公开的缺失输入标签（thermal 走 label 字符串） */
@@ -154,6 +163,55 @@ function check(label: string, fn: () => void) {
   try { fn(); console.log('  ✓ ' + label); }
   catch (err) { failures++; console.log('  ✗ ' + label); console.log('    ' + (err as Error).message); }
 }
+
+console.log('\n=== 证据等级闸门：TEXT_INFERRED 猜测不能顶替实测（数字在，但来源不够格）===');
+// 背景：ProjectContextView 的「自由文本推断」对任意领域的空白字段都会写入 TEXT_INFERRED 来源的猜测值
+// （见 scenarioDomainEngine.extractMeasurementsFromText，它按 resolveEngineeringDomain() 的字段表逐个正则匹配，
+// 不区分 BLDC/关节/热）。三个确定性引擎都必须能拒绝只有 TEXT_INFERRED 证据的字段，而不是只看「有没有数字」。
+// bldcDeterministicEngine 一直是对的；robotJointDeterministicEngine / thermalCascadeEngine 曾经只调 isMeasuredValuePresent()，
+// 对来源可信度视而不见——用户在自由文本里写「减速比100」就会被两个引擎当成已验证输入直接算出谐振/结温。
+
+const LOW_EVIDENCE_GUARDS: { name: string; run: () => EngineOutcome; rawKey: string; mv: MV; category: string }[] = [
+  {
+    name: '关节谐振 resonance：gearRatio 仅 TEXT_INFERRED',
+    category: 'Robot Joint Drive', rawKey: 'gearRatio',
+    mv: { torsionalStiffnessNmPerRad: 15000, rotorInertiaKgm2: 2.0e-4, loadInertiaKgm2: 0.1, gearRatio: 100, velocityLoopBandwidthHz: 40 },
+    run: () => {
+      const i = makeIssueWithLowEvidence({ torsionalStiffnessNmPerRad: 15000, rotorInertiaKgm2: 2.0e-4, loadInertiaKgm2: 0.1, gearRatio: 100, velocityLoopBandwidthHz: 40 }, 'Robot Joint Drive', ['gearRatio']);
+      const s = extractUnifiedEngineeringModel(CONTEXT, i);
+      const r = calculateRobotJointDeterministicCalculations(i, s).find((x) => x.calculation === 'resonance') as { status?: string; missingInputs?: string[]; value?: unknown } | undefined;
+      return { status: r?.status, missingLabel: (r?.missingInputs || []).join(', '), numericValue: r?.value };
+    },
+  },
+  {
+    name: '结温级联 thermal：温度基准(tAmbientC) 仅 TEXT_INFERRED',
+    category: 'Thermal', rawKey: 'tAmbientC',
+    mv: { currentNominalA: 10, rdsOnMilliOhm: 2.5, busVoltageNominalV: 48, pwmFreqKhz: 20, qgdNc: 15, tjMaxC: 150, tAmbientC: 25 },
+    run: () => {
+      const i = makeIssueWithLowEvidence({ currentNominalA: 10, rdsOnMilliOhm: 2.5, busVoltageNominalV: 48, pwmFreqKhz: 20, qgdNc: 15, tjMaxC: 150, tAmbientC: 25 }, 'Thermal', ['tAmbientC']);
+      const s = extractUnifiedEngineeringModel(CONTEXT, i);
+      const r = calculateThermalCascade(i, s) as { status?: string; tjEst?: unknown } | undefined;
+      return { status: r?.status, missingLabel: '', numericValue: r?.tjEst };
+    },
+  },
+];
+
+for (const g of LOW_EVIDENCE_GUARDS) {
+  check(`${g.name}：全部字段"有数字"，但 ${g.rawKey} 来源只是自由文本猜测 -> 必须仍是 INSUFFICIENT_INPUT，不得算出数值`, () => {
+    const out = g.run();
+    assert.equal(out.status, 'INSUFFICIENT_INPUT', `期望 INSUFFICIENT_INPUT，实际 status=${out.status}（说明 TEXT_INFERRED 被当成了已验证输入）`);
+    assert.equal(out.numericValue, undefined, `INSUFFICIENT_INPUT 时不得给出数值，实际 numericValue=${out.numericValue}`);
+  });
+}
+
+check('对照组：同一字段若来源是真实实测（不打 TEXT_INFERRED 标签），必须正常算出数值（确认上面不是把闸门焊死了）', () => {
+  const i = makeIssue({ torsionalStiffnessNmPerRad: 15000, rotorInertiaKgm2: 2.0e-4, loadInertiaKgm2: 0.1, gearRatio: 100, velocityLoopBandwidthHz: 40 }, 'Robot Joint Drive');
+  const s = extractUnifiedEngineeringModel(CONTEXT, i);
+  const r = calculateRobotJointDeterministicCalculations(i, s).find((x) => x.calculation === 'resonance') as { status?: string; value?: unknown } | undefined;
+  assert.equal(r?.status, 'CALCULATED', `期望正常算出结果，实际 status=${r?.status}`);
+  assert.notEqual(r?.value, undefined);
+});
+
 
 console.log('\n=== 缺输入护栏：逐个摘掉必需输入，引擎必须判 INSUFFICIENT_INPUT 且不给数值 ===');
 

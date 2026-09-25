@@ -2,16 +2,19 @@ import { IssueInput, ProjectContext } from '../types';
 import { UnifiedEngineeringModel } from '../types/v4Models';
 
 /**
- * 判断某个工程量是否有真实的结构化实测输入（issue.measuredValues 中的原始值）。
+ * 判断 issue.measuredValues 里是否存在这个 key 的原始数值（不管来源可信度）。
  *
  * 重要：这个函数只看 issue.measuredValues 原始数据，不看下面 extractUnifiedEngineeringModel()
  * 产出的 state.xxx —— state 里的数值为了兼容大量老代码，在结构化输入缺失时会走正则文本提取、
  * 再退化到写死的经验默认值（如 rotorInertiaKgm2 默认 0.0001），所以 state.xxx 永远不是
  * undefined，不能用来判断"这个量到底有没有真实依据"。
  *
- * 任何要做"缺输入就必须返回 INSUFFICIENT_INPUT、禁止用默认值顶上"判定的调用方（目前是
- * bldcDeterministicEngine.ts / robotJointDeterministicEngine.ts / thermalCascadeEngine.ts），
- * 必须用这个函数做输入完整性检查，而不是检查 state 字段是否为空。
+ * 注意：这个函数不检查来源可信度——一个 TEXT_INFERRED（自由文本猜测）的值也会让它返回 true。
+ * 「缺输入就必须 INSUFFICIENT_INPUT、禁止用低证据等级顶上」的判定，必须用下面的
+ * isDecisionReadyValuePresent()，三个确定性引擎（bldcDeterministicEngine.ts /
+ * robotJointDeterministicEngine.ts / thermalCascadeEngine.ts）现在都已统一改用它做输入完整性
+ * 检查。这个函数保留给只需要"有没有原始数值"的场景（例如 isDecisionReadyValuePresent 自己内部、
+ * 或 UI 上判断字段是否已填写以便高亮）。
  */
 export function isMeasuredValuePresent(issue: IssueInput, key: string): boolean {
   const raw = issue.measuredValues?.[key];
@@ -38,8 +41,10 @@ export function isDecisionReadyValuePresent(issue: IssueInput, key: string): boo
  * 缺输入（undefined / null / 空串 / 纯空白 / 非数字 / 非有限值）一律 undefined；
  * **合法的 0 会被保留**（0A 电流、0℃ 环境温度都是真实测量值，不能被当成「没填」）。
  *
- * 与 isMeasuredValuePresent() 的分工：本函数回答「值是多少」，它回答「到底填没填」。
- * 需要「缺输入就必须 INSUFFICIENT_INPUT」的判定，必须用 isMeasuredValuePresent()。
+ * 与 isMeasuredValuePresent()/isDecisionReadyValuePresent() 的分工：本函数只回答「值是多少」，
+ * 不回答「到底填没填」或「填的东西够不够格」。确定性引擎做「缺输入就必须 INSUFFICIENT_INPUT」的
+ * 判定，必须用 isDecisionReadyValuePresent()（会排除 TEXT_INFERRED/BENCHMARK/ASSUMPTION 等低证据等级来源），
+ * 不能只用 isMeasuredValuePresent()——后者只看「有没有数字」，不看来源可信度。
  *
  * 提取它的原因：此前 bldcMotorExpert.ts 自己写了一份 Number(...) 读数（对 ''/null 会返回 0，
  * 把「没填」当成「量到 0」），加 unifiedStateExtractor 内部两份、scenarioDerived 三件套，
@@ -66,7 +71,7 @@ export function readMeasuredNumber(
 // 这里是确定性引擎的"结构化事实"来源，二者各司其职、不再各写一套正则互相分叉。
 export function extractUnifiedEngineeringModel(context: ProjectContext, issue: IssueInput): UnifiedEngineeringModel {
   // [统一修复] 这里只读 issue.measuredValues 结构化输入，不再做正则文本兜底、也不再写死默认值。
-  // 缺输入时返回 0 / undefined，由下游引擎用 isMeasuredValuePresent() 判断 INSUFFICIENT_INPUT。
+  // 缺输入时返回 0 / undefined，由下游引擎用 isDecisionReadyValuePresent() 判断 INSUFFICIENT_INPUT。
   // 之前这里用正则 + 写死默认值(如 vbusNominal=12、cbusUf=1000、rpm=3000、rdsOn=2.5)，
   // 既和 pattern 引擎的 deriveBldcEvaluationInput 分叉，还会把自由文本里的"37.8V"误读成标称电压。
   // 两个包装都走同一个 readMeasuredNumber，区别只在「缺输入」如何表达：

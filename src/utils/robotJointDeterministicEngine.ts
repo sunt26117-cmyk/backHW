@@ -2,7 +2,7 @@ import { IssueInput, MeasurementSource } from '../types';
 import { UnifiedEngineeringModel } from '../types/v4Models';
 import { calculateTwoMassResonance } from './robotJointResonance';
 import { DeterministicCalculationStatus } from './bldcDeterministicEngine';
-import { extractUnifiedEngineeringModel, isMeasuredValuePresent } from './unifiedStateExtractor';
+import { extractUnifiedEngineeringModel, isDecisionReadyValuePresent } from './unifiedStateExtractor';
 
 export interface RobotJointCalculationEvidence {
   id: string;
@@ -37,7 +37,7 @@ function sourceFor(issue: IssueInput, key: string): MeasurementSource | 'MISSING
   // 同 bldcDeterministicEngine.ts：必须核对 issue.measuredValues 原始输入，不能看 state 派生值，
   // 因为 state 在结构化输入缺失时会被 unifiedStateExtractor.getNum() 用写死的默认值兜底。
   const rawKey = rawKeyOf(key);
-  if (!isMeasuredValuePresent(issue, rawKey)) return 'MISSING';
+  if (!isDecisionReadyValuePresent(issue, rawKey)) return 'MISSING';
   return issue.measurementProvenance?.[rawKey]?.source || issue.measuredValueSource || 'USER_MEASURED';
 }
 
@@ -53,7 +53,7 @@ function buildKinematicError(issue: IssueInput, state: UnifiedEngineeringModel):
   };
 
   const missingInputs = ['backlashArcmin', 'torsionalStiffnessNmPerRad', 'outputTorqueNm'].filter(
-    (key) => !isMeasuredValuePresent(issue, rawKeyOf(key))
+    (key) => !isDecisionReadyValuePresent(issue, rawKeyOf(key))
   );
   const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key)])) as RobotJointCalculationEvidence['inputSources'];
 
@@ -118,7 +118,7 @@ function buildResonance(issue: IssueInput, state: UnifiedEngineeringModel): Robo
   };
 
   const missingInputs = ['torsionalStiffnessNmPerRad', 'motorInertiaKgm2', 'loadInertiaKgm2', 'gearRatio'].filter(
-    (key) => !isMeasuredValuePresent(issue, rawKeyOf(key))
+    (key) => !isDecisionReadyValuePresent(issue, rawKeyOf(key))
   );
   const inputSources = Object.fromEntries(inputs.map((key) => [key, sourceFor(issue, key)])) as RobotJointCalculationEvidence['inputSources'];
 

@@ -62,3 +62,16 @@ AI 明确禁止猜测；图表估读必须降低置信度并标记 DATASHEET_GRA
 4. `Tjmax` 不能映射成当前工况 `junctionTempC`，Crss→Cgd / Ciss-Crss→Cgs 只能作为低置信度派生候选，不能伪装为 datasheet 直接值。
 
 另有一项结构性限制保留在下一阶段：当前模板对同一参数的多个 typ/min/max、多个不同测试条件，仍主要依赖 `variants` / 原始 JSON 保留，工程候选导入目前只选一个主值；后续可把“多条件候选”做成独立选择器，不应在 AI 提取层丢失数据。
+
+## v2 review（外部复核）：发现并修复一个未覆盖的证据等级闸门缺口
+
+`bldcDeterministicEngine.ts` 早就改用 `isDecisionReadyValuePresent()`（排除 TEXT_INFERRED/BENCHMARK/ASSUMPTION 等低证据来源），但 `robotJointDeterministicEngine.ts` 和 `thermalCascadeEngine.ts` 仍在用旧的 `isMeasuredValuePresent()`（只看"有没有数字"，不看来源）。
+
+风险不是假设性的：`ProjectContextView.inferMeasurementsFromIssueText()` 调用的 `extractMeasurementsFromText()`（`scenarioDomainEngine.ts`）是通用的、按 `resolveEngineeringDomain()` 的字段表逐个正则匹配，覆盖全部领域，不止 BLDC。实测复现：构造一个 ROBOT_JOINT 场景，`gearRatio` 只有 `TEXT_INFERRED` 来源（其余字段正常实测），`calculateRobotJointDeterministicCalculations` 的 `resonance` 判据在修复前会直接算出 `63.16`（状态 `CALCULATED`），而不是 `INSUFFICIENT_INPUT`；`thermalCascadeEngine` 对 `tAmbientC` 同样成立。也就是说，工程师在自由文本里写一句"减速比100"，系统会把这个未经证实的猜测当成已验证输入直接算出谐振裕量。
+
+修复：
+- `robotJointDeterministicEngine.ts` / `thermalCascadeEngine.ts` 全部改用 `isDecisionReadyValuePresent()`（各 3-4 处调用点，逐一替换）。
+- 修正 `unifiedStateExtractor.ts` 里两处引用旧函数名的过期注释（原文档仍写"必须用 isMeasuredValuePresent()"，会误导下一次接手的人继续调错函数）。
+- `scripts/verify-insufficient-input-guards.ts` 新增"证据等级闸门"一节：分别对关节谐振（`gearRatio`）、热级联（`tAmbientC`）构造"数值都在、但来源只是 TEXT_INFERRED"的场景，断言仍是 `INSUFFICIENT_INPUT` 且不产出数值；并加一条对照组确认真实实测时正常算出结果（防止闸门被焊死）。已验证：该测试在修复前会正确失败（`status=CALCULATED`），修复后通过。
+
+已确认没有第三处遗漏：全项目 `isMeasuredValuePresent` 的调用点，现在只剩它自身的 `isDecisionReadyValuePresent()` 内部调用（合理，属于分层调用），以及 UI/文档性质的注释引用。

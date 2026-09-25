@@ -1,7 +1,7 @@
 import { IssueInput } from '../types';
 import { UnifiedEngineeringModel } from '../types/v4Models';
 import { PrecomputedFact } from './deterministicPrecomputation';
-import { isMeasuredValuePresent } from './unifiedStateExtractor';
+import { isDecisionReadyValuePresent } from './unifiedStateExtractor';
 
 export interface ThermalCascadeResult {
   status: 'CALCULATED' | 'INSUFFICIENT_INPUT';
@@ -26,10 +26,10 @@ export function calculateThermalCascade(issue: IssueInput, state: UnifiedEnginee
   // 之前的实现直接读 state.xxx 并用 `|| 默认值` 兜底，state 里的数值即使输入缺失也永远
   // 是一个数字（unifiedStateExtractor 里写死的经验默认值），导致这里的"输入不足"检查从未生效，
   // 每次都会算出一个包装成"确定性结温"的、实际上大半是拍脑袋常数拼出来的数字。
-  const hasCaseTemp = isMeasuredValuePresent(issue, 'tCaseC');
-  const hasAmbientTemp = isMeasuredValuePresent(issue, 'tAmbientC');
+  const hasCaseTemp = isDecisionReadyValuePresent(issue, 'tCaseC');
+  const hasAmbientTemp = isDecisionReadyValuePresent(issue, 'tAmbientC');
   const requiredCoreKeys = ['currentNominal', 'rdsOnMilliOhm', 'vbusNominal', 'pwmFrequencyKhz', 'qgdNc', 'tjMaxC'];
-  const missingCore = requiredCoreKeys.filter((key) => !isMeasuredValuePresent(issue, rawKeyOf(key)));
+  const missingCore = requiredCoreKeys.filter((key) => !isDecisionReadyValuePresent(issue, rawKeyOf(key)));
   const missingTemp = !hasCaseTemp && !hasAmbientTemp ? ['tCaseC(焊盘温度) 或 tAmbientC(环境温度)'] : [];
   const missingInputs = [...missingCore, ...missingTemp];
 

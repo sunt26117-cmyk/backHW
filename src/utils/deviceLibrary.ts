@@ -8,6 +8,14 @@ export interface DeviceParamPoint {
   y: number | null;
 }
 
+export type CandidateDecisionType = 'imported' | 'skipped' | 'mapped_to';
+
+export interface CandidateDecision {
+  decision: CandidateDecisionType;
+  mappedKey?: string;
+  decidedAt: string;
+}
+
 export interface DeviceEntry {
   id: string;
   deviceType: string;
@@ -18,6 +26,10 @@ export interface DeviceEntry {
   channelType: string;
   /** 完整导入的原始 JSON（保留所有字段与工况，供后续物理引擎读取）。 */
   raw: Record<string, unknown>;
+  /** 以 rawPath 为稳定键保存工程师对候选的处理决定。 */
+  candidateDecisions: Record<string, CandidateDecision>;
+  /** 工程师提出但当前 schema 尚未承载的参数需求，作为本地待办保留。 */
+  candidateRequests: Record<string, { label: string; category: string; requestedAt: string }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -29,7 +41,17 @@ export function loadDevices(): DeviceEntry[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const list = JSON.parse(raw);
-    if (Array.isArray(list)) return list as DeviceEntry[];
+    if (Array.isArray(list)) {
+      return list.map((device: DeviceEntry) => ({
+        ...device,
+        candidateDecisions: device && typeof device.candidateDecisions === 'object' && device.candidateDecisions
+          ? device.candidateDecisions
+          : {},
+        candidateRequests: device && typeof device.candidateRequests === 'object' && device.candidateRequests
+          ? device.candidateRequests
+          : {},
+      })) as DeviceEntry[];
+    }
   } catch (err) {
     console.error('加载本地器件库失败:', err);
   }
@@ -84,11 +106,97 @@ export function importDeviceFromJson(jsonText: string): { device?: DeviceEntry; 
     aecqGrade: String(rawAny.aecqGrade || ''),
     channelType: String(rawAny.channelType || ''),
     raw: parsed,
+    candidateDecisions: {},
+    candidateRequests: {},
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
   const warnings = validateDeviceCompleteness(device);
   return { device, warnings };
+}
+
+export function updateDeviceCandidateDecision(
+  deviceId: string,
+  rawPath: string,
+  decision: CandidateDecisionType,
+  mappedKey?: string,
+): DeviceEntry[] {
+  const devices = loadDevices();
+  const device = devices.find((d) => d.id === deviceId);
+  if (!device) return devices;
+
+  const candidateDecisions = {
+    ...(device.candidateDecisions || {}),
+    [rawPath]: {
+      decision,
+      ...(mappedKey ? { mappedKey } : {}),
+      decidedAt: new Date().toISOString(),
+    },
+  };
+
+  return saveDevice({ ...device, candidateDecisions });
+}
+
+export function clearDeviceCandidateDecision(deviceId: string, rawPath: string): DeviceEntry[] {
+  const devices = loadDevices();
+  const device = devices.find((d) => d.id === deviceId);
+  if (!device) return devices;
+  const candidateDecisions = { ...(device.candidateDecisions || {}) };
+  delete candidateDecisions[rawPath];
+  return saveDevice({ ...device, candidateDecisions });
+}
+
+export function requestDeviceCandidateParameter(
+  deviceId: string,
+  rawPath: string,
+  label: string,
+  category: string,
+): DeviceEntry[] {
+  const devices = loadDevices();
+  const device = devices.find((d) => d.id === deviceId);
+  if (!device) return devices;
+
+  const candidateRequests = {
+    ...(device.candidateRequests || {}),
+    [rawPath]: { label, category, requestedAt: new Date().toISOString() },
+  };
+  return saveDevice({ ...device, candidateRequests });
+}
+
+export function applyCandidateDecisions<T extends {
+  rawPath: string;
+  targetKey: string | null;
+  value: number | string;
+  note?: string;
+  importable: boolean;
+  mappingStatus: 'mapped' | 'unmapped' | 'ambiguous' | 'rejected';
+}>(
+  candidates: T[],
+  decisions: Record<string, CandidateDecision> | undefined,
+  currentFieldKeys: ReadonlySet<string>,
+): T[] {
+  if (!decisions) return candidates;
+  return candidates.map((candidate) => {
+    const decision = decisions[candidate.rawPath];
+    if (!decision) return candidate;
+
+    if (decision.decision === 'skipped') {
+      return { ...candidate, importable: false };
+    }
+
+    if ((decision.decision === 'mapped_to' || decision.decision === 'imported') && decision.mappedKey) {
+      const mapped = currentFieldKeys.has(decision.mappedKey);
+      return {
+        ...candidate,
+        targetKey: decision.mappedKey,
+        mappingStatus: mapped ? 'mapped' : 'unmapped',
+        importable: mapped && typeof candidate.value === 'number',
+        note: `${candidate.note ? candidate.note + ' ' : ''}工程师已人工映射至 ${decision.mappedKey}。`,
+      };
+    }
+
+    return candidate;
+  });
 }
 
 /** 完整性体检：关键曲线参数是否录够了随工况变化的点。 */
