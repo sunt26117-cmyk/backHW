@@ -24,6 +24,7 @@ import { calculateBldcDeterministicCalculations } from '../src/utils/bldcDetermi
 import { calculateRobotJointDeterministicCalculations } from '../src/utils/robotJointDeterministicEngine';
 import { calculateThermalCascade } from '../src/utils/thermalCascadeEngine';
 import { deriveBldcEvaluationInput } from '../src/utils/scenarioDerived';
+import { deriveRobotJointEvaluationInput, evaluateAllRobotJointPatterns } from '../src/data/robotJointPatternEngine';
 
 const CONTEXT = {
   projectName: 'guard', projectPhase: 'DV', customer: 'x', ecuType: 'x',
@@ -218,6 +219,38 @@ check('path A 读数：真的填了 0 时实测优先（0 是合法值，仍然�
   } as unknown as IssueInput;
   const zero = deriveBldcEvaluationInput(CONTEXT, zeroIssue);
   assert.equal(zero.vbusNominal, 0, '实测 0 必须压过文本推断，实际=' + zero.vbusNominal);
+});
+
+console.log('\n=== 缺字段不得凭空造出「一票否决」（同时确认真值仍能触发） ===');
+
+const jointIssue = (measuredValues: Record<string, unknown>) => ({
+  issueCategories: ['Robot Joint Drive'], failurePhenomenon: '', requirement: '', testCondition: '',
+  actualMeasurement: '', engineeringConcern: '', notes: '', measuredValues,
+} as unknown as IssueInput);
+
+const jointVetoes = (measuredValues: Record<string, unknown>) =>
+  evaluateAllRobotJointPatterns(deriveRobotJointEvaluationInput(jointIssue(measuredValues)))
+    .filter((p) => p.vetoTriggered).map((p) => p.id);
+
+check('J004：泄放电阻连续额定未填写（空串）时，不得凭空造出否决', () => {
+  const withRating = (cont: unknown) => ({
+    regenPowerPeakW: 10, dutyCycleDecelPct: 100,
+    brakingResistorRatedContinuousW: cont,
+    brakingResistorRatedPeakW: 1000, // 峰值那一条永远不成立，只隔离连续档
+  });
+  assert.equal(jointVetoes(withRating('')).includes('J004'), false, '空串=未填写，不得触发 J004（旧实现 Number("")===0 -> 10>0 -> 假否决）');
+  assert.equal(jointVetoes(withRating(1000)).includes('J004'), false, '额定 1000W 足够，不应触发');
+  assert.equal(jointVetoes(withRating(5)).includes('J004'), true, '额定 5W 真的不够，必须仍能触发 —— 真值不能被削弱');
+});
+
+check('J002：编码器电池电压未填写（空串）时，不得凭空造出否决', () => {
+  const withBattery = (v: unknown) => ({
+    encoderType: 'MULTI_TURN_ABS_BATTERY',
+    encoderBatteryVoltageV: v,
+    encoderBatteryMinVoltageV: v,
+  });
+  assert.equal(jointVetoes(withBattery('')).includes('J002'), false, '电压空串=未填写，不得触发 J002（旧实现 0-0<=0.15 -> 假否决）');
+  assert.equal(jointVetoes(withBattery(2.6)).includes('J002'), true, '实测 2.6V 触及裕量下限，必须仍能触发');
 });
 
 for (const g of GUARDS) {

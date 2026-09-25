@@ -5,6 +5,7 @@ import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput } from '
 import { buildScenarioPassFailCriteria, getDomainPhysics, resolveEngineeringDomain, resolveEngineeringDomains } from './scenarioDomainEngine';
 import { getCrossDomainCouplings } from './crossDomainCouplingMatrix';
 import { recalculateStandardWeightedScore } from './scoringWeights';
+import { readMeasuredNumber } from './unifiedStateExtractor';
 
 const firstNum = (text: string, regs: RegExp[], fallback = NaN) => {
   for (const re of regs) {
@@ -39,9 +40,9 @@ function asPlainObjectText(value: object): string {
 }
 
 function metric(issue: IssueInput, key: string, fallback = NaN): number {
-  const raw = issue.measuredValues?.[key];
-  const n = typeof raw === 'number' ? raw : Number(raw);
-  return Number.isFinite(n) ? n : fallback;
+  // 统一读数：''/null/非有限值 一律回落 fallback(NaN)，不再被 Number('') 读成 0。
+  const value = readMeasuredNumber(issue.measuredValues, key);
+  return value === undefined ? fallback : value;
 }
 
 function scoreTotal(T: number, S: number, C: number, Q: number, L: number): number {

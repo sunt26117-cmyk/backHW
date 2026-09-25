@@ -29,6 +29,7 @@ import {
   ActuatorArchetype,
 } from '../types/motorDrive';
 import { IssueInput } from '../types';
+import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 
 interface MotorDriveToolboxProps {
   issue?: IssueInput;
@@ -107,10 +108,8 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
   });
   const [safetyChainResult, setSafetyChainResult] = useState<ReturnType<typeof evaluateSafetyChainTiming> | null>(null);
 
-  const issueNumber = (key: string): number | undefined => {
-    const value = Number(issue?.measuredValues?.[key]);
-    return Number.isFinite(value) ? value : undefined;
-  };
+  // 统一读数：''/null 不再被当成 0，否则工具会拿 0 参与计算并给出一个假的结论。
+  const issueNumber = (key: string): number | undefined => readMeasuredNumber(issue?.measuredValues, key);
 
   const updateIssueMeasuredValue = (key: string, rawValue: string) => {
     if (!issue || !onIssueChange) return;

@@ -40,6 +40,7 @@ import { EvidenceType, ConfidenceLevel, RobotJointPatternId } from '../types/v4M
 import { IssueInput } from '../types';
 import { calculateTwoMassResonance } from '../utils/robotJointResonance';
 import { sanitizePatternOutput } from '../utils/nanGuard';
+import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 
 export type { RobotJointPatternId };
 
@@ -129,10 +130,13 @@ export interface RobotJointEvaluationInput {
  */
 export function deriveRobotJointEvaluationInput(issue: IssueInput): RobotJointEvaluationInput {
   const mv = issue.measuredValues || {};
+  // 统一读数原语：以前 Number('') === 0，会把「没填」读成「量到 0」。
+  // 而 J004 判据是 avgRegenPowerW > brakingResistorRatedContinuousW，于是未填写会
+  // 凭空造出一条「泄放电阻功率不足」的一票否决；J002 的电池裕量同理（0-0 <= 0.15）。
+  // ''/null/空白 必须回落到 fallback(NaN)，不能变成 0。
   const num = (key: string, fallback: number): number => {
-    const raw = mv[key];
-    const value = Number(raw);
-    return Number.isFinite(value) ? value : fallback;
+    const value = readMeasuredNumber(mv, key);
+    return value === undefined ? fallback : value;
   };
   const numOpt = (key: string): number | undefined => {
     const raw = mv[key];

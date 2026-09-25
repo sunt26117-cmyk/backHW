@@ -33,6 +33,7 @@ import {
 } from '../data/robotJointPatternEngine';
 import { BldcPatternId, ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
 import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
+import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 
 interface BldcPatternEngineViewProps {
@@ -51,7 +52,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
   // 由当前典型工况自动映射初始物理参数；用户仍可手工微调。
   const scenarioDomainKey = resolveEngineeringDomain(issue);
   const isBldcScenario = scenarioDomainKey === 'BLDC';
-  const hasUsableBldcInputs = issue.measuredValueSource === 'BENCHMARK' || ['rpm','busVoltagePeakV','vdsRatingV','currentPeakA'].every((key) => Number.isFinite(Number(issue.measuredValues?.[key]))) || /\b\d+(?:\.\d+)?\s*rpm/i.test(`${issue.testCondition} ${issue.actualMeasurement}`);
+  const hasUsableBldcInputs = issue.measuredValueSource === 'BENCHMARK' || ['rpm','busVoltagePeakV','vdsRatingV','currentPeakA'].every((key) => readMeasuredNumber(issue.measuredValues, key) !== undefined) || /\b\d+(?:\.\d+)?\s*rpm/i.test(`${issue.testCondition} ${issue.actualMeasurement}`);
   const derivedParams = useMemo(() => deriveBldcEvaluationInput(context, issue), [context, issue]);
   const [params, setParams] = useState<BldcEvaluationInput>(derivedParams);
 

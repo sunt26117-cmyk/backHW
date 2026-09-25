@@ -34,6 +34,7 @@ import {
 import { ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
 import { deriveSafetyTraceability, deriveFmedaRows, deriveFtaTree, deriveSafetyCollateral } from '../utils/scenarioDerived';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 
 const FSR_INPUT_KEYS = ['primaryRdsOnMilliOhm','secondaryRdsOnMilliOhm','primaryQgNc','secondaryQgNc','primaryQrrNc','secondaryQrrNc','primaryRthJcCPerW','secondaryRthJcCPerW','componentPartNumber','supplierName','pcnChangeDescription','esdLevelKv','esdPeakCurrentA','recoveryTimeMs','canErrorCount','affectedPort','tvsClampingVoltageV','harnessLengthM','bciInjectionMa','bciSensitiveFreqMhz','commonModeCurrentMa','bciNodeVoltageV','currentSenseErrorPct'] as const;
 
@@ -111,7 +112,8 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
     const isHv = /(?:400V|800V|高压|400\s*V|800\s*V)/i.test(text);
     const isEmc = domain === 'EMC_BCI' || domain === 'EMC_ESD' || domain === 'EMC_RE_CE';
     const isBldc = domain === 'BLDC';
-    const num = (k: string): number | undefined => { const raw = fsrInputs[k]; if (raw === undefined || raw === '') return undefined; const v = Number(raw); return Number.isFinite(v) ? v : undefined; };
+    // 统一读数：原实现挡了 undefined/''，但漏了 null（Number(null) === 0），也没挡纯空白。
+    const num = (k: string): number | undefined => readMeasuredNumber(fsrInputs, k);
     const str = (k: string): string => fsrInputs[k] || '';
     const primary = isHv ? '当前高压主功率器件（Primary）' : isBldc ? '当前 3 相逆变功率管（Primary）' : `${context.productType} 关键器件（Primary）`;
     const secondary = isHv ? '候选高压二供器件（Secondary）' : isBldc ? '候选 Gate Driver / MOSFET 二供（Secondary）' : `${context.productType} 候选二供器件（Secondary）`;

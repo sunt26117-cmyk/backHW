@@ -1,6 +1,7 @@
 import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } from '../types';
 import type { ScenarioPillars } from './decisionPillars';
 import { recalculateStandardWeightedScore } from '../utils/scoringWeights';
+import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 
 function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): number {
   return recalculateStandardWeightedScore({ T, S, C, Q, L });
@@ -9,7 +10,8 @@ function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): 
 export function generateRobotJointAnalysis(context: ProjectContext, issue: IssueInput): CopilotAnalysisResult {
   // 动态评分：技术/进度分随当前背隙超规格程度与剩余工期变化，成本/质量/可靠性保留方案画像。
   const mv = issue.measuredValues || {};
-  const num = (k: string) => { const v = Number(mv[k]); return Number.isFinite(v) ? v : undefined; };
+  // 统一读数：''/null 不能再被读成 0，否则「缺背隙」会把风险严重度算低（方向是低估，不是高估）。
+  const num = (k: string) => readMeasuredNumber(mv, k);
   const backlash = num('backlashArcmin');
   const required = num('requiredPositionAccuracyArcmin');
   const daysRemaining = context.daysRemaining;
