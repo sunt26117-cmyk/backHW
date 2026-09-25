@@ -77,6 +77,8 @@ export const AppModals: React.FC<AppModalsProps> = ({
         onClose={() => setDeviceLibraryOpen(false)}
         showToast={showToast}
         onSelectDevice={(id) => setContext((prev) => ({ ...prev, selectedDeviceId: id }))}
+        issue={issue}
+        onApplyToIssue={(values, provenance) => setIssue((prev) => ({ ...prev, measuredValues: { ...(prev.measuredValues || {}), ...values }, measurementProvenance: { ...(prev.measurementProvenance || {}), ...provenance }, measuredValueSource: 'IMPORTED' }))}
       />
 
       <OscilloscopeImportModal

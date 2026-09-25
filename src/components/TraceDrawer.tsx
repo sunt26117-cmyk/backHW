@@ -19,6 +19,9 @@ const sourceClass: Record<string, string> = {
   USER_INPUT: 'border-blue-700/50 bg-blue-950/30 text-blue-300',
   ASSUMED_DEFAULT: 'border-amber-700/60 bg-amber-950/35 text-amber-300',
   SPEC_CONSTANT: 'border-violet-700/50 bg-violet-950/30 text-violet-300',
+  DATASHEET: 'border-fuchsia-700/50 bg-fuchsia-950/30 text-fuchsia-300',
+  TEXT_INFERRED: 'border-orange-700/50 bg-orange-950/30 text-orange-300',
+  DERIVED: 'border-sky-700/50 bg-sky-950/30 text-sky-300',
 };
 
 const verdictClass: Record<string, string> = {

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ProjectContext, IssueInput, IssueCategory, ProjectPhase, AsilLevel, HwLeadStyle, IssueAttachment } from '../types';
-import { getDomainDataQuality, getDomainMeasurementFields, getDomainMeasurementGroups, getEngineeringDomainLabel, extractMeasurementsFromText, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+import { getDomainDataQuality, getDomainMeasurementFields, getDomainMeasurementGroups, getEngineeringDomainLabel, extractMeasurementsFromText, extractTextInferredMeasurements, resolveEngineeringDomain, getBldcParameterSections } from '../utils/scenarioDomainEngine';
 import {
   Layers,
   AlertCircle,
@@ -23,6 +23,9 @@ import {
   CheckCircle2,
   Save,
   Trash2,
+  ChevronDown,
+  ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 
 interface ProjectContextViewProps {
@@ -89,6 +92,35 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
   lastSavedAt,
 }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [expandedBldcGroups, setExpandedBldcGroups] = useState<Record<string, boolean>>({ BASE: true });
+  const [selectedBldcModes, setSelectedBldcModes] = useState<string[]>([]);
+
+  const inferMeasurementsFromIssueText = (extraText = '') => {
+    setIssue((prev) => {
+      const rawText = [prev.failurePhenomenon, prev.actualMeasurement, prev.testCondition, prev.engineeringConcern, extraText].filter(Boolean).join('\n');
+      const numeric = extractMeasurementsFromText(prev, rawText);
+      const semantic = extractTextInferredMeasurements(prev, rawText);
+      const proposed = { ...numeric, ...semantic };
+      const measuredValues = { ...(prev.measuredValues || {}) };
+      const measurementProvenance = { ...(prev.measurementProvenance || {}) };
+      let added = 0;
+      for (const [key, value] of Object.entries(proposed)) {
+        const existing = measuredValues[key];
+        const blank = existing === undefined || existing === null || existing === '';
+        if (!blank) continue;
+        measuredValues[key] = value;
+        measurementProvenance[key] = {
+          source: 'TEXT_INFERRED',
+          sourceLabel: '自由文本推断，请工程师核实',
+          enteredAt: new Date().toISOString(),
+          confidencePct: semantic[key] !== undefined ? 70 : 65,
+          note: '仅填充原本为空的字段；不会覆盖工程师已有输入。',
+        };
+        added++;
+      }
+      return { ...prev, measuredValues, measurementProvenance, ...(added ? {} : {}) };
+    });
+  };
 
   const toggleCategory = (cat: IssueCategory) => {
     if (issue.issueCategories.includes(cat)) {
@@ -801,119 +833,147 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
             </div>
           </div>
 
-          {/* 可量化实测参数回填：这些数值会进入本地专家引擎，覆盖默认示例参数 */}
+          {/* 可量化参数：BLDC 按需展开；其它域保持现有完整表单 */}
           {(() => {
             const quality = getDomainDataQuality(issue);
             const pct = quality.requiredCount ? Math.round((quality.requiredDone / quality.requiredCount) * 100) : 100;
+            const isBldc = resolveEngineeringDomain(issue) === 'BLDC';
+            const uniqueFields = getDomainMeasurementFields(issue);
+            const renderField = (field: any) => {
+              const key = field.key;
+              return (
+                <div key={key}>
+                  <label className="block text-[10px] text-slate-500 mb-1">
+                    {field.label} {field.unit ? `(${field.unit})` : ''}{field.required ? ' *' : ''}
+                    <span className={((issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)) === 'BENCHMARK') ? 'text-violet-400' : field.tag === 'CALCULATED' ? 'text-cyan-500' : field.tag === 'SPEC' ? 'text-amber-500' : issue.measurementProvenance?.[key]?.source === 'TEXT_INFERRED' ? 'text-orange-300' : 'text-emerald-500'}>
+                      · {issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)}
+                    </span>
+                  </label>
+                  {field.inputType === 'select' ? (
+                    <select
+                      value={String(issue.measuredValues?.[key] ?? '')}
+                      disabled={field.tag === 'CALCULATED'}
+                      onChange={(e) => setIssue({
+                        ...issue,
+                        measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value },
+                        measuredValueSource: 'USER_MEASURED',
+                        measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+                      })}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">请选择</option>
+                      {(field.options || []).map((option: any) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  ) : field.inputType === 'checkbox' ? (
+                    <label className="flex items-center gap-2 h-[30px] px-2 rounded border border-slate-700 bg-slate-800/70 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1'}
+                        onChange={(e) => setIssue({
+                          ...issue,
+                          measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.checked ? 1 : 0 },
+                          measuredValueSource: 'USER_MEASURED',
+                          measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+                        })}
+                        className="accent-blue-500"
+                      />
+                      <span className="text-[10px] text-slate-300">{issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1' ? '已确认' : '未确认'}</span>
+                    </label>
+                  ) : (
+                    <input
+                      type="number"
+                      step="any"
+                      value={issue.measuredValues?.[key] ?? ''}
+                      disabled={field.tag === 'CALCULATED'}
+                      onChange={(e) => setIssue({
+                        ...issue,
+                        measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value === '' ? '' : Number(e.target.value) },
+                        measuredValueSource: 'USER_MEASURED',
+                        measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+                      })}
+                      className={`w-full border rounded px-2 py-1.5 font-mono text-xs focus:outline-none ${field.tag === 'CALCULATED' ? 'bg-slate-900/50 border-cyan-900/40 text-cyan-300 cursor-not-allowed' : 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'}`}
+                    />
+                  )}
+                  {issue.measurementProvenance?.[key]?.source === 'TEXT_INFERRED' && (
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <div className="text-[9px] text-orange-300">文本推断 · 请核实</div>
+                      <button
+                        type="button"
+                        onClick={() => setIssue({
+                          ...issue,
+                          measurementProvenance: {
+                            ...(issue.measurementProvenance || {}),
+                            [key]: {
+                              ...(issue.measurementProvenance?.[key] || {}),
+                              source: 'USER_MEASURED',
+                              sourceLabel: '工程师确认（原值来自文本推断）',
+                              enteredAt: new Date().toISOString(),
+                              confidencePct: 95,
+                              note: '工程师已核实文本推断值。',
+                            },
+                          },
+                        })}
+                        className="text-[9px] text-cyan-300 hover:text-white cursor-pointer"
+                      >确认此值</button>
+                    </div>
+                  )}
+                </div>
+              );
+            };
             return (
               <div className="mb-3 bg-slate-950/70 border border-slate-800 rounded-lg p-3">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                   <div>
                     <div className="text-xs font-semibold text-white">当前工况数据就绪度 · {resolveEngineeringDomain(issue)}</div>
-                    <div className="text-[10px] text-slate-500 mt-1">规则/公式可以先运行；但正式放行前，标记为“必填”的 MEASURED / SPEC 必须补齐。</div>
+                    <div className="text-[10px] text-slate-500 mt-1">先填真正影响判断的核心输入；高级参数按具体模式按需补齐。规格书导入值会保留来源，不冒充实测。</div>
                   </div>
                   <div className="text-xs font-mono text-cyan-300">{quality.requiredDone}/{quality.requiredCount} 必填 · {pct}%</div>
                 </div>
                 <div className="mt-2 h-1.5 rounded bg-slate-800 overflow-hidden"><div className="h-full bg-cyan-500" style={{width:`${pct}%`}} /></div>
                 {quality.missingRequired.length > 0 && <div className="mt-2 text-[10px] text-amber-300">尚缺：{quality.missingRequired.join('、')}</div>}
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {getDomainMeasurementGroups(issue).map((group, i) => {
-                    const groupRequired = group.fields.filter(f => f.required);
-                    const done = groupRequired.filter(f => { const v = issue.measuredValues?.[f.key]; return v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v)); }).length;
-                    return <span key={group.domain} className="px-2 py-1 rounded-md bg-slate-900 border border-slate-800 text-[10px] text-slate-400">{i === 0 ? '主导' : '关联'} · {getEngineeringDomainLabel(group.domain)} · {done}/{groupRequired.length} 必填</span>;
-                  })}
-                </div>
+                {isBldc ? (
+                  <>
+                    <div className="mt-3 flex flex-wrap gap-1.5 items-center">
+                      <span className="text-[10px] text-slate-500 mr-1">这次重点看：</span>
+                      {getBldcParameterSections(uniqueFields).filter(s => s.id !== 'BASE').map((section) => {
+                        const active = selectedBldcModes.includes(section.id);
+                        return <button key={section.id} type="button" onClick={() => setSelectedBldcModes(prev => active ? prev.filter(x => x !== section.id) : [...prev, section.id])} className={`px-2 py-1 rounded-md border text-[10px] cursor-pointer ${active ? 'bg-blue-600/30 border-blue-500/50 text-blue-200' : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'}`}>{section.pattern || section.id}</button>;
+                      })}
+                      <button type="button" onClick={() => setSelectedBldcModes(getBldcParameterSections(uniqueFields).filter(s => s.id !== 'BASE').map(s => s.id))} className="px-2 py-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">全选</button>
+                      <button type="button" onClick={() => setSelectedBldcModes([])} className="px-2 py-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">清空</button>
+                    </div>
+                    <div className="mt-3 rounded-lg border border-cyan-900/40 bg-cyan-950/10 p-2.5 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                      <div><div className="text-[11px] font-semibold text-cyan-200">文本自动识别</div><div className="text-[10px] text-slate-500">从问题现象、实测描述、工程困境里提取可识别字段，只填空白项，不覆盖手工输入。</div></div>
+                      <button type="button" onClick={() => inferMeasurementsFromIssueText()} className="inline-flex items-center justify-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-600/10 px-2.5 py-1.5 text-[10px] text-cyan-200 hover:bg-cyan-600/20 cursor-pointer"><Sparkles className="w-3.5 h-3.5" />重新识别并回填</button>
+                    </div>
+                    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 p-2.5">
+                      {(() => {
+                        const sections = getBldcParameterSections(uniqueFields);
+                        return sections.map((section) => {
+                          const isBase = section.id === 'BASE';
+                          const modeSelected = selectedBldcModes.includes(section.id);
+                          const expanded = isBase || modeSelected || Boolean(expandedBldcGroups[section.id]);
+                          const valuesPresent = section.fields.filter((f: any) => issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '').length;
+                          if (!isBase && !modeSelected && !expandedBldcGroups[section.id]) {
+                            return <button key={section.id} type="button" onClick={() => setExpandedBldcGroups(prev => ({...prev, [section.id]: true}))} className="w-full flex items-center justify-between px-2.5 py-2 border-b border-slate-800/70 text-left hover:bg-slate-900/60 cursor-pointer"><span className="flex items-center gap-2 text-xs text-slate-300"><ChevronRight className="w-3.5 h-3.5 text-slate-600" />{section.label}</span><span className="text-[10px] text-slate-600">{section.fields.length} 项 · 已填 {valuesPresent}</span></button>;
+                          }
+                          return <div key={section.id} className="border-b border-slate-800/70 last:border-b-0 py-2">
+                            <button type="button" onClick={() => !isBase && setExpandedBldcGroups(prev => ({...prev, [section.id]: !prev[section.id]}))} className="w-full flex items-center justify-between text-left cursor-pointer px-2 py-1"><span className="flex items-center gap-2 text-xs font-semibold text-slate-200">{expanded ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-600" />}{section.label}{isBase && <span className="text-[9px] text-emerald-400">核心输入</span>}</span><span className="text-[10px] text-slate-600">{section.fields.length} 项 · 已填 {valuesPresent}</span></button>
+                            {expanded && <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mt-1.5">{section.fields.map(renderField)}</div>}
+                          </div>;
+                        });
+                      })()}
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-3 space-y-4">
+                    {(() => { const renderedKeys = new Set<string>(); return getDomainMeasurementGroups(issue).map((group, groupIndex) => { const visibleFields = group.fields.filter((field) => { if (renderedKeys.has(field.key)) return false; renderedKeys.add(field.key); return true; }); return <div key={group.domain} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3"><div className="flex flex-wrap items-center justify-between gap-2 mb-3"><div className="flex items-center gap-2"><span className={`px-2 py-1 rounded-md text-[10px] font-semibold border ${groupIndex === 0 ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>{groupIndex === 0 ? '主导域' : '涉及域'}</span><span className="text-xs font-semibold text-slate-200">{getEngineeringDomainLabel(group.domain)}</span></div><span className="text-[10px] text-slate-500">{visibleFields.length} 个显示参数</span></div><div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">{visibleFields.map(renderField)}</div></div>; }); })()}
+                  </div>
+                )}
               </div>
             );
           })()}
-          <div className="bg-slate-950/60 border border-blue-900/40 rounded-lg p-3">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-slate-300 font-semibold">实测参数回填（真实数据优先）</label>
-              <span className="text-[10px] text-blue-300">{issue.measuredValueSource === 'USER_MEASURED' ? '来源：工程师手工实测回填' : issue.measuredValueSource === 'IMPORTED' ? '来源：导入原始数据文件' : issue.measuredValueSource === 'BENCHMARK' ? '来源：系统基准样例（仅演示，可覆盖）' : '来源：尚未标记'}</span>
-            </div>
-            <div className="space-y-4">
-              {(() => {
-                const renderedKeys = new Set<string>();
-                return getDomainMeasurementGroups(issue).map((group, groupIndex) => {
-                  const visibleFields = group.fields.filter((field) => {
-                    if (renderedKeys.has(field.key)) return false;
-                    renderedKeys.add(field.key);
-                    return true;
-                  });
-                  return (
-                    <div key={group.domain} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded-md text-[10px] font-semibold border ${groupIndex === 0 ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>
-                            {groupIndex === 0 ? '主导域' : '涉及域'}
-                          </span>
-                          <span className="text-xs font-semibold text-slate-200">{getEngineeringDomainLabel(group.domain)}</span>
-                        </div>
-                        <span className="text-[10px] text-slate-500">{visibleFields.length} 个显示参数 · 重复字段只保留一份共享输入</span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-                    {visibleFields.map((field) => {
-                      const key = field.key;
-                      return (
-                        <div key={key}>
-                          <label className="block text-[10px] text-slate-500 mb-1">{field.label} {field.unit ? `(${field.unit})` : ''}{field.required ? ' *' : ''} <span className={((issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)) === 'BENCHMARK') ? 'text-violet-400' : field.tag === 'CALCULATED' ? 'text-cyan-500' : field.tag === 'SPEC' ? 'text-amber-500' : 'text-emerald-500'}>· {issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)}</span></label>
-                          {field.inputType === 'select' ? (
-                            <select
-                              value={String(issue.measuredValues?.[key] ?? '')}
-                              disabled={field.tag === 'CALCULATED'}
-                              onChange={(e) => setIssue({
-                                ...issue,
-                                measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value },
-                                measuredValueSource: 'USER_MEASURED',
-                                measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
-                              })}
-                              className="w-full bg-slate-800 border border-slate-700 text-white rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
-                            >
-                              <option value="">请选择</option>
-                              {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                            </select>
-                          ) : field.inputType === 'checkbox' ? (
-                            <label className="flex items-center gap-2 h-[30px] px-2 rounded border border-slate-700 bg-slate-800/70 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1'}
-                                onChange={(e) => setIssue({
-                                  ...issue,
-                                  measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.checked ? 1 : 0 },
-                                  measuredValueSource: 'USER_MEASURED',
-                                  measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
-                                })}
-                                className="accent-blue-500"
-                              />
-                              <span className="text-[10px] text-slate-300">{issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1' ? '已确认' : '未确认'}</span>
-                            </label>
-                          ) : (
-                            <input
-                              type="number"
-                              step="any"
-                              value={issue.measuredValues?.[key] ?? ''}
-                              disabled={field.tag === 'CALCULATED'}
-                              onChange={(e) => setIssue({
-                                ...issue,
-                                measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value === '' ? '' : Number(e.target.value) },
-                                measuredValueSource: 'USER_MEASURED',
-                                measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
-                              })}
-                              className={`w-full border rounded px-2 py-1.5 font-mono text-xs focus:outline-none ${field.tag === 'CALCULATED' ? 'bg-slate-900/50 border-cyan-900/40 text-cyan-300 cursor-not-allowed' : 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'}`}
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
-                      </div>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-            <p className="text-[10px] text-slate-500 mt-2">不适用的参数留空。原始报告/示波器/温箱数据仍建议保留在“实际测量数据”文本框或附件中，系统不会把计算值冒充实测值。</p>
-          </div>
-
+          <p className="text-[10px] text-slate-500">不适用的参数留空。来源为 TEXT_INFERRED 的字段只是候选，不会覆盖已经手填或导入的工程数据。</p>
           {/* Test condition & Environment */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -952,6 +1012,7 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
               type="text"
               value={issue.failurePhenomenon}
               onChange={(e) => setIssue({ ...issue, failurePhenomenon: e.target.value })}
+              onBlur={(e) => inferMeasurementsFromIssueText(e.target.value)}
               className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
               placeholder="例如：150MHz 谐波与 Gate Driver DC/DC 频点一致；或高温下 MOSFET Rds(on) 翻倍"
             />

@@ -60,7 +60,7 @@ export type IssueCategory =
   | 'Design Deviation'
   | 'Other';
 
-export type MeasurementSource = 'USER_MEASURED' | 'IMPORTED' | 'BENCHMARK' | 'SPEC' | 'CONTEXT' | 'CALCULATED' | 'ASSUMPTION' | 'UNKNOWN';
+export type MeasurementSource = 'USER_MEASURED' | 'IMPORTED' | 'BENCHMARK' | 'SPEC' | 'DATASHEET' | 'TEXT_INFERRED' | 'CONTEXT' | 'CALCULATED' | 'DERIVED' | 'ASSUMPTION' | 'UNKNOWN';
 
 export interface MeasurementProvenance {
   source: MeasurementSource;
@@ -128,7 +128,7 @@ export interface ReferencedStandard {
   relevance: string;// 如 "热降额判定依据与器件安全工作区", "辐射发射限值与传导骚扰"
 }
 
-export type InformationTag = 'MEASURED' | 'SPEC' | 'CALCULATED' | 'ASSUMPTION' | 'UNKNOWN';
+export type InformationTag = 'MEASURED' | 'SPEC' | 'CALCULATED' | 'DERIVED' | 'ASSUMPTION' | 'UNKNOWN';
 
 export interface ClassifiedInfoItem {
   id: string;
@@ -606,7 +606,7 @@ export interface DebateSimulationResult {
   disclaimer: string;
 }
 
-export type TraceInputSource = 'MEASURED' | 'IMPORTED' | 'USER_INPUT' | 'ASSUMED_DEFAULT' | 'SPEC_CONSTANT';
+export type TraceInputSource = 'MEASURED' | 'IMPORTED' | 'USER_INPUT' | 'ASSUMED_DEFAULT' | 'SPEC_CONSTANT' | 'DATASHEET' | 'TEXT_INFERRED' | 'DERIVED';
 
 export interface TraceInput {
   key: string;

@@ -20,6 +20,18 @@ export function isMeasuredValuePresent(issue: IssueInput, key: string): boolean 
   return !isNaN(num);
 }
 
+
+/**
+ * 判断某字段是否达到“可进入确定性工程判据”的证据等级。
+ * TEXT_INFERRED / BENCHMARK / ASSUMPTION / CONTEXT 等只能作为候选或辅助信息，
+ * 不得因为有一个数字就让确定性引擎误把它当作已验证输入。
+ */
+export function isDecisionReadyValuePresent(issue: IssueInput, key: string): boolean {
+  if (!isMeasuredValuePresent(issue, key)) return false;
+  const source = issue.measurementProvenance?.[key]?.source || issue.measuredValueSource || 'USER_MEASURED';
+  return source === 'USER_MEASURED' || source === 'IMPORTED' || source === 'SPEC' || source === 'DATASHEET';
+}
+
 /**
  * 从 measuredValues 读一个「工程师真的填了」的数值 —— 全项目唯一的数值读取原语。
  *

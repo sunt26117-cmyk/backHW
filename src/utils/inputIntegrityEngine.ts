@@ -125,7 +125,8 @@ export function assessInputIntegrity(
     provenance[field.key]?.source ||
     (globalSource === 'USER_MEASURED' || globalSource === 'IMPORTED' || globalSource === 'BENCHMARK' ? globalSource :
       field.tag === 'CALCULATED' ? 'CALCULATED' : field.tag === 'SPEC' ? 'SPEC' : field.tag === 'CONTEXT' ? 'CONTEXT' : 'UNKNOWN');
-  const isTrustedEvidence = (source: string) => source === 'USER_MEASURED' || source === 'IMPORTED';
+  const isTrustedEvidence = (source: string, field?: DomainMeasurementField) =>
+    source === 'USER_MEASURED' || source === 'IMPORTED' || (source === 'DATASHEET' && field?.tag === 'SPEC');
 
   for (const field of expectedFields) {
     const val = measuredValues[field.key];
@@ -133,11 +134,11 @@ export function assessInputIntegrity(
     const source = resolveSource(field);
     if (filled) {
       filledCount++;
-      if (field.required && isTrustedEvidence(source)) {
+      if (field.required && isTrustedEvidence(source, field)) {
         filledRequiredCount++;
-      } else if (field.required && !isTrustedEvidence(source)) {
+      } else if (field.required && !isTrustedEvidence(source, field)) {
         missingRequiredFields.push(`${field.label} (${field.key}${field.unit ? ` [${field.unit}]` : ''}) · 证据来源=${source}`);
-        requiredAssumptions.push(`字段【${field.label}】虽有数值 ${val}，但来源标记为 ${source}，不计入实测证据；必须由工程师实测或可追溯导入数据闭环`);
+        requiredAssumptions.push(`字段【${field.label}】虽有数值 ${val}，但来源标记为 ${source}，不计入实测证据；必须由工程师实测或可追溯的规格书/测试数据闭环`);
         riskWarnings.push(`【${field.label}】当前来源为 ${source}，存在数值但不具备可直接放行的实测证据等级`);
       }
     } else if (field.required) {
@@ -155,7 +156,7 @@ export function assessInputIntegrity(
 
     const reqRatio = requiredFields.length > 0 ? filledRequiredCount / requiredFields.length : 1;
     const optFields = expectedFields.filter((f) => !f.required);
-    const filledOptCount = optFields.filter((field) => isValueFilled(measuredValues[field.key]) && isTrustedEvidence(resolveSource(field))).length;
+    const filledOptCount = optFields.filter((field) => isValueFilled(measuredValues[field.key]) && isTrustedEvidence(resolveSource(field), field)).length;
     const optRatio = optFields.length > 0 ? filledOptCount / optFields.length : 1;
 
     measurementScore = Math.round(reqRatio * requiredWeight + optRatio * optionalWeight);

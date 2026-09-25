@@ -13,7 +13,7 @@ export function makeTraceInput(
 }
 
 export function anyAssumed(inputs: TraceInput[]): boolean {
-  return inputs.some((i) => i.source === 'ASSUMED_DEFAULT' || i.source === 'SPEC_CONSTANT');
+  return inputs.some((i) => i.source === 'ASSUMED_DEFAULT' || i.source === 'SPEC_CONSTANT' || i.source === 'TEXT_INFERRED');
 }
 
 export function makeTraceNode(partial: Omit<TraceNode, 'degraded'>): TraceNode {
@@ -29,6 +29,9 @@ export function mapMeasurementSourceToTraceSource(source?: MeasurementSource): T
     case 'BENCHMARK': return 'ASSUMED_DEFAULT';
     case 'CONTEXT': return 'USER_INPUT';
     case 'CALCULATED': return 'USER_INPUT';
+    case 'DERIVED': return 'DERIVED';
+    case 'DATASHEET': return 'DATASHEET';
+    case 'TEXT_INFERRED': return 'TEXT_INFERRED';
     default: return 'USER_INPUT';
   }
 }
@@ -64,6 +67,9 @@ export function traceSourceLabel(source: TraceInputSource): string {
     case 'USER_INPUT': return '用户输入';
     case 'ASSUMED_DEFAULT': return '假设值';
     case 'SPEC_CONSTANT': return '规格/常量';
+    case 'DATASHEET': return '规格书';
+    case 'TEXT_INFERRED': return '文本推断';
+    case 'DERIVED': return '推导值';
   }
 }
 

@@ -54,6 +54,58 @@ export interface DomainMeasurementField {
   options?: Array<{ value: string; label: string }>;
 }
 
+
+
+export interface MeasurementGroupDescriptor {
+  id: string;
+  label: string;
+  pattern?: string;
+  keys: string[];
+}
+
+const BLDC_REQUIRED_KEYS = ['rpm', 'busVoltageNominalV', 'busVoltagePeakV', 'vdsRatingV', 'cBusUf', 'rotorInertiaKgm2'];
+
+export const BLDC_PARAMETER_GROUPS: MeasurementGroupDescriptor[] = [
+  { id: 'BASE', label: '基础工况 / 必填', pattern: 'P001', keys: BLDC_REQUIRED_KEYS },
+  { id: 'P002', label: 'P002 · 反电动势 / 低温磁通', pattern: 'P002', keys: ['keVkrpm','keConvention','magnetLowTempFluxUpliftPct'] },
+  { id: 'P003', label: 'P003 · Miller / Vgs 瞬态', pattern: 'P003', keys: ['gateSpikeV','rgOffOhm','cgdPf','vthMinV','dvdtVns','cgsPf','sourceInductanceNh','diDtANs'] },
+  { id: 'P004', label: 'P004 · 死区 / 关断动态', pattern: 'P004', keys: ['deadTimeNs','turnOffDelayNs','turnOffDelayMaxNs','fallTimeNs','fallTimeMaxNs','driverPropMismatchNs','driverPropMismatchMaxNs'] },
+  { id: 'P005', label: 'P005 · 死区畸变 / 二极管', pattern: 'P005', keys: ['pwmSwitchingFreqHz','diodeForwardVoltageV','modulationIndex'] },
+  { id: 'P006', label: 'P006 · 损耗', pattern: 'P006', keys: ['currentPeakA','rthCaOrJa','switchingTimeNs','qrrNc','powerFactorCosPhi'] },
+  { id: 'P007', label: 'P007 · 瞬态热', pattern: 'P007', keys: ['junctionTempC','pulseDurationS','thermalTauS','deratingBasisC'] },
+  { id: 'P008', label: 'P008 · 寄生谐振', pattern: 'P008', keys: ['parasiticCapPf','loopInductanceNh','dvdtVns'] },
+  { id: 'P009', label: 'P009 · 位置传感器', pattern: 'P009', keys: ['motorSensorType','hallFaultRiskIndicated'] },
+  { id: 'P010', label: 'P010 · 电流采样', pattern: 'P010', keys: ['currentSenseArchitecture','currentSenseFaultRiskIndicated'] },
+  { id: 'P011', label: 'P011 · UVLO / 预驱供电', pattern: 'P011', keys: ['vbusMinExpectedV','uvloTypicalV','uvloMinV','hasSupplyBoostRegulation','driverLockupRiskIndicated'] },
+  { id: 'P012', label: 'P012 · Bootstrap', pattern: 'P012', keys: ['gateChargeQgNc','bootRefreshWindowUs','bootChargeLoopOhm'] },
+  { id: 'P013', label: 'P013 · 母线电容最坏容量', pattern: 'P013', keys: ['capInitialTolerancePct','capEolDeratingPct','capLowTempDeratingPct'] },
+  { id: 'P014', label: 'P014 · Vds 尖峰', pattern: 'P014', keys: ['loopInductanceNh','vdsRatingV','busVoltagePeakV'] },
+  { id: 'P015', label: 'P015 · 保护/控制链（补充）', pattern: 'P015', keys: ['gateSpikeV','deadTimeNs','pwmSwitchingFreqHz'] },
+  { id: 'P016', label: 'P016 · 短路保护 / SOA', pattern: 'P016', keys: ['senseDelayNs','compDelayNs','digitalFilterDelayNs','driverPropDelayNs','gateTurnOffDelayNs','currentFallDelayNs','soaShortCircuitTimeUs','easEnergyMj'] },
+  { id: 'P017', label: 'P017 · 采样/反馈（补充）', pattern: 'P017', keys: ['currentSenseArchitecture','currentSenseFaultRiskIndicated','currentPeakA'] },
+  { id: 'P018', label: 'P018 · 堵转', pattern: 'P018', keys: ['stallRiskIndicated','stallCurrentThresholdA','stallRpmThreshold','stallLevel1TimeMs','stallLevel2TimeMs','stallLevel3TimeMs','stallLockoutCountN'] },
+];
+
+export function getBldcParameterSections(fields: DomainMeasurementField[]) {
+  const byKey = new Map(fields.map(f => [f.key, f]));
+  const assigned = new Set<string>();
+  const sections = BLDC_PARAMETER_GROUPS.map(group => {
+    const fields = group.keys
+      .map(k => byKey.get(k))
+      .filter(Boolean)
+      .filter((f) => !assigned.has((f as DomainMeasurementField).key)) as DomainMeasurementField[];
+    fields.forEach((f) => assigned.add(f.key));
+    return { ...group, fields };
+  });
+  const remaining = fields.filter(f => !assigned.has(f.key) && !f.required);
+  if (remaining.length) sections.push({ id:'OTHER', label:'其他高级参数', pattern:'OTHER', keys:remaining.map(f=>f.key), fields:remaining });
+  return sections.filter(section => section.fields.length > 0);
+}
+
+export function getBldcParameterGroupForKey(key: string): string {
+  return BLDC_PARAMETER_GROUPS.find(g => g.keys.includes(key))?.id || 'OTHER';
+}
+
 export interface DomainProfile {
   key: EngineeringDomain;
   title: string;
@@ -588,7 +640,7 @@ export function getDomainDataQuality(issue: IssueInput) {
   const sourceFor = (field: DomainMeasurementField): MeasurementSource =>
     (provenance[field.key]?.source || (issue.measuredValueSource as MeasurementSource | undefined) ||
       (field.tag === 'CALCULATED' ? 'CALCULATED' : field.tag === 'SPEC' ? 'SPEC' : field.tag === 'CONTEXT' ? 'CONTEXT' : 'UNKNOWN')) as MeasurementSource;
-  const trusted = (field: DomainMeasurementField) => sourceFor(field) === 'USER_MEASURED' || sourceFor(field) === 'IMPORTED';
+  const trusted = (field: DomainMeasurementField) => sourceFor(field) === 'USER_MEASURED' || sourceFor(field) === 'IMPORTED' || (sourceFor(field) === 'DATASHEET' && field.tag === 'SPEC');
   const requiredDone = required.filter((field) => present(field) && trusted(field)).length;
   const measured = fields.filter(f => (f.tag === 'MEASURED' || f.tag === 'SPEC' || f.tag === 'CONTEXT') && present(f) && trusted(f)).length;
   const sourceCounts = fields.reduce((acc, f) => {
@@ -652,6 +704,27 @@ export function extractMeasurementsFromText(issue: IssueInput, rawText: string):
       const m = text.match(re);
       if (m?.[1]) { const n = Number(m[1]); if (Number.isFinite(n)) { out[key] = n; break; } }
     }
+  }
+  return out;
+}
+
+
+export function extractTextInferredMeasurements(issue: IssueInput, rawText: string): Record<string, number | string> {
+  const text = `${rawText || ''}`.toLowerCase();
+  const out: Record<string, number | string> = {};
+  if (/hall|霍尔/.test(text)) {
+    out.motorSensorType = 'HALL';
+    if (/故障|异常|间歇|开路|短路|丢脉冲|断线/.test(text)) out.hallFaultRiskIndicated = 1;
+  }
+  if (/堵转|卡死|卡滞|stall/.test(text)) out.stallRiskIndicated = 1;
+  if (/编码器|encoder/.test(text)) out.motorSensorType = 'ENCODER';
+  if (/resolver|旋变/.test(text)) out.motorSensorType = 'RESOLVER';
+  if (/无传感器|sensorless/.test(text)) out.motorSensorType = 'SENSORLESS';
+  if (/采样.*故障|电流.*采样.*异常|current sense.*fault/.test(text)) out.currentSenseFaultRiskIndicated = 1;
+  if (/预驱.*死锁|uvlo.*fault|欠压.*锁死/.test(text)) out.driverLockupRiskIndicated = 1;
+  if (/dv\s*\/?\s*dt|dvdt/.test(text)) {
+    const m = text.match(/dv\s*\/?\s*dt[^0-9+-]{0,12}([0-9]+(?:\.[0-9]+)?)/i);
+    if (m) out.dvdtVns = Number(m[1]);
   }
   return out;
 }
