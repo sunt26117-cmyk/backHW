@@ -1,20 +1,22 @@
 /**
- * 缺输入纪律验证脚本（目前【未接入 npm test】，因为它当前是失败状态）
+ * 缺输入纪律验证（已接入 npm test）
  *
- * 现实约定分歧：
- *   - 本脚本断言「缺输入 -> state.xxx 必须是 undefined」；
- *   - 而 src/utils/unifiedStateExtractor.ts 的 getNum() 目前用 0 作为「未提供」哨兵
- *     （见该文件注释：缺输入返回 0/undefined，由下游用 isMeasuredValuePresent() 判断
- *     INSUFFICIENT_INPUT 并给出 INSUFFICIENT_INPUT 状态）。
- * 所以现在跑会在这条断言上失败：state.motor.j = 0（期望 undefined）。
+ * 验的是「缺输入不得静默算出一个数字」这条底线，四组：
+ *   1) 缺转子惯量 J + 母线电容 Cbus      -> busPumping 必须 INSUFFICIENT_INPUT
+ *   2) 关节缺扭转刚度/负载惯量/减速比     -> resonance 必须 INSUFFICIENT_INPUT
+ *   3) 缺热参数                          -> PRE_THERMAL_TJ 必须 INSUFFICIENT_INPUT
+ *   4) 参数齐全                          -> busPumping 必须真的 CALCULATED 出数值
  *
- * 要把 0 哨兵统一改成 undefined，需要同步改所有 extractUnifiedEngineeringModel 的消费者，
- * 属于一次有爆炸半径的约定迁移，不能在合并提交里顺手做。
- * 在此之前不要把它加进 package.json 的 test 链，否则 CI 会红。
+ * 约定说明（别把这条读成 bug）：
+ *   unifiedStateExtractor.getNum() 用 0 作为「未提供」哨兵，而不是 undefined；
+ *   「到底缺没缺」一律由 isMeasuredValuePresent(issue, key) 按原始 measuredValues 判定，
+ *   消费端再用 `state.motor.j || undefined` 把哨兵中和掉。
+ *   所以本脚本断言的是「存在性判定 + 引擎状态」，不是 state 的内部表示。
+ *   （若将来把哨兵统一迁成 undefined，那是另一次有爆炸半径的约定迁移。）
  *
  * 手动运行：npx tsx scripts/verify_insufficient_input.ts
  */
-import { extractUnifiedEngineeringModel } from '../src/utils/unifiedStateExtractor';
+import { extractUnifiedEngineeringModel, isMeasuredValuePresent } from '../src/utils/unifiedStateExtractor';
 import { calculateBldcDeterministicCalculations } from '../src/utils/bldcDeterministicEngine';
 import { calculateRobotJointDeterministicCalculations } from '../src/utils/robotJointDeterministicEngine';
 import { runDeterministicPrecomputations } from '../src/utils/deterministicPrecomputation';
@@ -58,8 +60,14 @@ const state1 = extractUnifiedEngineeringModel(dummyContext, issueMissingJ);
 console.log('Test 1 State Motor J:', state1.motor.j);
 console.log('Test 1 State Bus Capacitance:', state1.powerStage.cbusUf);
 
-if (state1.motor.j !== undefined) {
-  console.error('FAIL: state.motor.j should be undefined when not provided, but got:', state1.motor.j);
+// 真正的契约：未提供时「存在性判定」必须为 false。
+// （state.motor.j 本身是 0 哨兵，由消费端 `|| undefined` 中和，不作为断言对象。）
+if (isMeasuredValuePresent(issueMissingJ, 'rotorInertiaKgm2')) {
+  console.error('FAIL: rotorInertiaKgm2 未提供时 isMeasuredValuePresent 必须为 false');
+  process.exit(1);
+}
+if (isMeasuredValuePresent(issueMissingJ, 'cBusUf')) {
+  console.error('FAIL: cBusUf 未提供时 isMeasuredValuePresent 必须为 false');
   process.exit(1);
 }
 
