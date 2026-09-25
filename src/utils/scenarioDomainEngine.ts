@@ -50,6 +50,8 @@ export interface DomainMeasurementField {
   description: string;
   tag: 'MEASURED' | 'SPEC' | 'CONTEXT' | 'CALCULATED' | 'BENCHMARK';
   required?: boolean;
+  inputType?: 'number' | 'select' | 'checkbox';
+  options?: Array<{ value: string; label: string }>;
 }
 
 export interface DomainProfile {
@@ -88,6 +90,92 @@ const P: Record<EngineeringDomain, DomainProfile> = {
       {key:'vthMinV',label:'Vgs开启阈值(最小值)',unit:'V',description:'器件数据手册最小开启阈值，用于判定米勒尖峰是否会误导通',tag:'SPEC'},
       {key:'dvdtVns',label:'dv/dt',unit:'V/ns',description:'开关节点电压变化率，用于 BLDC Miller 风险确定性计算',tag:'MEASURED'},
       {key:'keVkrpm',label:'反电动势常数 Ke',unit:'V/krpm',description:'电机反电动势系数，用于交叉核验实测泵升与理论泵升是否一致',tag:'SPEC'},
+
+      // P002：反电动势约定 / 低温磁通
+      {key:'keConvention',label:'Ke定义约定',description:'明确 Ke 是相电压 RMS/krpm，还是已经给出的线电压峰值/krpm，避免单位口径导致 BEMF 系统性偏差',tag:'SPEC',inputType:'select',options:[
+        {value:'PHASE_RMS_SINUSOIDAL',label:'相电压 RMS / krpm（正弦）'},
+        {value:'LINE_PEAK_DIRECT',label:'线电压峰值 / krpm（已换算）'},
+      ]},
+      {key:'magnetLowTempFluxUpliftPct',label:'低温磁通提升',unit:'%',description:'-40℃相对25℃磁通提升，用于 P002 最坏低温 BEMF',tag:'SPEC'},
+
+      // P003：Miller / Vgs 瞬态
+      {key:'cgsPf',label:'栅源电容 Cgs',unit:'pF',description:'用于 Miller 容性分压边界',tag:'SPEC'},
+      {key:'sourceInductanceNh',label:'源极寄生电感 Ls',unit:'nH',description:'源极寄生电感，配合 di/dt 估算 Vgs 过冲',tag:'SPEC'},
+      {key:'diDtANs',label:'关断 di/dt',unit:'A/ns',description:'功率回路电流变化率，用于源极电感与 Vds 尖峰计算',tag:'MEASURED'},
+
+      // P004：死区 / 关断动态
+      {key:'turnOffDelayNs',label:'关断延迟 t_d(off)',unit:'ns',description:'MOSFET 关断延迟典型值',tag:'SPEC'},
+      {key:'turnOffDelayMaxNs',label:'关断延迟最大值',unit:'ns',description:'datasheet 最坏关断延迟',tag:'SPEC'},
+      {key:'fallTimeNs',label:'下降时间 t_f',unit:'ns',description:'典型电流/电压下降时间',tag:'SPEC'},
+      {key:'fallTimeMaxNs',label:'下降时间最大值',unit:'ns',description:'最坏下降时间',tag:'SPEC'},
+      {key:'driverPropMismatchNs',label:'驱动传播失配',unit:'ns',description:'上下桥传播延迟失配典型值',tag:'SPEC'},
+      {key:'driverPropMismatchMaxNs',label:'驱动传播失配最大值',unit:'ns',description:'datasheet 最坏传播延迟失配',tag:'SPEC'},
+
+      // P005：死区畸变
+      {key:'pwmSwitchingFreqHz',label:'PWM开关频率',unit:'Hz',description:'实际功率级 PWM 开关频率',tag:'CONTEXT'},
+      {key:'diodeForwardVoltageV',label:'体二极管 Vf',unit:'V',description:'当前电流/温度条件下体二极管正向压降',tag:'SPEC'},
+      {key:'modulationIndex',label:'调制比 m',description:'PWM 调制比，用于死区畸变相对基波电压的计算',tag:'CONTEXT'},
+
+      // P006/P007：损耗 / 热
+      {key:'rthCaOrJa',label:'RθCA / RθJA',unit:'℃/W',description:'壳到环境或结到环境热阻，替代隐藏硬编码热阻',tag:'SPEC'},
+      {key:'switchingTimeNs',label:'开关重叠时间',unit:'ns',description:'用于 P006 开关重叠损耗估算',tag:'SPEC'},
+      {key:'qrrNc',label:'反向恢复电荷 Qrr',unit:'nC',description:'体二极管反向恢复电荷',tag:'SPEC'},
+      {key:'powerFactorCosPhi',label:'功率因数 cosφ',description:'用于交流等效损耗估算',tag:'CONTEXT'},
+      {key:'pulseDurationS',label:'热脉冲持续时间',unit:'s',description:'P007 瞬态热脉冲持续时间',tag:'CONTEXT'},
+      {key:'thermalTauS',label:'热时间常数 τ',unit:'s',description:'壳体/散热器侧热时间常数',tag:'SPEC'},
+      {key:'deratingBasisC',label:'降额基准温度',unit:'℃',description:'车规热降额曲线基准温度',tag:'SPEC'},
+
+      // P008：寄生谐振
+      {key:'parasiticCapPf',label:'回路寄生电容',unit:'pF',description:'用于与回路电感共同计算真实振铃频率',tag:'SPEC'},
+
+      // P009/P010：结构选择 + 故障证据
+      {key:'motorSensorType',label:'转子位置传感器',description:'P009 位置传感器架构',tag:'CONTEXT',inputType:'select',options:[
+        {value:'HALL',label:'Hall'}, {value:'ENCODER',label:'Encoder'}, {value:'RESOLVER',label:'Resolver'}, {value:'SENSORLESS',label:'Sensorless'},
+      ]},
+      {key:'hallFaultRiskIndicated',label:'Hall故障证据',description:'当前 case 是否已有 Hall 信号故障的具体证据',tag:'MEASURED',inputType:'checkbox'},
+      {key:'currentSenseArchitecture',label:'电流采样架构',description:'P010/P017 使用的电流采样拓扑',tag:'CONTEXT',inputType:'select',options:[
+        {value:'LOW_SIDE_SINGLE',label:'低边单电阻'}, {value:'THREE_PHASE_LOW_SIDE',label:'三相低边'}, {value:'INLINE_PHASE',label:'相线串联'}, {value:'HALL_SENSOR',label:'Hall电流传感器'},
+      ]},
+      {key:'currentSenseFaultRiskIndicated',label:'采样故障证据',description:'当前 case 是否已有采样链路故障具体证据',tag:'MEASURED',inputType:'checkbox'},
+
+      // P011：UVLO / 预驱供电
+      {key:'vbusMinExpectedV',label:'最低预期母线',unit:'V',description:'冷启动/负载跌落等最坏工况的最低母线电压',tag:'MEASURED'},
+      {key:'uvloTypicalV',label:'UVLO典型阈值',unit:'V',description:'预驱欠压锁定典型阈值',tag:'SPEC'},
+      {key:'uvloMinV',label:'UVLO最小阈值',unit:'V',description:'预驱欠压锁定最小阈值',tag:'SPEC'},
+      {key:'hasSupplyBoostRegulation',label:'有升压/稳压兜底',description:'是否存在独立升压/稳压供电兜底',tag:'CONTEXT',inputType:'checkbox'},
+      {key:'driverLockupRiskIndicated',label:'预驱死锁证据',description:'当前 case 是否已有预驱 UVLO/死锁具体证据',tag:'MEASURED',inputType:'checkbox'},
+
+      // P012：Bootstrap
+      {key:'gateChargeQgNc',label:'MOSFET总栅电荷 Qg',unit:'nC',description:'高边 MOSFET 总栅电荷',tag:'SPEC'},
+      {key:'bootRefreshWindowUs',label:'自举刷新窗口',unit:'μs',description:'低边导通时可用于自举刷新/充电的有效窗口',tag:'CONTEXT'},
+      {key:'bootChargeLoopOhm',label:'自举充电回路电阻',unit:'Ω',description:'Rboot + 二极管 + 低边导通路径总电阻',tag:'SPEC'},
+
+      // P013：母线电容最坏容量
+      {key:'capInitialTolerancePct',label:'电容初始公差',unit:'%',description:'Cbus 初始容量负偏差',tag:'SPEC'},
+      {key:'capEolDeratingPct',label:'EOL容量衰减',unit:'%',description:'寿命末期容量衰减',tag:'SPEC'},
+      {key:'capLowTempDeratingPct',label:'低温容量衰减',unit:'%',description:'低温条件下有效容量衰减',tag:'SPEC'},
+
+      // P014：急停 Vds 尖峰
+      {key:'loopInductanceNh',label:'功率回路寄生电感',unit:'nH',description:'功率回路/线束寄生电感，直接进入 L·di/dt 与泵升能量边界',tag:'MEASURED'},
+
+      // P016：短路保护完整时序
+      {key:'senseDelayNs',label:'电流检测延迟',unit:'ns',description:'从短路发生到检测链路有效的延迟',tag:'MEASURED'},
+      {key:'compDelayNs',label:'比较器延迟',unit:'ns',description:'过流/短路比较器传播延迟',tag:'SPEC'},
+      {key:'digitalFilterDelayNs',label:'数字滤波延迟',unit:'ns',description:'数字滤波/去毛刺增加的响应时间',tag:'SPEC'},
+      {key:'driverPropDelayNs',label:'驱动传播延迟',unit:'ns',description:'故障信号到 Gate Driver 输出的传播延迟',tag:'SPEC'},
+      {key:'gateTurnOffDelayNs',label:'Gate关断延迟',unit:'ns',description:'驱动输出到功率管有效关断的延迟',tag:'SPEC'},
+      {key:'currentFallDelayNs',label:'电流下降延迟',unit:'ns',description:'Gate关断后短路电流实际下降到安全区的时间',tag:'MEASURED'},
+      {key:'soaShortCircuitTimeUs',label:'短路耐受时间',unit:'μs',description:'MOSFET SOA/短路耐受允许时间',tag:'SPEC'},
+      {key:'easEnergyMj',label:'单脉冲雪崩能量 EAS',unit:'mJ',description:'器件单脉冲雪崩能量能力，用于 P016 能量预算复核',tag:'SPEC'},
+
+      // P018：堵转判据
+      {key:'stallRiskIndicated',label:'堵转风险证据',description:'当前 case 是否已有堵转/机械卡滞具体证据',tag:'MEASURED',inputType:'checkbox'},
+      {key:'stallCurrentThresholdA',label:'堵转电流阈值',unit:'A',description:'I_stall_th：进入堵转保护判据的相电流阈值',tag:'SPEC'},
+      {key:'stallRpmThreshold',label:'堵转低速阈值',unit:'rpm',description:'RPM_low_th：判定机械低速/停转的转速阈值',tag:'SPEC'},
+      {key:'stallLevel1TimeMs',label:'Level 1 时间窗',unit:'ms',description:'超过堵转电流且低速后，进入软限制的持续时间',tag:'SPEC'},
+      {key:'stallLevel2TimeMs',label:'Level 2 时间窗',unit:'ms',description:'持续堵转后进入 PWM 降额/DTC 预警的时间',tag:'SPEC'},
+      {key:'stallLevel3TimeMs',label:'Level 3 时间窗',unit:'ms',description:'持续堵转后执行安全停机的时间',tag:'SPEC'},
+      {key:'stallLockoutCountN',label:'Level 3 锁存次数 N',unit:'次',description:'单次点火循环内 Level 3 累计达到 N 次后锁存故障',tag:'SPEC'},
     ],
     knownPitfalls: ['不能用计算泵升峰值替代示波器实测峰值作为放行证据', 'RDS(on)/Qg/Qgd 不能只看室温 datasheet typ 值', 'Cbus/J/dvdt/Cgd/Rg/Vth 任一确定性计算关键输入缺失时，必须明确标记 INSUFFICIENT_INPUT，不得从自由文本或默认工程参数补齐'],
   },

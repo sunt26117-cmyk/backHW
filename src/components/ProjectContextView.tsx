@@ -857,19 +857,51 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
                       return (
                         <div key={key}>
                           <label className="block text-[10px] text-slate-500 mb-1">{field.label} {field.unit ? `(${field.unit})` : ''}{field.required ? ' *' : ''} <span className={((issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)) === 'BENCHMARK') ? 'text-violet-400' : field.tag === 'CALCULATED' ? 'text-cyan-500' : field.tag === 'SPEC' ? 'text-amber-500' : 'text-emerald-500'}>· {issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)}</span></label>
-                          <input
-                            type="number"
-                            step="any"
-                            value={issue.measuredValues?.[key] ?? ''}
-                            disabled={field.tag === 'CALCULATED'}
-                            onChange={(e) => setIssue({
-                              ...issue,
-                              measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value === '' ? '' : Number(e.target.value) },
-                              measuredValueSource: 'USER_MEASURED',
-                              measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
-                            })}
-                            className={`w-full border rounded px-2 py-1.5 font-mono text-xs focus:outline-none ${field.tag === 'CALCULATED' ? 'bg-slate-900/50 border-cyan-900/40 text-cyan-300 cursor-not-allowed' : 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'}`}
-                          />
+                          {field.inputType === 'select' ? (
+                            <select
+                              value={String(issue.measuredValues?.[key] ?? '')}
+                              disabled={field.tag === 'CALCULATED'}
+                              onChange={(e) => setIssue({
+                                ...issue,
+                                measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value },
+                                measuredValueSource: 'USER_MEASURED',
+                                measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+                              })}
+                              className="w-full bg-slate-800 border border-slate-700 text-white rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                            >
+                              <option value="">请选择</option>
+                              {(field.options || []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </select>
+                          ) : field.inputType === 'checkbox' ? (
+                            <label className="flex items-center gap-2 h-[30px] px-2 rounded border border-slate-700 bg-slate-800/70 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1'}
+                                onChange={(e) => setIssue({
+                                  ...issue,
+                                  measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.checked ? 1 : 0 },
+                                  measuredValueSource: 'USER_MEASURED',
+                                  measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+                                })}
+                                className="accent-blue-500"
+                              />
+                              <span className="text-[10px] text-slate-300">{issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1' ? '已确认' : '未确认'}</span>
+                            </label>
+                          ) : (
+                            <input
+                              type="number"
+                              step="any"
+                              value={issue.measuredValues?.[key] ?? ''}
+                              disabled={field.tag === 'CALCULATED'}
+                              onChange={(e) => setIssue({
+                                ...issue,
+                                measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value === '' ? '' : Number(e.target.value) },
+                                measuredValueSource: 'USER_MEASURED',
+                                measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+                              })}
+                              className={`w-full border rounded px-2 py-1.5 font-mono text-xs focus:outline-none ${field.tag === 'CALCULATED' ? 'bg-slate-900/50 border-cyan-900/40 text-cyan-300 cursor-not-allowed' : 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'}`}
+                            />
+                          )}
                         </div>
                       );
                     })}

@@ -52,6 +52,11 @@ function optMeas(issue: IssueInput, key: string): number | undefined {
   return Number.isFinite(v) ? v : undefined;
 }
 
+function rawMeas(issue: IssueInput, key: string): number | string | undefined {
+  const v = issue.measuredValues?.[key];
+  return v === '' || v === null || v === undefined ? undefined : v;
+}
+
 export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueInput): BldcEvaluationInput {
   const text = allText(issue);
   const isEmc = issue.issueCategories?.includes('EMC');
@@ -209,6 +214,12 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   registerTraceSource('cbusUf', ['cBusUf'], cbusUf);
   registerTraceSource('ambientTempC', ['ambientTempC'], tAmbientC);
   registerTraceSource('currentPeakA', ['currentPeakA', 'loadCurrentA'], currentPeakA);
+  registerTraceSource('stallCurrentThresholdA', ['stallCurrentThresholdA'], optMeas(issue, 'stallCurrentThresholdA'));
+  registerTraceSource('stallRpmThreshold', ['stallRpmThreshold'], optMeas(issue, 'stallRpmThreshold'));
+  registerTraceSource('stallLevel1TimeMs', ['stallLevel1TimeMs'], optMeas(issue, 'stallLevel1TimeMs'));
+  registerTraceSource('stallLevel2TimeMs', ['stallLevel2TimeMs'], optMeas(issue, 'stallLevel2TimeMs'));
+  registerTraceSource('stallLevel3TimeMs', ['stallLevel3TimeMs'], optMeas(issue, 'stallLevel3TimeMs'));
+  registerTraceSource('stallLockoutCountN', ['stallLockoutCountN'], optMeas(issue, 'stallLockoutCountN'));
   registerTraceSource('harnessLengthM', ['harnessLengthM'], harnessLengthM);
   registerTraceSource('deadTimeNs', ['deadTimeNs'], deadTimeNs);
   registerTraceSource('rgOffOhm', ['rgOffOhm'], rgOffOhm);
@@ -265,6 +276,26 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   // P018: 堵转/机械卡滞的具体症状描述
   const stallRiskIndicated = /堵转|卡死|卡滞|locked\s*rotor|抱死|机械死锁/i.test(text);
 
+  // 用户结构化输入优先于自由文本推断。这样新增的 BLDC 输入窗口真正进入 P001~P018，
+  // 而不是只停留在 UI 层。
+  const measuredKeConvention = rawMeas(issue, 'keConvention');
+  const keConvention = measuredKeConvention === 'PHASE_RMS_SINUSOIDAL' || measuredKeConvention === 'LINE_PEAK_DIRECT'
+    ? measuredKeConvention : undefined;
+  const measuredMotorSensorType = rawMeas(issue, 'motorSensorType');
+  if (measuredMotorSensorType === 'HALL' || measuredMotorSensorType === 'ENCODER' || measuredMotorSensorType === 'RESOLVER' || measuredMotorSensorType === 'SENSORLESS') motorSensorType = measuredMotorSensorType;
+  const measuredSenseArchitecture = rawMeas(issue, 'currentSenseArchitecture');
+  if (measuredSenseArchitecture === 'LOW_SIDE_SINGLE' || measuredSenseArchitecture === 'THREE_PHASE_LOW_SIDE' || measuredSenseArchitecture === 'INLINE_PHASE' || measuredSenseArchitecture === 'HALL_SENSOR') currentSenseArchitecture = measuredSenseArchitecture;
+  const boolValue = (key: string): boolean | undefined => {
+    const raw = rawMeas(issue, key);
+    if (raw === undefined) return undefined;
+    return raw === 1 || raw === '1';
+  };
+  const structuredHallFault = boolValue('hallFaultRiskIndicated');
+  const structuredSenseFault = boolValue('currentSenseFaultRiskIndicated');
+  const structuredBoost = boolValue('hasSupplyBoostRegulation');
+  const structuredDriverLockup = boolValue('driverLockupRiskIndicated');
+  const structuredStall = boolValue('stallRiskIndicated');
+
   return {
     vbusNominal,
     vbusMeasuredPeak: Number.isFinite(vbusMeasuredPeak) ? vbusMeasuredPeak : undefined,
@@ -281,8 +312,27 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     dvDtVns,
     vthMinV,
     keVkrpm: Number.isFinite(keVkrpm) ? keVkrpm : undefined,
+    keConvention,
     rthJc: Number.isFinite(rthJc) ? rthJc : undefined,
     rdsOnMilliOhm: Number.isFinite(rdsOnMilliOhm) ? rdsOnMilliOhm : undefined,
+    gateSpikeMeasuredV: optMeas(issue, 'gateSpikeV'),
+    turnOffDelayNs: optMeas(issue, 'turnOffDelayNs'),
+    turnOffDelayMaxNs: optMeas(issue, 'turnOffDelayMaxNs'),
+    fallTimeNs: optMeas(issue, 'fallTimeNs'),
+    fallTimeMaxNs: optMeas(issue, 'fallTimeMaxNs'),
+    driverPropMismatchNs: optMeas(issue, 'driverPropMismatchNs'),
+    driverPropMismatchMaxNs: optMeas(issue, 'driverPropMismatchMaxNs'),
+    pwmSwitchingFreqHz: optMeas(issue, 'pwmSwitchingFreqHz'),
+    diodeForwardVoltageV: optMeas(issue, 'diodeForwardVoltageV'),
+    modulationIndex: optMeas(issue, 'modulationIndex'),
+    rthCaOrJa: optMeas(issue, 'rthCaOrJa'),
+    switchingTimeNs: optMeas(issue, 'switchingTimeNs'),
+    qrrNc: optMeas(issue, 'qrrNc'),
+    powerFactorCosPhi: optMeas(issue, 'powerFactorCosPhi'),
+    pulseDurationS: optMeas(issue, 'pulseDurationS'),
+    thermalTauS: optMeas(issue, 'thermalTauS'),
+    deratingBasisC: optMeas(issue, 'deratingBasisC'),
+    parasiticCapPf: optMeas(issue, 'parasiticCapPf'),
     senseDelayNsOverride: optMeas(issue, 'senseDelayNs'),
     compDelayNsOverride: optMeas(issue, 'compDelayNs'),
     digitalFilterDelayNsOverride: optMeas(issue, 'digitalFilterDelayNs'),
@@ -295,21 +345,34 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     loopInductanceNh: optMeas(issue, 'loopInductanceNh'),
     cgsPf: optMeas(issue, 'cgsPf'),
     magnetLowTempFluxUpliftPct: optMeas(issue, 'magnetLowTempFluxUpliftPct'),
+    gateChargeQgNc: optMeas(issue, 'gateChargeQgNc'),
+    bootRefreshWindowUs: optMeas(issue, 'bootRefreshWindowUs'),
+    bootChargeLoopOhm: optMeas(issue, 'bootChargeLoopOhm'),
+    capInitialTolerancePct: optMeas(issue, 'capInitialTolerancePct'),
+    capEolDeratingPct: optMeas(issue, 'capEolDeratingPct'),
+    capLowTempDeratingPct: optMeas(issue, 'capLowTempDeratingPct'),
+    vbusMinExpectedV,
+    uvloTypicalV: optMeas(issue, 'uvloTypicalV'),
+    uvloMinV: optMeas(issue, 'uvloMinV'),
     easEnergyMj: easEnergyMj ?? optMeas(issue, 'easEnergyMj'),
     traceSources,
     traceEvidenceIds,
     rdsOnCurve,
     crssCurve,
     vthCurve,
-    gateSpikeMeasuredV: optMeas(issue, 'gateSpikeV'),
     motorSensorType,
-    hallFaultRiskIndicated: hallFaultRiskIndicated || undefined,
+    hallFaultRiskIndicated: structuredHallFault ?? (hallFaultRiskIndicated || undefined),
     currentSenseArchitecture,
-    currentSenseFaultRiskIndicated: currentSenseFaultRiskIndicated || undefined,
-    vbusMinExpectedV,
-    hasSupplyBoostRegulation,
-    driverLockupRiskIndicated: driverLockupRiskIndicated || undefined,
-    stallRiskIndicated: stallRiskIndicated || undefined,
+    currentSenseFaultRiskIndicated: structuredSenseFault ?? (currentSenseFaultRiskIndicated || undefined),
+    hasSupplyBoostRegulation: structuredBoost ?? hasSupplyBoostRegulation,
+    driverLockupRiskIndicated: structuredDriverLockup ?? (driverLockupRiskIndicated || undefined),
+    stallRiskIndicated: structuredStall ?? (stallRiskIndicated || undefined),
+    stallCurrentThresholdA: optMeas(issue, 'stallCurrentThresholdA'),
+    stallRpmThreshold: optMeas(issue, 'stallRpmThreshold'),
+    stallLevel1TimeMs: optMeas(issue, 'stallLevel1TimeMs'),
+    stallLevel2TimeMs: optMeas(issue, 'stallLevel2TimeMs'),
+    stallLevel3TimeMs: optMeas(issue, 'stallLevel3TimeMs'),
+    stallLockoutCountN: optMeas(issue, 'stallLockoutCountN'),
   };
 }
 
