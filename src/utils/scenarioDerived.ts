@@ -6,6 +6,8 @@ import { getPhaseReviewChecklist } from '../data/designReviewEngine';
 import { resolveEngineeringDomain, getDomainPhysics } from './scenarioDomainEngine';
 import { loadDevices, getDeviceCurve } from './deviceLibrary';
 import { readMeasuredNumber } from './unifiedStateExtractor';
+import { mapMeasurementSourceToTraceSource } from './trace';
+import { TraceInputSource } from '../types';
 
 const allText = (issue: IssueInput) => [
   ...(issue.issueCategories || []),
@@ -176,6 +178,57 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   }
 
   // ----------------------------------------------------------------
+  // Trace provenance：把统一工程输入中的逐字段来源一路带到 Pattern Engine。
+  // 规则：结构化 provenance > 工程级 measuredValueSource > 自由文本解析(USER_INPUT) > BENCHMARK假设。
+  const traceSources: Record<string, TraceInputSource> = {};
+  const traceEvidenceIds: Record<string, string> = {};
+  const registerTraceSource = (targetKey: string, sourceKeys: string[], parsedValue: number | undefined) => {
+    const directKey = sourceKeys.find((key) => readMeasuredNumber(issue.measuredValues, key) !== undefined);
+    const provenance = directKey ? issue.measurementProvenance?.[directKey] : undefined;
+    if (provenance?.source) {
+      traceSources[targetKey] = mapMeasurementSourceToTraceSource(provenance.source);
+      if (provenance.evidenceId) traceEvidenceIds[targetKey] = provenance.evidenceId;
+      return;
+    }
+    if (directKey) {
+      traceSources[targetKey] = mapMeasurementSourceToTraceSource(issue.measuredValueSource);
+      return;
+    }
+    if (Number.isFinite(parsedValue)) {
+      traceSources[targetKey] = isBenchmark ? 'ASSUMED_DEFAULT' : 'USER_INPUT';
+      return;
+    }
+    traceSources[targetKey] = isBenchmark ? 'ASSUMED_DEFAULT' : 'USER_INPUT';
+  };
+
+  registerTraceSource('vbusNominal', ['busVoltageNominalV', 'inputVoltageV'], vbusNominal);
+  registerTraceSource('busVoltagePeakV', ['busVoltagePeakV'], vbusMeasuredPeak);
+  registerTraceSource('vdsRating', ['vdsRatingV'], vdsRating);
+  registerTraceSource('rpm', ['rpm'], rpm);
+  registerTraceSource('rotorInertiaKgm2', ['rotorInertiaKgm2'], jInertia);
+  registerTraceSource('cbusUf', ['cBusUf'], cbusUf);
+  registerTraceSource('ambientTempC', ['ambientTempC'], tAmbientC);
+  registerTraceSource('currentPeakA', ['currentPeakA', 'loadCurrentA'], currentPeakA);
+  registerTraceSource('harnessLengthM', ['harnessLengthM'], harnessLengthM);
+  registerTraceSource('deadTimeNs', ['deadTimeNs'], deadTimeNs);
+  registerTraceSource('rgOffOhm', ['rgOffOhm'], rgOffOhm);
+  registerTraceSource('cgdPf', ['cgdPf'], cgdPf);
+  registerTraceSource('dvdtVns', ['dvdtVns'], dvDtVns);
+  registerTraceSource('vthMinV', ['vthMinV'], vthMinV);
+  registerTraceSource('keVkrpm', ['keVkrpm'], keVkrpm);
+  registerTraceSource('thermalResistanceCPerW', ['thermalResistanceCPerW'], rthJc);
+  registerTraceSource('rdsOnMilliOhm', ['rdsOnMilliOhm', 'rdsOn'], rdsOnMilliOhm);
+  ['senseDelayNs','compDelayNs','digitalFilterDelayNs','driverPropDelayNs','gateTurnOffDelayNs','currentFallDelayNs','soaShortCircuitTimeUs'].forEach((key) => {
+    const v = optMeas(issue, key);
+    registerTraceSource(key, [key], v);
+  });
+  registerTraceSource('gateSpikeV', ['gateSpikeV'], optMeas(issue, 'gateSpikeV'));
+  ['loopInductanceNh','diDtANs','cgsPf','sourceInductanceNh','magnetLowTempFluxUpliftPct','pwmSwitchingFreqHz','diodeForwardVoltageV','modulationIndex','rthCaOrJa','switchingTimeNs','qrrNc','powerFactorCosPhi','pulseDurationS','thermalTauS','deratingBasisC','uvloTypicalV','uvloMinV','gateChargeQgNc','bootRefreshWindowUs','bootChargeLoopOhm','capInitialTolerancePct','capEolDeratingPct','capLowTempDeratingPct','easEnergyMj'].forEach((key) => {
+    const v = optMeas(issue, key);
+    if (v !== undefined) registerTraceSource(key, [key], v);
+  });
+
+  // ----------------------------------------------------------------
   // [本次修复新增] P009/P010/P011/P018 此前在引擎里是无条件 triggered:true 的硬编码，
   // 现在改为依据下面这些从自由文本/结构化实测值中抽取出的证据字段来判断是否适用于
   // 当前case。抽取不到证据时保持 undefined——引擎侧会据此不触发，而不是继续拍脑袋硬编码。
@@ -237,10 +290,17 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     gateTurnOffDelayNsOverride: optMeas(issue, 'gateTurnOffDelayNs'),
     currentFallDelayNsOverride: optMeas(issue, 'currentFallDelayNs'),
     soaShortCircuitTimeUsOverride: optMeas(issue, 'soaShortCircuitTimeUs'),
+    sourceInductanceNh: optMeas(issue, 'sourceInductanceNh'),
+    diDtANs: optMeas(issue, 'diDtANs'),
+    loopInductanceNh: optMeas(issue, 'loopInductanceNh'),
+    cgsPf: optMeas(issue, 'cgsPf'),
+    magnetLowTempFluxUpliftPct: optMeas(issue, 'magnetLowTempFluxUpliftPct'),
+    easEnergyMj: easEnergyMj ?? optMeas(issue, 'easEnergyMj'),
+    traceSources,
+    traceEvidenceIds,
     rdsOnCurve,
     crssCurve,
     vthCurve,
-    easEnergyMj,
     gateSpikeMeasuredV: optMeas(issue, 'gateSpikeV'),
     motorSensorType,
     hallFaultRiskIndicated: hallFaultRiskIndicated || undefined,

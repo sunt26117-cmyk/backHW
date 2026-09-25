@@ -21,6 +21,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  FileSearch,
+  AlertCircle,
 } from 'lucide-react';
 import {
   evaluateAllBldcPatterns,
@@ -35,6 +37,7 @@ import { BldcPatternId, ProjectContext, IssueInput, CopilotAnalysisResult } from
 import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
+import TraceDrawer from './TraceDrawer';
 
 interface BldcPatternEngineViewProps {
   context: ProjectContext;
@@ -61,6 +64,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
   }, [derivedParams]);
 
   const [selectedPatternId, setSelectedPatternId] = useState<BldcPatternId>('P001');
+  const [tracePatternId, setTracePatternId] = useState<BldcPatternId | null>(null);
   const [filterMode, setFilterMode] = useState<'ALL' | 'TRIGGERED' | 'VETO' | 'CHECKLIST'>('ALL');
 
   const patternResults = useMemo(() => {
@@ -98,6 +102,17 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
   const activePattern = useMemo(() => {
     return patternResults.find((p) => p.id === selectedPatternId) || patternResults[0];
   }, [patternResults, selectedPatternId]);
+  const tracePattern = useMemo(() => {
+    return tracePatternId ? patternResults.find((p) => p.id === tracePatternId) : undefined;
+  }, [patternResults, tracePatternId]);
+
+  const updateParam = <K extends keyof BldcEvaluationInput>(key: K, value: BldcEvaluationInput[K]) => {
+    setParams((prev) => ({
+      ...prev,
+      [key]: value,
+      traceSources: { ...(prev.traceSources || {}), [String(key)]: 'USER_INPUT' },
+    }));
+  };
 
   const scenarioCategory = issue.issueCategories?.[0] || 'Other';
   const scenarioDomain = useMemo(() => getDomainPhysics(issue), [issue]);
@@ -317,7 +332,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
             <input
               type="number"
               value={params.rpm}
-              onChange={(e) => setParams({ ...params, rpm: Number(e.target.value) })}
+              onChange={(e) => updateParam('rpm', Number(e.target.value))}
               className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
             />
           </div>
@@ -327,7 +342,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
               type="number"
               step="0.1"
               value={params.vbusNominal}
-              onChange={(e) => setParams({ ...params, vbusNominal: Number(e.target.value) })}
+              onChange={(e) => updateParam('vbusNominal', Number(e.target.value))}
               className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
             />
           </div>
@@ -336,7 +351,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
             <input
               type="number"
               value={params.vdsRating}
-              onChange={(e) => setParams({ ...params, vdsRating: Number(e.target.value) })}
+              onChange={(e) => updateParam('vdsRating', Number(e.target.value))}
               className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
             />
           </div>
@@ -345,7 +360,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
             <input
               type="number"
               value={params.cbusUf}
-              onChange={(e) => setParams({ ...params, cbusUf: Number(e.target.value) })}
+              onChange={(e) => updateParam('cbusUf', Number(e.target.value))}
               className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
             />
           </div>
@@ -355,7 +370,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
               type="number"
               step="0.5"
               value={params.dvDtVns}
-              onChange={(e) => setParams({ ...params, dvDtVns: Number(e.target.value) })}
+              onChange={(e) => updateParam('dvDtVns', Number(e.target.value))}
               className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
             />
           </div>
@@ -364,7 +379,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
             <input
               type="number"
               value={params.deadTimeNs}
-              onChange={(e) => setParams({ ...params, deadTimeNs: Number(e.target.value) })}
+              onChange={(e) => updateParam('deadTimeNs', Number(e.target.value))}
               className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700"
             />
           </div>
@@ -382,26 +397,31 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
             {filteredPatterns.map((pattern) => {
               const isSelected = pattern.id === selectedPatternId;
               return (
-                <button
+                <div
                   key={pattern.id}
-                  onClick={() => setSelectedPatternId(pattern.id)}
-                  className={`w-full p-3 rounded-lg border text-left transition cursor-pointer flex items-start justify-between gap-2 ${
+                  className={`rounded-lg border transition flex items-stretch gap-1 ${
                     isSelected
                       ? 'bg-blue-600/20 border-blue-500 text-white'
                       : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800/60'
                   }`}
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-cyan-400">{pattern.id}</span>
-                      <span className="text-xs font-medium">{pattern.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPatternId(pattern.id)}
+                    className="min-w-0 flex-1 p-3 text-left cursor-pointer"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-cyan-400">{pattern.id}</span>
+                        <span className="text-xs font-medium">{pattern.name}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 line-clamp-1">
+                        {pattern.corePhysicalChain}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-400 line-clamp-1">
-                      {pattern.corePhysicalChain}
-                    </div>
-                  </div>
+                  </button>
 
-                  <div className="shrink-0 flex flex-col items-end gap-1">
+                  <div className="shrink-0 flex flex-col items-end justify-center gap-1 pr-2 py-2">
                     {pattern.patternKind === 'CHECKLIST' ? (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                         检查清单
@@ -419,11 +439,19 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
                         SAFE
                       </span>
                     )}
-                    <span className="text-[10px] font-mono text-slate-500">
-                      {pattern.evidenceType}
-                    </span>
+                    <span className="text-[10px] font-mono text-slate-500">{pattern.evidenceType}</span>
+                    {pattern.trace?.length ? (
+                      <button
+                        type="button"
+                        onClick={() => setTracePatternId(pattern.id)}
+                        className="inline-flex items-center gap-1 rounded border border-cyan-700/50 bg-cyan-950/30 px-1.5 py-0.5 text-[9px] font-semibold text-cyan-300 hover:bg-cyan-900/40 cursor-pointer"
+                        title="查看输入→公式→结果→阈值→Verdict"
+                      >
+                        <FileSearch className="h-3 w-3" /> Trace
+                      </button>
+                    ) : null}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -447,6 +475,11 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
                 <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">
                   置信度: {activePattern.confidence}
                 </span>
+                {activePattern.trace?.length ? (
+                  <button type="button" onClick={() => setTracePatternId(activePattern.id)} className="inline-flex items-center gap-1.5 rounded border border-cyan-700/50 bg-cyan-950/30 px-2 py-1 text-[10px] font-semibold text-cyan-300 hover:bg-cyan-900/40 cursor-pointer">
+                    <FileSearch className="h-3 w-3" /> 查看 Trace
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -461,6 +494,12 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
               </div>
             )}
           </div>
+          {activePattern.trace?.some((node) => node.degraded) && (
+            <div className="rounded-lg border border-amber-700/60 bg-amber-950/20 p-3 text-xs text-amber-200 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-amber-400" />
+              <div><b className="text-amber-300">Trace 含非实测输入：</b>请点击“查看 Trace”逐项确认哪些数字来自假设默认值/规格常量。该标记不是说公式失效，而是提醒结论证据等级受输入来源限制。</div>
+            </div>
+          )}
 
           {/* 核心物理链条 */}
           <div>
@@ -555,6 +594,12 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
           </div>
         </div>
       </div>
+      <TraceDrawer
+        open={!!tracePatternId && !!tracePattern?.trace?.length}
+        traces={tracePattern?.trace || []}
+        title={tracePattern ? `Trace · ${tracePattern.id} · ${tracePattern.name}` : 'Trace'}
+        onClose={() => setTracePatternId(null)}
+      />
     </div>
   );
 };

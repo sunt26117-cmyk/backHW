@@ -606,6 +606,34 @@ export interface DebateSimulationResult {
   disclaimer: string;
 }
 
+export type TraceInputSource = 'MEASURED' | 'IMPORTED' | 'USER_INPUT' | 'ASSUMED_DEFAULT' | 'SPEC_CONSTANT';
+
+export interface TraceInput {
+  key: string;
+  label: string;
+  value: number | string;
+  unit?: string;
+  source: TraceInputSource;
+  note?: string;
+  /** 当 source=IMPORTED 时，可回链到 waveformStorage 中的 evidenceId。 */
+  evidenceId?: string;
+}
+
+export interface TraceNode {
+  id: string;
+  title: string;
+  value: number | string;
+  unit?: string;
+  inputs: TraceInput[];
+  formula?: string;
+  standardRef?: string;
+  threshold?: { value: number; unit: string; label: string };
+  verdict?: 'PASS' | 'MARGINAL' | 'FAIL' | 'CRITICAL' | 'INFO';
+  /** 只要直接参与该结论的输入中包含 ASSUMED_DEFAULT / SPEC_CONSTANT，就降级。 */
+  degraded: boolean;
+  children?: TraceNode[];
+}
+
 export interface CopilotAnalysisResult {
   coreConclusion: {
     problemSummary: string;

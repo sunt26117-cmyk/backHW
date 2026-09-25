@@ -33,6 +33,20 @@ export function sanitizePatternOutput<T>(p: T): T {
     }
     if (typeof q.vetoReason === 'string') q.vetoReason = sanitizeText(q.vetoReason);
     if (typeof q.corePhysicalChain === 'string') q.corePhysicalChain = sanitizeText(q.corePhysicalChain);
+    if (Array.isArray(q.trace)) {
+      const sanitizeTraceNode = (node: any) => {
+        if (!node || typeof node !== 'object') return;
+        if (typeof node.value === 'number' && !Number.isFinite(node.value)) node.value = UNKNOWN;
+        if (Array.isArray(node.inputs)) {
+          node.inputs.forEach((input: any) => {
+            if (typeof input?.value === 'number' && !Number.isFinite(input.value)) input.value = UNKNOWN;
+            if (typeof input?.note === 'string') input.note = sanitizeText(input.note);
+          });
+        }
+        if (Array.isArray(node.children)) node.children.forEach(sanitizeTraceNode);
+      };
+      q.trace.forEach(sanitizeTraceNode);
+    }
   }
   return p;
 }

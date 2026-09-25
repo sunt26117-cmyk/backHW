@@ -37,10 +37,14 @@ import {
   PatternOutputItem,
   EvidenceType,
   ConfidenceLevel,
+  TraceInputSource,
+  TraceInput,
+  TraceNode,
 } from '../types';
 import { linearInterp } from '../utils/deviceLibrary';
 import { calculateBusPumping, checkMillerRisk } from '../utils/motorPhysicsEngine';
 import { sanitizePatternOutput } from '../utils/nanGuard';
+import { makeTraceInput, makeTraceNode } from '../utils/trace';
 
 export interface BldcEvaluationInput {
   vbusNominal: number;      // V
@@ -123,6 +127,10 @@ export interface BldcEvaluationInput {
   // P014
   loopInductanceNh?: number;
   diDtANs?: number;
+  /** 由 scenarioDerived 从 measurementProvenance 映射；Pattern 页面本地调谐时可覆盖为 USER_INPUT。 */
+  traceSources?: Record<string, TraceInputSource>;
+  /** 导入波形的 evidenceId，用于 Trace 从数值回链到 WaveformPlot。 */
+  traceEvidenceIds?: Record<string, string>;
 
   // P016（低压 MOSFET 通常不给短路耐受时间，此项默认值仅供参考，务必用 SOA 能量法复核）
   senseDelayNsOverride?: number;
@@ -161,6 +169,29 @@ export interface BldcEvaluationInput {
   stallRiskIndicated?: boolean;
 }
 
+function traceSource(input: BldcEvaluationInput, key: string, assumed = false): TraceInputSource {
+  return assumed ? 'ASSUMED_DEFAULT' : (input.traceSources?.[key] || 'USER_INPUT');
+}
+
+function traceEvidenceId(input: BldcEvaluationInput, key: string): string | undefined {
+  return input.traceEvidenceIds?.[key];
+}
+
+function traceValue(value: number | undefined, missingNote = '未提供'): number | string {
+  return value !== undefined && Number.isFinite(value) ? value : '缺输入';
+}
+
+function traceVerdict(
+  critical: boolean,
+  value: number | undefined,
+  threshold: number | undefined,
+  marginalRatio = 0.8,
+): TraceNode['verdict'] {
+  if (critical) return 'CRITICAL';
+  if (Number.isFinite(value) && Number.isFinite(threshold) && (value as number) >= (threshold as number) * marginalRatio) return 'MARGINAL';
+  return 'PASS';
+}
+
 function pushAssumptionNote(
   calculatedValues: Record<string, string | number>,
   log: string[]
@@ -168,6 +199,28 @@ function pushAssumptionNote(
   if (log.length > 0) {
     calculatedValues['⚠ 使用的假设默认值(未提供实测/器件参数，仅供数量级参考，不应单独支撑一票否决)'] = log.join('；');
   }
+}
+
+function makeLogicalTraceNode(args: {
+  id: string;
+  title: string;
+  value: string;
+  inputs: TraceInput[];
+  formula: string;
+  standardRef?: string;
+  verdict: TraceNode['verdict'];
+  degradedOverride?: boolean;
+}): TraceNode {
+  const node = makeTraceNode({
+    id: args.id,
+    title: args.title,
+    value: args.value,
+    inputs: args.inputs,
+    formula: args.formula,
+    standardRef: args.standardRef,
+    verdict: args.verdict,
+  });
+  return args.degradedOverride === undefined ? node : { ...node, degraded: args.degradedOverride };
 }
 
 export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutputItem[] {
@@ -245,12 +298,32 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p001CalculatedValues, p001Assumptions);
 
+  const p001Trace = makeTraceNode({
+    id: 'bldcPattern:P001.peak',
+    title: '母线泵升最坏工况峰值',
+    value: traceValue(theoreticalVbusPeakWorstCase),
+    unit: 'V',
+    inputs: [
+      makeTraceInput('vbusNominal', '母线标称电压', vbusNominalSafe, traceSource(input, 'vbusNominal', vbusNominalWasAssumed), 'V', vbusNominalWasAssumed ? '未提供，按13.5V作为数量级参考；不是实测值' : undefined, traceEvidenceId(input, 'vbusNominal')),
+      makeTraceInput('cbusUf', 'DC-Link 母线电容', cbusUfEffective, traceSource(input, 'cbusUf', !Number.isFinite(input.cbusUf) || input.cbusUf <= 0), 'μF', (!Number.isFinite(input.cbusUf) || input.cbusUf <= 0) ? '未提供，按470μF假设' : undefined, traceEvidenceId(input, 'cbusUf')),
+      makeTraceInput('rotorInertiaKgm2', '转子等效惯量 J', traceValue(input.jInertia), traceSource(input, 'rotorInertiaKgm2', !Number.isFinite(input.jInertia)), 'kg·m²', !Number.isFinite(input.jInertia) ? '缺少惯量时共享公式无法形成有效理论泵升值' : undefined, traceEvidenceId(input, 'rotorInertiaKgm2')),
+      makeTraceInput('rpm', '电机转速', traceValue(input.rpm), traceSource(input, 'rpm', !Number.isFinite(input.rpm)), 'rpm', undefined, traceEvidenceId(input, 'rpm')),
+      makeTraceInput('currentPeakA', '峰值电流', Number.isFinite(input.currentPeakA) ? input.currentPeakA : 0, traceSource(input, 'currentPeakA', !Number.isFinite(input.currentPeakA)), 'A', !Number.isFinite(input.currentPeakA) ? '缺失时当前共享函数按0A防止NaN；会低估线束电感储能贡献' : undefined, traceEvidenceId(input, 'currentPeakA')),
+      makeTraceInput('loopInductanceNh', '回路寄生电感', loopInductanceUh * 1000, traceSource(input, 'loopInductanceNh', loopInductanceUh === 0), 'nH', loopInductanceUh === 0 ? '未提供，未计入0.5·L·I²线束储能；该假设可能低估尖峰' : undefined, traceEvidenceId(input, 'loopInductanceNh')),
+    ],
+    formula: 'E_mech=0.5·J·ω²；E_elec=η·E_mech（最坏 η=1.0）；Vbus_peak 由 calculateBusPumping() 根据 Cbus 与可用能量求解',
+    standardRef: '功率器件 VDS 绝对最大额定值（以实际器件数据手册为准）',
+    threshold: { value: input.vdsRating, unit: 'V', label: 'MOSFET VDS 额定耐压' },
+    verdict: traceVerdict(p001Veto, theoreticalVbusPeakWorstCase, input.vdsRating, 0.9),
+  });
+
   patterns.push({
     id: 'P001',
     name: '急停→母线泵升 (DC-Link Overvoltage on E-Stop)',
     triggered: input.rpm >= 1500 && theoreticalVbusPeakTypical > vbusNominalSafe * 1.15,
     corePhysicalChain: '转子动能 E=½Jω² → 回馈制动电流 → DC-Link去耦电容充电 → 母线Vbus抬升 → MOSFET击穿与雪崩应力。注意：本模型未包含前端反向阻断路径判定（若无反灌路径，母线可能被电池钳位而非按此能量平衡自由泵升）与损耗项(ESR/导通/铜耗)，仅给出理论上界',
     calculatedValues: p001CalculatedValues,
+    trace: [p001Trace],
     riskLevel: p001Veto ? 'High' : (input.vdsRating - theoreticalVbusPeakWorstCase < 5 ? 'Medium-High' : 'Low'),
     confidence: p001Assumptions.length > 0 ? 'LOW' : (hasMeasuredVbus ? 'HIGH' : 'MEDIUM'),
     evidenceType: hasMeasuredVbus ? 'MEASURED' : 'CALCULATED',
@@ -320,12 +393,31 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p002CalculatedValues, p002Assumptions);
 
+  const p002Trace = makeTraceNode({
+    id: 'bldcPattern:P002.bemfLowTempPeak',
+    title: '低温最坏反电动势峰值',
+    value: traceValue(backEmfPeakLowTempWorstCase),
+    unit: 'V',
+    inputs: [
+      makeTraceInput('keVkrpm', '反电动势常数 Ke', ke, traceSource(input, 'keVkrpm', !hasProvidedKe), 'V/krpm', !hasProvidedKe ? '未提供，按4.2V/krpm假设' : undefined, traceEvidenceId(input, 'keVkrpm')),
+      makeTraceInput('rpm', '电机转速', traceValue(input.rpm), traceSource(input, 'rpm', !Number.isFinite(input.rpm)), 'rpm', undefined, traceEvidenceId(input, 'rpm')),
+      makeTraceInput('keConvention', 'Ke 标定约定', keConvention, traceSource(input, 'keConvention', input.keConvention === undefined), undefined, input.keConvention === undefined ? '未声明，默认相电压 RMS / 正弦反电势约定' : undefined),
+      makeTraceInput('magnetLowTempFluxUpliftPct', '低温磁通提升系数', lowTempUpliftPct, traceSource(input, 'magnetLowTempFluxUpliftPct', input.magnetLowTempFluxUpliftPct === undefined), '%', input.magnetLowTempFluxUpliftPct === undefined ? '未提供，按7%假设' : undefined, traceEvidenceId(input, 'magnetLowTempFluxUpliftPct')),
+      makeTraceInput('vbusNominal', '母线标称电压', vbusNominalSafe, traceSource(input, 'vbusNominal', vbusNominalWasAssumed), 'V', vbusNominalWasAssumed ? '未提供，按13.5V假设，仅用于裕量计算' : undefined, traceEvidenceId(input, 'vbusNominal')),
+    ],
+    formula: 'BEMF_pk = Ke·rpm/1000·折算系数；低温最坏值=BEMF_pk·(1+磁通提升%)',
+    standardRef: '电机 Ke 标定约定 + 功率器件 VDS 绝对最大额定值',
+    threshold: { value: input.vdsRating * 0.95, unit: 'V', label: 'VDS 95% 安全红线' },
+    verdict: traceVerdict(p002Veto, backEmfPeakLowTempWorstCase, input.vdsRating, 0.8),
+  });
+
   patterns.push({
     id: 'P002',
     name: '高转速→反电动势过压与失控回馈风险 (Back-EMF Overvoltage)',
     triggered: p002Triggered,
     corePhysicalChain: '高转速RPM → 线圈反电动势Back-EMF超过母线电压 → PWM失控全开三相桥失步整流 → 母线失控反向泵升。永磁体退磁温度系数为负，最坏反电势工况通常出现在低温而非高温',
     calculatedValues: p002CalculatedValues,
+    trace: [p002Trace],
     riskLevel: backEmfPeakLowTempWorstCase >= vbusNominalSafe ? 'Medium-High' : 'Low',
     confidence: p002Assumptions.length > 0 ? 'LOW' : 'MEDIUM',
     evidenceType: 'CALCULATED',
@@ -407,12 +499,35 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   p003CalculatedValues[hasGateSpikeMeasured ? '判据取用值(实测优先) Vgs_total (V)' : '判据取用值(无实测，用理论估算) Vgs_total (V)'] = Number(vgateInducedTotal.toFixed(2));
   p003CalculatedValues['门极安全裕量 Margin (V)'] = Number(millerMargin.toFixed(2));
 
+  const p003Trace = makeTraceNode({
+    id: 'bldcPattern:P003.vgsInduced',
+    title: '米勒误导通判据取用 Vgs',
+    value: traceValue(vgateInducedTotal),
+    unit: 'V',
+    inputs: [
+      makeTraceInput('dvdtVns', '开关节点 dv/dt', traceValue(input.dvDtVns), traceSource(input, 'dvdtVns', !Number.isFinite(input.dvDtVns)), 'V/ns', undefined, traceEvidenceId(input, 'dvdtVns')),
+      makeTraceInput('cgdPf', 'Cgd / Crss', traceValue(cgdPfEff), traceSource(input, 'cgdPf', Boolean(input.crssCurve?.length && input.crssCurve.length >= 2)), 'pF', input.crssCurve?.length && input.crssCurve.length >= 2 ? '由器件库 Crss 曲线按当前 Vbus 插值' : !Number.isFinite(input.cgdPf) ? '未提供，当前模型仅能给出缺输入保护' : undefined, traceEvidenceId(input, 'cgdPf')),
+      ...(input.cgsPf !== undefined ? [makeTraceInput('cgsPf', '栅源电容 Cgs', input.cgsPf, traceSource(input, 'cgsPf'), 'pF', undefined, traceEvidenceId(input, 'cgsPf'))] : [makeTraceInput('cgsPf', '栅源电容 Cgs', '缺输入', 'ASSUMED_DEFAULT', 'pF', '未提供；当前只能使用阻性上界')]),
+      makeTraceInput('rgOffOhm', '关断回路总电阻 Rg_off', traceValue(input.rgOffOhm), traceSource(input, 'rgOffOhm', !Number.isFinite(input.rgOffOhm)), 'Ω', undefined, traceEvidenceId(input, 'rgOffOhm')),
+      makeTraceInput('vbusNominal', '母线电压', vbusNominalSafe, traceSource(input, 'vbusNominal', vbusNominalWasAssumed), 'V', vbusNominalWasAssumed ? '未提供，按13.5V假设' : undefined, traceEvidenceId(input, 'vbusNominal')),
+      makeTraceInput('sourceInductanceNh', '源极寄生电感', traceValue(input.sourceInductanceNh), traceSource(input, 'sourceInductanceNh', input.sourceInductanceNh === undefined), 'nH', input.sourceInductanceNh === undefined ? '未提供，理论源极电感过冲项不可单独核实' : undefined, traceEvidenceId(input, 'sourceInductanceNh')),
+      makeTraceInput('diDtANs', 'di/dt', traceValue(input.diDtANs), traceSource(input, 'diDtANs', input.diDtANs === undefined), 'A/ns', input.diDtANs === undefined ? '未提供，源极电感过冲项缺输入' : undefined, traceEvidenceId(input, 'diDtANs')),
+      makeTraceInput('gateSpikeV', '门极 Vgs 实测尖峰', hasGateSpikeMeasured ? input.gateSpikeMeasuredV! : '未导入', hasGateSpikeMeasured ? traceSource(input, 'gateSpikeV') : 'USER_INPUT', 'V', hasGateSpikeMeasured ? undefined : '没有实测门极波形，判据取理论模型值', traceEvidenceId(input, 'gateSpikeV')),
+      makeTraceInput('vthMinV', 'MOSFET Vth 最小值', vthMinVEff, traceSource(input, 'vthMinV', Boolean(input.vthCurve?.length && input.vthCurve.length >= 2)), 'V', input.vthCurve?.length && input.vthCurve.length >= 2 ? '由器件库 Vth 曲线 @25℃ 插值' : undefined, traceEvidenceId(input, 'vthMinV')),
+    ],
+    formula: 'I_miller=Cgd·dv/dt；Vgs_induced=min(阻性界, 容性分压界)+L_source·di/dt；有实测 Vgs 时以实测优先',
+    standardRef: 'MOSFET 栅极驱动数据手册 / 实测 Vgs 过冲边界',
+    threshold: { value: vthMinVEff, unit: 'V', label: 'Vth 最小开通阈值' },
+    verdict: p003ShootThroughRisk ? 'CRITICAL' : (vgateInducedTotal >= vthMinVEff * 0.8 ? 'MARGINAL' : 'PASS'),
+  });
+
   patterns.push({
     id: 'P003',
     name: '高dv/dt→门极米勒效应误导通 (Miller Effect Induced False Turn-On)',
     triggered: input.dvDtVns >= 4.0 || input.rgOffOhm >= 3.0 || p003ShootThroughRisk,
     corePhysicalChain: '开关管对管开通 → 桥臂中点高dv/dt → 经Cgd耦合米勒位移电流 → 流经关断电阻Rg_off → 门极抬升Vgs > Vth → 同桥臂瞬态直通炸机。真实感应电压是阻性界与容性分压界中的较小值，仅算阻性界会在开关沿较短时高估；有示波器实测Vgs尖峰时以实测为准',
     calculatedValues: p003CalculatedValues,
+    trace: [p003Trace],
     riskLevel: p003ShootThroughRisk ? 'High' : (millerMargin < 0.5 ? 'Medium-High' : 'Low'),
     confidence: hasGateSpikeMeasured ? 'HIGH' : (vgateInducedCapacitiveBound !== undefined ? 'HIGH' : 'MEDIUM'),
     evidenceType: hasGateSpikeMeasured ? 'MEASURED' : 'CALCULATED',
@@ -467,12 +582,30 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p004CalculatedValues, p004Assumptions);
 
+  const p004Trace = makeTraceNode({
+    id: 'bldcPattern:P004.deadTimeMargin',
+    title: '最坏工况所需死区与当前死区裕量',
+    value: traceValue(deadTimeMarginWorst),
+    unit: 'ns',
+    inputs: [
+      makeTraceInput('deadTimeNs', '当前设定死区时间', traceValue(input.deadTimeNs), traceSource(input, 'deadTimeNs'), 'ns', undefined, traceEvidenceId(input, 'deadTimeNs')),
+      makeTraceInput('turnOffDelayMaxNs', '关断延迟最坏值', turnOffDelayMax, traceSource(input, 'turnOffDelayMaxNs', input.turnOffDelayMaxNs === undefined), 'ns', input.turnOffDelayMaxNs === undefined ? '未提供，假设典型值×1.5' : undefined, traceEvidenceId(input, 'turnOffDelayMaxNs')),
+      makeTraceInput('fallTimeMaxNs', '下降时间最坏值', fallTimeMax, traceSource(input, 'fallTimeMaxNs', input.fallTimeMaxNs === undefined), 'ns', input.fallTimeMaxNs === undefined ? '未提供，假设典型值×1.6' : undefined, traceEvidenceId(input, 'fallTimeMaxNs')),
+      makeTraceInput('driverPropMismatchMaxNs', '驱动传播延迟失配最坏值', driverPropMismatchMax, traceSource(input, 'driverPropMismatchMaxNs', input.driverPropMismatchMaxNs === undefined), 'ns', input.driverPropMismatchMaxNs === undefined ? '未提供，假设典型值×1.4' : undefined, traceEvidenceId(input, 'driverPropMismatchMaxNs')),
+    ],
+    formula: 'DeadTime Margin = DeadTime − (t_d(off,max) + t_f,max + PropagationMismatch,max)',
+    standardRef: '驱动器传播延迟/功率MOSFET关断时序 datasheet；项目死区设计规范',
+    threshold: { value: 0, unit: 'ns', label: '最坏死区裕量边界' },
+    verdict: p004Veto && p004Assumptions.length === 0 ? 'CRITICAL' : (deadTimeMarginWorst < 40 ? 'MARGINAL' : 'PASS'),
+  });
+
   patterns.push({
     id: 'P004',
     name: '死区过短→桥臂瞬态直通风险 (Dead-Time Too Short: Shoot-Through)',
     triggered: input.deadTimeNs <= 200,
     corePhysicalChain: '死区设置过小 → 上下管关断延迟未完全结束即开启对管 → 半桥瞬态直通 → 脉冲短路电流击穿MOSFET',
     calculatedValues: p004CalculatedValues,
+    trace: [p004Trace],
     riskLevel: p004Veto ? 'High' : (deadTimeMarginWorst < 40 ? 'Medium-High' : 'Low'),
     confidence: p004Assumptions.length > 0 ? 'LOW' : 'HIGH',
     evidenceType: 'CALCULATED',
@@ -519,12 +652,31 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p005CalculatedValues, p005Assumptions);
 
+  const p005Trace = makeTraceNode({
+    id: 'bldcPattern:P005.deadTimeDistortion',
+    title: '死区引起的相电压误差占比',
+    value: traceValue(deadTimeErrorRelativePct),
+    unit: '%',
+    inputs: [
+      makeTraceInput('deadTimeNs', '死区时间', traceValue(input.deadTimeNs), traceSource(input, 'deadTimeNs'), 'ns', undefined, traceEvidenceId(input, 'deadTimeNs')),
+      makeTraceInput('pwmSwitchingFreqHz', 'PWM开关频率', pwmFreqHz, traceSource(input, 'pwmSwitchingFreqHz', input.pwmSwitchingFreqHz === undefined), 'Hz', input.pwmSwitchingFreqHz === undefined ? '未提供，假设20kHz' : undefined, traceEvidenceId(input, 'pwmSwitchingFreqHz')),
+      makeTraceInput('diodeForwardVoltageV', '体二极管正向压降', diodeVf, traceSource(input, 'diodeForwardVoltageV', input.diodeForwardVoltageV === undefined), 'V', input.diodeForwardVoltageV === undefined ? '未提供，假设1.0V' : undefined, traceEvidenceId(input, 'diodeForwardVoltageV')),
+      makeTraceInput('vbusNominal', '母线标称电压', vbusNominalSafe, traceSource(input, 'vbusNominal', vbusNominalWasAssumed), 'V', vbusNominalWasAssumed ? '未提供，按13.5V假设' : undefined, traceEvidenceId(input, 'vbusNominal')),
+      makeTraceInput('modulationIndex', '调制比 m', modulationIndex, traceSource(input, 'modulationIndex', input.modulationIndex === undefined), undefined, input.modulationIndex === undefined ? '未提供，假设m=1.0；低调制比时相对误差会被放大' : undefined, traceEvidenceId(input, 'modulationIndex')),
+    ],
+    formula: 'ΔV = (DeadTime / PWM Period)·Vf；Relative Error = ΔV / (Vbus·m)',
+    standardRef: 'PWM dead-time compensation design；相电压非线性误差预算',
+    threshold: { value: 5, unit: '%', label: '相对基波电压误差关注阈值' },
+    verdict: deadTimeErrorRelativePct >= 5 ? 'MARGINAL' : 'PASS',
+  });
+
   patterns.push({
     id: 'P005',
     name: '死区过长→低转速相电流与换相畸变 (Excessive Dead-Time Commutation Distortion)',
     triggered: p005Triggered,
     corePhysicalChain: '死区时间过大 → 寄生体二极管导通时间过长 → 输出相电压非线性压降误差 → 相对基波电压(随调制比/转速下降而减小)的占比在低速时被放大 → 低速过零畸变、转矩脉动与效率降低',
     calculatedValues: p005CalculatedValues,
+    trace: [p005Trace],
     riskLevel: p005Triggered || deadTimeErrorRelativePct > 5 ? 'Medium' : 'Low',
     confidence: p005Assumptions.length > 0 ? 'LOW' : 'MEDIUM',
     evidenceType: 'CALCULATED',
@@ -614,12 +766,33 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p006CalculatedValues, p006Assumptions);
 
+  const p006Trace = makeTraceNode({
+    id: 'bldcPattern:P006.tjSteady',
+    title: '热电正反馈迭代后的结温 Tj',
+    value: traceValue(tjEstimated),
+    unit: '℃',
+    inputs: [
+      makeTraceInput('currentPeakA', '相电流峰值', iPeak, traceSource(input, 'currentPeakA', input.currentPeakA === undefined), 'A', input.currentPeakA === undefined ? '未提供，假设25A' : undefined, traceEvidenceId(input, 'currentPeakA')),
+      makeTraceInput('rdsOnMilliOhm', '25℃ Rds(on)', rdsOn25, traceSource(input, 'rdsOnMilliOhm', input.rdsOnMilliOhm === undefined), 'mΩ', input.rdsOnMilliOhm === undefined ? '未提供，假设3.5mΩ' : undefined, traceEvidenceId(input, 'rdsOnMilliOhm')),
+      makeTraceInput('rthJc', 'Rth(j-c)', rthJc, traceSource(input, 'rthJc', input.rthJc === undefined), '℃/W', input.rthJc === undefined ? '未提供，假设1.8℃/W' : undefined, traceEvidenceId(input, 'rthJc')),
+      makeTraceInput('rthCaOrJa', 'Rth(c-a / j-a)', rthCaOrJa, traceSource(input, 'rthCaOrJa', !hasRthCa), '℃/W', !hasRthCa ? '未提供，假设12.0℃/W；这是当前结论最大不确定源' : undefined, traceEvidenceId(input, 'rthCaOrJa')),
+      makeTraceInput('tAmbientC', '环境温度', traceValue(input.tAmbientC), traceSource(input, 'tAmbientC'), '℃', undefined, traceEvidenceId(input, 'tAmbientC')),
+      makeTraceInput('pwmSwitchingFreqHz', 'PWM开关频率', swFreq, traceSource(input, 'pwmSwitchingFreqHz', input.pwmSwitchingFreqHz === undefined), 'Hz', input.pwmSwitchingFreqHz === undefined ? '未提供，假设20kHz' : undefined, traceEvidenceId(input, 'pwmSwitchingFreqHz')),
+      makeTraceInput('switchingTimeNs', '开关重叠时间', swTimeNs, traceSource(input, 'switchingTimeNs', input.switchingTimeNs === undefined), 'ns', input.switchingTimeNs === undefined ? '未提供，假设55ns' : undefined, traceEvidenceId(input, 'switchingTimeNs')),
+    ],
+    formula: 'Pcond=Idevice,rms²·Rds(Tj)；Psw≈0.5·Vbus·Iavg·t_sw·fsw+P_Qrr；Tj=Ta+(Pcond+Psw)·(RthJC+RthCA)，迭代至收敛',
+    standardRef: 'MOSFET Rds(on)(Tj) / thermal resistance datasheet；项目 Tj limit',
+    threshold: { value: 150, unit: '℃', label: '绝对最大结温' },
+    verdict: p006ThermalRunaway || (tjEstimated >= 150 && !p006CriticalAssumption) ? 'CRITICAL' : (tjEstimated >= 125 ? 'MARGINAL' : 'PASS'),
+  });
+
   patterns.push({
     id: 'P006',
     name: '大电流→MOSFET热电正反馈与结温过热 (MOSFET Thermal Runaway & Self-Heating)',
     triggered: tjEstimated >= 115 || p006ThermalRunaway,
     corePhysicalChain: '连续堵转或重载大电流 → 导通损耗增加 → 结温Tj上升 → 硅材料载流子迁移率下降使Rds(on)正温度系数增大 → 损耗进一步恶化。本模型用不动点迭代表达这一正反馈，不收敛即判定为热失控特征，而非只算一次就下结论',
     calculatedValues: p006CalculatedValues,
+    trace: [p006Trace],
     riskLevel: p006ThermalRunaway ? 'High' : (p006Overheat ? 'High' : (tjEstimated >= 125 ? 'Medium-High' : 'Low')),
     confidence: p006Assumptions.length > 0 ? 'LOW' : 'HIGH',
     evidenceType: 'CALCULATED',
@@ -676,12 +849,30 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   }
   pushAssumptionNote(p007CalculatedValues, p007Assumptions);
 
+  const p007Trace = makeTraceNode({
+    id: 'bldcPattern:P007.thermalMargins',
+    title: '热安全综合裕量',
+    value: traceValue(deratingMargin),
+    unit: '℃',
+    inputs: [
+      makeTraceInput('tjEstimated', 'P006 迭代结温', traceValue(tjEstimated), traceSource(input, 'tjEstimated'), '℃', '由同一确定性热模型计算，不重复造一套热公式'),
+      makeTraceInput('deratingBasisC', '车规降额基准温度', deratingBasisC, traceSource(input, 'deratingBasisC', input.deratingBasisC === undefined), '℃', input.deratingBasisC === undefined ? '未提供，假设125℃' : undefined, traceEvidenceId(input, 'deratingBasisC')),
+      makeTraceInput('pulseDurationS', '脉冲持续时间', traceValue(input.pulseDurationS), traceSource(input, 'pulseDurationS', input.pulseDurationS === undefined), 's', input.pulseDurationS === undefined ? '未提供，瞬态裕量退化为稳态-15℃假设' : undefined, traceEvidenceId(input, 'pulseDurationS')),
+      makeTraceInput('thermalTauS', '热时间常数', traceValue(input.thermalTauS), traceSource(input, 'thermalTauS', input.thermalTauS === undefined), 's', input.thermalTauS === undefined ? '未提供，无法用真实Zth(t)核验脉冲温升' : undefined, traceEvidenceId(input, 'thermalTauS')),
+    ],
+    formula: 'Steady Margin=Tj_max−Tj；Transient Margin=Steady Margin−P·Rth·(1−e^(−t/τ))（缺t/τ时采用明确标注的15℃参考假设）；Derating Margin=T_derating−Tj',
+    standardRef: '器件绝对最大结温；项目车规降额温度窗口；器件 Zth(t) datasheet',
+    threshold: { value: 0, unit: '℃', label: '降额裕量边界' },
+    verdict: deratingMargin < 0 ? 'MARGINAL' : (deratingMargin < 15 ? 'MARGINAL' : 'PASS'),
+  });
+
   patterns.push({
     id: 'P007',
     name: '高温→多工况热安全综合裕量 (Multi-Domain Thermal Safety Margins)',
     triggered: Number.isFinite(tjEstimated) && tjEstimated >= 90,
     corePhysicalChain: '不能仅判断 Tj < TjMax 绝对值，必须综合评估稳态、脉冲瞬态、SOA与车规长期降额裕量',
     calculatedValues: p007CalculatedValues,
+    trace: [p007Trace],
     riskLevel: deratingMargin < 0 ? 'Medium-High' : 'Low',
     confidence: p007Assumptions.length > 0 ? 'LOW' : 'HIGH',
     evidenceType: 'CALCULATED',
@@ -719,12 +910,29 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p008CalculatedValues, p008Assumptions);
 
+  const p008Trace = makeTraceNode({
+    id: 'bldcPattern:P008.resonanceFrequency',
+    title: '线束寄生 LC 谐振频率',
+    value: traceValue(fRingMHz),
+    unit: 'MHz',
+    inputs: [
+      makeTraceInput('harnessLengthM', '线束总长度', harnessLength, traceSource(input, 'harnessLengthM', !Number.isFinite(input.harnessLengthM) || input.harnessLengthM <= 0), 'm', (!Number.isFinite(input.harnessLengthM) || input.harnessLengthM <= 0) ? '未提供，假设1.8m' : undefined, traceEvidenceId(input, 'harnessLengthM')),
+      makeTraceInput('harnessInductancePerM', '单位长度回路电感', 1.2, 'ASSUMED_DEFAULT', 'μH/m', '当前模型的几何经验假设；应通过线束结构/实测校正'),
+      makeTraceInput('parasiticCapPf', '回路寄生电容', parasiticCapPf, traceSource(input, 'parasiticCapPf', input.parasiticCapPf === undefined), 'pF', input.parasiticCapPf === undefined ? '未提供，假设100pF' : undefined, traceEvidenceId(input, 'parasiticCapPf')),
+    ],
+    formula: 'L_harness≈1.2μH/m·Length；f_ring=1/(2π√(L·C))',
+    standardRef: 'CISPR 25 频谱预扫描；实际线束/PCB寄生参数应由结构与实测校正',
+    threshold: { value: 1.2, unit: 'm', label: '当前 Pattern 适用性线束长度阈值' },
+    verdict: p008Triggered ? 'MARGINAL' : 'INFO',
+  });
+
   patterns.push({
     id: 'P008',
     name: '长线束→EMI高频谐振与辐射超标 (Harness Parasitic Inductance & Common-Mode EMI)',
     triggered: p008Triggered,
     corePhysicalChain: 'EMC Root Cause Tree: Source(开关节点高频dv/dt谐波) → Coupling(线束寄生电感L与对地杂散电容C) → Path(长供电线束成为发射天线) → Victim(车载FM/DAB天线CISPR 25 Class 5超标)',
     calculatedValues: p008CalculatedValues,
+    trace: [p008Trace],
     riskLevel: p008Triggered ? 'Medium-High' : 'Low',
     confidence: p008Assumptions.length > 0 ? 'LOW' : 'MEDIUM',
     evidenceType: 'CALCULATED',
@@ -755,12 +963,25 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   const p009HallImplied = p009SensorType === 'HALL' || input.hallFaultRiskIndicated === true;
   const p009Triggered = p009HallImplied && !p009ExplicitlyNotHall;
   const p009SensorTypeKnown = p009SensorType !== undefined;
+  const p009Trace = makeLogicalTraceNode({
+    id: 'bldcPattern:P009.hallApplicability',
+    title: '霍尔故障模式适用性 / 风险证据',
+    value: p009Triggered ? 'TRIGGERED' : (p009ExplicitlyNotHall ? 'NOT_APPLICABLE' : 'NO_EVIDENCE'),
+    inputs: [
+      makeTraceInput('motorSensorType', '电机位置传感器类型', p009SensorType || '未提供', traceSource(input, 'motorSensorType', false), undefined, undefined, traceEvidenceId(input, 'motorSensorType')),
+      makeTraceInput('hallFaultRiskIndicated', '霍尔故障症状指示', input.hallFaultRiskIndicated === true ? '是' : '否', input.hallFaultRiskIndicated === true ? traceSource(input, 'hallFaultRiskIndicated') : 'USER_INPUT', undefined, undefined, traceEvidenceId(input, 'hallFaultRiskIndicated')),
+    ],
+    formula: 'Triggered = (SensorType=HALL OR HallFaultSymptom=true) AND SensorType≠explicit non-HALL',
+    standardRef: '位置传感器架构定义；故障注入/诊断需求',
+    verdict: p009Triggered ? 'FAIL' : 'INFO',
+  });
   patterns.push({
     id: 'P009',
     name: '霍尔传感器故障与容错退避 (Hall Sensor Hardware Failure & Degradation)',
     triggered: p009Triggered,
     patternKind: 'DETECTED_RISK',
     corePhysicalChain: '霍尔线缆断线/虚焊/短路/强磁干扰 → 产生非法编码 (000/111) 或状态跳变卡死 → MCU换相失步 → 电机失步停转、强烈抖动或反转风险 → 触发整车功能降级',
+    trace: [p009Trace],
     calculatedValues: {
       '电机位置传感器类型': p009SensorTypeKnown ? p009SensorType! : (input.hallFaultRiskIndicated ? '未显式指定，由自由文本中的霍尔故障症状描述推断为霍尔方案' : '未提供，无法判断本模式是否适用于当前电机方案'),
       '支持诊断的物理失效模式': '开路 / 高钳位 / 低钳位 / 卡死 / 非法状态 / 高频抖动噪声',
@@ -792,12 +1013,25 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   const p010UsesShuntSensing = input.currentSenseArchitecture !== undefined && p010ShuntBasedArchitectures.includes(input.currentSenseArchitecture);
   const p010ExplicitlyHallCurrentSensor = input.currentSenseArchitecture === 'HALL_SENSOR';
   const p010Triggered = (p010UsesShuntSensing || input.currentSenseFaultRiskIndicated === true) && !p010ExplicitlyHallCurrentSensor;
+  const p010Trace = makeLogicalTraceNode({
+    id: 'bldcPattern:P010.sensingFaultApplicability',
+    title: '电流采样故障模式适用性 / 风险证据',
+    value: p010Triggered ? 'TRIGGERED' : (p010ExplicitlyHallCurrentSensor ? 'NOT_APPLICABLE' : 'NO_EVIDENCE'),
+    inputs: [
+      makeTraceInput('currentSenseArchitecture', '电流采样架构', input.currentSenseArchitecture || '未提供', traceSource(input, 'currentSenseArchitecture', false), undefined, undefined, traceEvidenceId(input, 'currentSenseArchitecture')),
+      makeTraceInput('currentSenseFaultRiskIndicated', '采样链故障症状指示', input.currentSenseFaultRiskIndicated === true ? '是' : '否', input.currentSenseFaultRiskIndicated === true ? traceSource(input, 'currentSenseFaultRiskIndicated') : 'USER_INPUT', undefined, undefined, traceEvidenceId(input, 'currentSenseFaultRiskIndicated')),
+    ],
+    formula: 'Triggered = (Shunt-based architecture OR specific sensing-fault evidence) AND architecture≠HALL_SENSOR',
+    standardRef: '电流采样架构定义；ASIL诊断/故障注入需求',
+    verdict: p010Triggered ? 'FAIL' : 'INFO',
+  });
   patterns.push({
     id: 'P010',
     name: '电流采样硬件故障双重致命性 (Current Sensing Dual Failure: Control & Protection)',
     triggered: p010Triggered,
     patternKind: 'DETECTED_RISK',
     corePhysicalChain: '分流电阻虚焊/运放供电跌落/偏置漂移/ADC饱和 → 同时引发两大致命后果：① 闭环 FOC 电流环发散产生失控过流；② 硬件过流保护判据失效无法关断，造成灾难性炸机',
+    trace: [p010Trace],
     calculatedValues: {
       '电流采样架构': input.currentSenseArchitecture ?? (input.currentSenseFaultRiskIndicated ? '未显式指定，由自由文本中的采样故障症状描述推断为分流电阻方案' : '未提供，无法判断本模式是否适用于当前工况'),
       '失效影响': '控制失效 + 保护失效 双重并发',
@@ -856,11 +1090,29 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p011CalculatedValues, p011Assumptions);
 
+  const p011Trace = makeTraceNode({
+    id: 'bldcPattern:P011.uvloMargin',
+    title: '驱动供电相对 UVLO 门限裕量',
+    value: traceValue(p011MarginV),
+    unit: 'V',
+    inputs: [
+      makeTraceInput('vbusMinExpectedV', '预期最低供电电压', p011VbusMinEffective, traceSource(input, 'vbusMinExpectedV', !p011VbusMinProvided), 'V', !p011VbusMinProvided ? '未提供，6.0V仅作展示参考，不作为触发依据' : undefined, traceEvidenceId(input, 'vbusMinExpectedV')),
+      makeTraceInput('uvloTypicalV', 'UVLO典型门限', uvloTyp, traceSource(input, 'uvloTypicalV', input.uvloTypicalV === undefined), 'V', input.uvloTypicalV === undefined ? '未提供具体驱动型号，假设8.2V' : undefined, traceEvidenceId(input, 'uvloTypicalV')),
+      makeTraceInput('uvloMinV', 'UVLO最小门限', uvloMin, traceSource(input, 'uvloMinV', input.uvloMinV === undefined), 'V', input.uvloMinV === undefined ? '未提供具体驱动型号，假设7.8V' : undefined, traceEvidenceId(input, 'uvloMinV')),
+      makeTraceInput('hasSupplyBoostRegulation', '是否有升压稳压兜底', input.hasSupplyBoostRegulation === true ? '是' : (input.hasSupplyBoostRegulation === false ? '否' : '未提供'), traceSource(input, 'hasSupplyBoostRegulation'), undefined, traceEvidenceId(input, 'hasSupplyBoostRegulation')),
+    ],
+    formula: 'UVLO Margin = V_UVLO,typ − V_supply,min；若无升压且 V_supply,min < UVLO_typ，则计算路径触发',
+    standardRef: '实际预驱 UVLO datasheet；ISO 16750-2 cranking profile（供电跌落工况）',
+    threshold: { value: 0, unit: 'V', label: '进入 UVLO 典型区间的边界' },
+    verdict: p011Triggered ? 'FAIL' : (p011MarginV < 0 ? 'MARGINAL' : 'PASS'),
+  });
+
   patterns.push({
     id: 'P011',
     name: '栅极驱动芯片欠压锁定 (Gate Driver Under-Voltage Lock-Out, UVLO)',
     triggered: p011Triggered,
     patternKind: 'DETECTED_RISK',
+    trace: [p011Trace],
     corePhysicalChain: `驱动供电 Vcc 异常跌落至 ${uvloMin}V 以下 → 门极驱动输出电压不足 → MOSFET 进入高阻放大区而非饱和导通 → 导通压降 Vds 激增 → 芯片数毫秒内热击穿`,
     calculatedValues: p011CalculatedValues,
     riskLevel: p011Triggered ? 'Medium-High' : 'Low',
@@ -918,12 +1170,35 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   }
   pushAssumptionNote(p012CalculatedValues, p012Assumptions);
 
+  const p012Trace = makeTraceNode({
+    id: 'bldcPattern:P012.bootstrapRefresh',
+    title: '自举刷新窗口充电完成度',
+    value: refreshFractionChargedPct !== undefined ? refreshFractionChargedPct : '无法计算',
+    unit: refreshFractionChargedPct !== undefined ? '%' : undefined,
+    inputs: [
+      makeTraceInput('cBootNf', '自举电容 Cboot', cBootNf, 'SPEC_CONSTANT', 'nF', '当前模型固定220nF，应该用具体驱动/外围实测或BOM参数替换'),
+      makeTraceInput('gateChargeQgNc', '高边 MOSFET 栅电荷 Qg', qgNc, traceSource(input, 'gateChargeQgNc', input.gateChargeQgNc === undefined), 'nC', input.gateChargeQgNc === undefined ? '未提供，假设30nC' : undefined, traceEvidenceId(input, 'gateChargeQgNc')),
+      makeTraceInput('pwmSwitchingFreqHz', 'PWM频率', swFreqForBoot, traceSource(input, 'pwmSwitchingFreqHz', input.pwmSwitchingFreqHz === undefined), 'Hz', input.pwmSwitchingFreqHz === undefined ? '未提供，假设20kHz' : undefined, traceEvidenceId(input, 'pwmSwitchingFreqHz')),
+      makeTraceInput('bootChargeLoopOhm', '自举充电回路总电阻', bootChargeLoopOhm !== undefined ? bootChargeLoopOhm : '缺输入', traceSource(input, 'bootChargeLoopOhm', bootChargeLoopOhm === undefined), 'Ω', bootChargeLoopOhm === undefined ? '未提供，无法验证刷新时间常数' : undefined, traceEvidenceId(input, 'bootChargeLoopOhm')),
+      makeTraceInput('bootRefreshWindowUs', '强制刷新窗口', refreshWindowUs, traceSource(input, 'bootRefreshWindowUs', input.bootRefreshWindowUs === undefined), 'μs', input.bootRefreshWindowUs === undefined ? '未提供，假设1.5μs' : undefined, traceEvidenceId(input, 'bootRefreshWindowUs')),
+    ],
+    formula: 'I_eq=I_leak+Qg·fsw；τ=R_boot·C_boot；Charge%=1−e^(−t_refresh/τ)（若R_boot缺失则不可判定）',
+    standardRef: '实际门极驱动 bootstrap design；驱动芯片 application note',
+    threshold: { value: 90, unit: '%', label: '刷新窗口目标充电完成度' },
+    verdict: p012RefreshInsufficient
+      ? 'CRITICAL'
+      : refreshFractionChargedPct === undefined
+        ? 'INFO'
+        : (refreshFractionChargedPct < 95 ? 'MARGINAL' : 'PASS'),
+  });
+
   patterns.push({
     id: 'P012',
     name: '高边自举电路充电动能不足 (Bootstrap Voltage Margin & Refresh Strategy)',
     triggered: p012RefreshInsufficient,
     corePhysicalChain: 'PWM 占空比逼近 100% → 下桥导通时间极短 → 自举电容无法充满电 → 高边门极浮动电压缓慢跌落 → 上桥 MOSFET 进入线性放大区发热烧毁。泄放电流除静态漏电流外，每次开关从自举电容抽走的栅极电荷 (Qg×fsw) 往往是主导项',
     calculatedValues: p012CalculatedValues,
+    trace: [p012Trace],
     riskLevel: p012RefreshInsufficient ? 'Medium-High' : 'Medium',
     confidence: p012Assumptions.length > 0 ? 'LOW' : 'MEDIUM',
     evidenceType: 'CALCULATED',
@@ -990,12 +1265,33 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p013CalculatedValues, p013Assumptions);
 
+  const p013Trace = makeTraceNode({
+    id: 'bldcPattern:P013.rippleAndCapacity',
+    title: 'DC-Link 有效容量与纹波电流',
+    value: traceValue(rippleCurrentEst),
+    unit: 'A RMS',
+    inputs: [
+      makeTraceInput('cbusUf', '母线电容标称容量', cbusUf013, traceSource(input, 'cbusUf', !(Number.isFinite(input.cbusUf) && input.cbusUf > 0)), 'μF', !(Number.isFinite(input.cbusUf) && input.cbusUf > 0) ? '未提供/无效，假设470μF；该假设不作为触发依据' : undefined, traceEvidenceId(input, 'cbusUf')),
+      makeTraceInput('currentPeakA', '相电流峰值', iPeak013, traceSource(input, 'currentPeakA', !hasProvidedPeakCurrent013), 'A', !hasProvidedPeakCurrent013 ? '未提供，假设25A' : undefined, traceEvidenceId(input, 'currentPeakA')),
+      makeTraceInput('modulationIndex', '调制比 m', modIdx013, traceSource(input, 'modulationIndex', input.modulationIndex === undefined), undefined, input.modulationIndex === undefined ? '未提供，假设0.9' : undefined, traceEvidenceId(input, 'modulationIndex')),
+      makeTraceInput('powerFactorCosPhi', '功率因数 cosφ', pf013, traceSource(input, 'powerFactorCosPhi', input.powerFactorCosPhi === undefined), undefined, input.powerFactorCosPhi === undefined ? '未提供，假设0.9' : undefined, traceEvidenceId(input, 'powerFactorCosPhi')),
+      makeTraceInput('capInitialTolerancePct', '初始容差降额', initTolPct, traceSource(input, 'capInitialTolerancePct', input.capInitialTolerancePct === undefined), '%', input.capInitialTolerancePct === undefined ? '未提供，假设20%' : undefined, traceEvidenceId(input, 'capInitialTolerancePct')),
+      makeTraceInput('capEolDeratingPct', 'EOL降额', eolDeratingPct, traceSource(input, 'capEolDeratingPct', input.capEolDeratingPct === undefined), '%', input.capEolDeratingPct === undefined ? '未提供，假设20%' : undefined, traceEvidenceId(input, 'capEolDeratingPct')),
+      makeTraceInput('capLowTempDeratingPct', '低温降额', lowTempDeratingPct, traceSource(input, 'capLowTempDeratingPct', input.capLowTempDeratingPct === undefined), '%', input.capLowTempDeratingPct === undefined ? '未提供，假设30%' : undefined, traceEvidenceId(input, 'capLowTempDeratingPct')),
+    ],
+    formula: 'I_ripple = I_peak·√[2m(√3/(4π)+pf²(√3/π−9m/16))]；C_eff=C_nom·(1−tol)·(1−EOL)·(1−lowTemp)',
+    standardRef: 'DC-Link capacitor ripple-current rating；具体电容 datasheet 与项目寿命/低温要求',
+    threshold: { value: 4.5, unit: 'A RMS', label: '示例器件允许纹波电流' },
+    verdict: p013Veto ? 'CRITICAL' : (rippleCurrentEst > 4.5 ? 'MARGINAL' : 'PASS'),
+  });
+
   patterns.push({
     id: 'P013',
     name: '母线去耦电容容量与纹波电流耐受评估 (DC-Link Capacitor Margins & Aging)',
     triggered: p013Triggered,
     corePhysicalChain: '逆变器三相高频开关 → 抽取大脉冲高频纹波电流 → DC-Link电容自发热升温与电解液干涸 → 电容老化失效与母线瞬态吸收能力丧失',
     calculatedValues: p013CalculatedValues,
+    trace: [p013Trace],
     riskLevel: rippleCurrentEst > 4.5 ? 'High' : 'Medium',
     confidence: p013Assumptions.length > 0 ? 'LOW' : 'HIGH',
     evidenceType: 'CALCULATED',
@@ -1048,6 +1344,22 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p014CalculatedValues, p014Assumptions);
 
+  const p014Trace = makeTraceNode({
+    id: 'bldcPattern:P014.vdsPeak',
+    title: 'MOSFET 动态 VDS 峰值',
+    value: traceValue(peakVds),
+    unit: 'V',
+    inputs: [
+      makeTraceInput('busVoltagePeakV', '母线瞬态峰值', measuredVbus, traceSource(input, 'busVoltagePeakV', !hasMeasuredVbus), 'V', !hasMeasuredVbus ? '没有台架实测，使用 P001 理论最坏值；不等同于实测 Vbus 峰值' : undefined, traceEvidenceId(input, 'busVoltagePeakV')),
+      ...(input.loopInductanceNh !== undefined && Number.isFinite(input.loopInductanceNh) ? [makeTraceInput('loopInductanceNh', '回路寄生电感', input.loopInductanceNh, traceSource(input, 'loopInductanceNh'), 'nH', undefined, traceEvidenceId(input, 'loopInductanceNh'))] : [makeTraceInput('loopInductanceNh', '回路寄生电感', '缺输入', 'ASSUMED_DEFAULT', 'nH', 'L_loop 未提供，采用30%过冲假设')]),
+      ...(input.diDtANs !== undefined && Number.isFinite(input.diDtANs) ? [makeTraceInput('diDtANs', '开关瞬态 di/dt', input.diDtANs, traceSource(input, 'diDtANs'), 'A/ns', undefined, traceEvidenceId(input, 'diDtANs'))] : [makeTraceInput('diDtANs', '开关瞬态 di/dt', '缺输入', 'ASSUMED_DEFAULT', 'A/ns', 'di/dt 未提供，采用30%过冲假设')]),
+    ],
+    formula: peakVdsMethod,
+    standardRef: 'MOSFET VDS absolute maximum rating；项目定义的 VDS 车规降额边界',
+    threshold: { value: input.vdsRating * 0.8, unit: 'V', label: '车规 80% 降额红线' },
+    verdict: traceVerdict(p014Veto, peakVds, input.vdsRating * 0.8, 0.95),
+  });
+
   patterns.push({
     id: 'P014',
     name: 'MOSFET VDS多层级电压裕量核查 (VDS Stress vs Rating Hierarchy)',
@@ -1057,6 +1369,7 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     triggered: hasMeasuredVbus && Number.isFinite(peakVds) && peakVds >= input.vdsRating * 0.75,
     corePhysicalChain: '区分：Vds_nominal / Vds_peak / Vds_repetitive_peak / Vds_absolute_maximum；若瞬态尖峰突破额定击穿电压，直接触发一票否决！',
     calculatedValues: p014CalculatedValues,
+    trace: [p014Trace],
     riskLevel: p014Veto ? 'High' : (vdsMargin < input.vdsRating * 0.1 || peakVds > input.vdsRating * 0.8 ? 'Medium-High' : 'Low'),
     confidence: p014Assumptions.length > 0 ? 'LOW' : 'HIGH',
     evidenceType: p014EvidenceType,
@@ -1077,6 +1390,21 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   // ----------------------------------------------------
   // P015: MCU依赖型保护 (Section 4)
   // ----------------------------------------------------
+  const p015Trace = makeLogicalTraceNode({
+    id: 'bldcPattern:P015.protectionIndependence',
+    title: '保护链独立性分类',
+    value: 'CHECKLIST',
+    inputs: [
+      makeTraceInput('softwareDependentProtection', '软件依赖保护类别', '过温降额 / 堵转 / 弱磁限速 / 相平衡诊断', 'SPEC_CONSTANT'),
+      makeTraceInput('hardwareIndependentProtection', '硬件独立保护类别', '硬件过流截流 / UVLO / 硬件超温', 'SPEC_CONSTANT'),
+      makeTraceInput('mixedProtection', '混合保护类别', '外置高速比较器直连驱动SD + MCU告警', 'SPEC_CONSTANT'),
+    ],
+    formula: 'Fault → Detection → Decision → Protection → Actuation → Confirmation；识别是否经过MCU软件路径',
+    standardRef: 'ISO 26262 hardware/software independence；项目安全架构定义',
+    verdict: 'INFO',
+    degradedOverride: false,
+  });
+
   patterns.push({
     id: 'P015',
     name: 'MCU依赖型保护独立性评估 (Protection Independence Taxonomy)',
@@ -1085,6 +1413,7 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     // 标记为 CHECKLIST 后 UI/统计口径会把它从"已触发风险"列表中分离，避免跟P009/P010等
     // 真实测出来的故障模式混在一起、让人误以为这也是本次分析新发现的问题。
     patternKind: 'CHECKLIST',
+    trace: [p015Trace],
     corePhysicalChain: '保护链分类：Fault → Detection → Decision → Protection → Actuation → Confirmation；区分软件依赖与硬件独立断路',
     calculatedValues: {
       '软件依赖保护 (Software-Dependent)': '过温降额、堵转停机、弱磁限速、相平衡诊断',
@@ -1149,12 +1478,36 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   };
   pushAssumptionNote(p016CalculatedValues, p016Assumptions);
 
+  const p016Trace = makeTraceNode({
+    id: 'bldcPattern:P016.faultToOffTime',
+    title: '保护链 Fault-to-Off 总时间',
+    value: traceValue(faultToOffTimeUs),
+    unit: 'μs',
+    inputs: [
+      makeTraceInput('senseDelayNs', '电流检测延迟', senseDelayNs, traceSource(input, 'senseDelayNs', input.senseDelayNsOverride === undefined), 'ns', input.senseDelayNsOverride === undefined ? '未提供，假设80ns' : undefined, traceEvidenceId(input, 'senseDelayNs')),
+      makeTraceInput('compDelayNs', '比较器响应时间', compDelayNs, traceSource(input, 'compDelayNs', input.compDelayNsOverride === undefined), 'ns', input.compDelayNsOverride === undefined ? '未提供，假设120ns' : undefined, traceEvidenceId(input, 'compDelayNs')),
+      makeTraceInput('digitalFilterDelayNs', '数字滤波消抖', digitalFilterDelayNs, traceSource(input, 'digitalFilterDelayNs', input.digitalFilterDelayNsOverride === undefined), 'ns', input.digitalFilterDelayNsOverride === undefined ? '未提供，假设150ns' : undefined, traceEvidenceId(input, 'digitalFilterDelayNs')),
+      makeTraceInput('driverPropDelayNs', '预驱传播延迟', driverPropDelayNs, traceSource(input, 'driverPropDelayNs', input.driverPropDelayNsOverride === undefined), 'ns', input.driverPropDelayNsOverride === undefined ? '未提供，假设100ns' : undefined, traceEvidenceId(input, 'driverPropDelayNs')),
+      makeTraceInput('gateTurnOffDelayNs', '门极关断延迟', gateTurnOffDelayNs, traceSource(input, 'gateTurnOffDelayNs', input.gateTurnOffDelayNsOverride === undefined), 'ns', input.gateTurnOffDelayNsOverride === undefined ? '未提供，假设220ns' : undefined, traceEvidenceId(input, 'gateTurnOffDelayNs')),
+      makeTraceInput('currentFallDelayNs', '电流衰减时间', currentFallDelayNs, traceSource(input, 'currentFallDelayNs', input.currentFallDelayNsOverride === undefined), 'ns', input.currentFallDelayNsOverride === undefined ? '未提供，假设180ns' : undefined, traceEvidenceId(input, 'currentFallDelayNs')),
+      makeTraceInput('soaShortCircuitTimeUs', 'MOSFET SOA 短路耐受时间', mosfetSoaShortCircuitTimeUs, traceSource(input, 'soaShortCircuitTimeUs', soaTimeAssumed), 'μs', soaTimeAssumed ? '低压 MOSFET 通常不直接给该指标；2.5μs仅为数量级假设，应回到实际 SOA 曲线' : undefined, traceEvidenceId(input, 'soaShortCircuitTimeUs')),
+      makeTraceInput('vbusNominal', '母线标称电压', vbusNominalSafe, traceSource(input, 'vbusNominal', vbusNominalWasAssumed), 'V', vbusNominalWasAssumed ? '未提供，按13.5V假设用于能量下界' : undefined, traceEvidenceId(input, 'vbusNominal')),
+      makeTraceInput('currentPeakA', '运行峰值电流（能量下界）', p016ShortCircuitCurrentA, traceSource(input, 'currentPeakA', !Number.isFinite(input.currentPeakA)), 'A', !Number.isFinite(input.currentPeakA) ? '缺失时按25A，仅作能量下界，不代表真实短路电流' : undefined, traceEvidenceId(input, 'currentPeakA')),
+      ...(p016HasEas ? [makeTraceInput('easEnergyMj', '器件单脉冲雪崩能量 E_AS', input.easEnergyMj!, traceSource(input, 'easEnergyMj'), 'mJ', undefined, traceEvidenceId(input, 'easEnergyMj'))] : [makeTraceInput('easEnergyMj', '器件单脉冲雪崩能量 E_AS', '未提供', 'USER_INPUT', 'mJ', '没有 E_AS，无法完成能量预算复核')]),
+    ],
+    formula: 't_fault→off = t_sense+t_comp+t_filter+t_driver+t_gate+t_fall；E_fault≈Vbus·I·t',
+    standardRef: '实际器件 SOA / E_AS 数据手册；保护链实测时序',
+    threshold: { value: mosfetSoaShortCircuitTimeUs, unit: 'μs', label: 'SOA/短路耐受时间边界' },
+    verdict: ((p016Veto && !soaTimeAssumed) || p016EnergyExceeds) ? 'CRITICAL' : (timingMarginUs < 1.0 ? 'MARGINAL' : 'PASS'),
+  });
+
   patterns.push({
     id: 'P016',
     name: '过流/短路保护响应时间时序 ↔ MOSFET SOA 安全区匹配 (Fault-to-Off Timing vs SOA)',
     triggered: timingMarginUs < 1.0 || p016Veto || p016EnergyExceeds,
     corePhysicalChain: 'Fault occurs → Current rises → Sense delay → Comparator/ADC delay → Digital delay → Driver propagation delay → Gate turn-off → 电流衰减。低压MOSFET更严谨的判据是SOA曲线上的能量积分而非固定的"短路耐受时间"',
     calculatedValues: p016CalculatedValues,
+    trace: [p016Trace],
     riskLevel: p016Veto || p016EnergyExceeds ? 'High' : (timingMarginUs < 0.5 ? 'Medium-High' : 'Low'),
     confidence: p016Assumptions.length > 2 ? 'LOW' : 'MEDIUM',
     evidenceType: 'CALCULATED',
@@ -1181,6 +1534,20 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   // ----------------------------------------------------
   // P017: 电流采样架构决策器 (重点新增模块 4.1)
   // ----------------------------------------------------
+  const p017Trace = makeLogicalTraceNode({
+    id: 'bldcPattern:P017.currentSensingArchitecture',
+    title: '电流采样架构决策输入',
+    value: input.currentSenseArchitecture || '未指定',
+    inputs: [
+      makeTraceInput('currentSenseArchitecture', '当前采样架构', input.currentSenseArchitecture || '未指定', traceSource(input, 'currentSenseArchitecture'), undefined, undefined, traceEvidenceId(input, 'currentSenseArchitecture')),
+      makeTraceInput('currentSenseFaultRiskIndicated', '当前case是否有采样故障证据', input.currentSenseFaultRiskIndicated === true ? '是' : '否', traceSource(input, 'currentSenseFaultRiskIndicated'), undefined, undefined, traceEvidenceId(input, 'currentSenseFaultRiskIndicated')),
+    ],
+    formula: 'Architecture choice = accuracy/observability/protection/BOM/PCB complexity trade-off；本节点不伪造“测得优劣”',
+    standardRef: 'FOC current sensing requirements；ISO 26262 fault observability/diagnostic design',
+    verdict: 'INFO',
+    degradedOverride: false,
+  });
+
   patterns.push({
     id: 'P017',
     name: '电流采样架构决策矩阵 (Current Sensing Architecture Trade-Off)',
@@ -1188,6 +1555,7 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
     // [FIX-11，本次修复] 同 P015，这是架构选型权衡参考表，标记为 CHECKLIST 与真实检测到
     // 的故障模式区分开，不计入"已触发风险"统计。
     patternKind: 'CHECKLIST',
+    trace: [p017Trace],
     corePhysicalChain: '系统级权衡：低边单电阻 (Single Low-Side) vs 三相低边独立采样 (Three-Phase Low-Side) vs 相线直串采样 (Inline Phase) vs 霍尔电流传感器 (Hall Sensor)',
     calculatedValues: {
       '方案 A (相电流独立采样 - 推荐)': '高精度FOC支持、全占空比采样、支持单相开路短路独立诊断、PCB复杂度中等、BOM适中',
@@ -1212,11 +1580,25 @@ export function evaluateAllBldcPatterns(input: BldcEvaluationInput): PatternOutp
   // 取决于当前case是否真的存在堵转/机械卡滞相关的具体症状描述——不是每个case都在谈堵转，
   // 未提供证据时不触发。
   const p018Triggered = input.stallRiskIndicated === true;
+  const p018Trace = makeLogicalTraceNode({
+    id: 'bldcPattern:P018.stallEvidence',
+    title: '堵转/机械卡滞证据适用性',
+    value: p018Triggered ? 'TRIGGERED' : 'NO_EVIDENCE',
+    inputs: [
+      makeTraceInput('stallRiskIndicated', '堵转/机械卡滞风险指示', p018Triggered ? '是' : '否', traceSource(input, 'stallRiskIndicated'), undefined, p018Triggered ? '当前case已提供相关症状/证据' : '当前case没有堵转证据，不以通用风险代替case证据', traceEvidenceId(input, 'stallRiskIndicated')),
+      makeTraceInput('currentPeakA', '运行峰值电流（保护标定关联）', traceValue(input.currentPeakA), traceSource(input, 'currentPeakA', !Number.isFinite(input.currentPeakA)), 'A', !Number.isFinite(input.currentPeakA) ? '缺失；只能作为后续标定输入缺口' : undefined, traceEvidenceId(input, 'currentPeakA')),
+      makeTraceInput('rpm', '当前转速（保护联合判据关联）', traceValue(input.rpm), traceSource(input, 'rpm', !Number.isFinite(input.rpm)), 'rpm', !Number.isFinite(input.rpm) ? '缺失；无法验证低速/停转条件' : undefined, traceEvidenceId(input, 'rpm')),
+    ],
+    formula: '适用性先决条件：存在堵转/机械卡滞证据；真正保护判据应为 I>I_stall_th AND RPM<RPM_low_th AND t>window，不用温度单独代替',
+    standardRef: '电机额定/峰值电流规格；P006/P007热时间常数；项目堵转保护需求',
+    verdict: p018Triggered ? 'FAIL' : 'INFO',
+  });
   patterns.push({
     id: 'P018',
     name: '电机堵转保护多级复合联合判据 (Multi-Level Stall Protection Rule Engine)',
     triggered: p018Triggered,
     patternKind: 'DETECTED_RISK',
+    trace: [p018Trace],
     corePhysicalChain: '联合判据：相电流 > I_stall_th AND 机械转速 < RPM_low_th AND 持续时间 > Time_window；严禁单纯使用温度阈值粗暴判断！四级阈值的结构具有普遍工程意义，但具体数值(电流/转速/时间窗)必须按电机额定电流与P006/P007给出的热时间常数标定，不应直接套用示例数字',
     calculatedValues: {
       ...(p018Triggered ? {} : { '⚠ 适用性说明': '自由文本/工况输入中未发现堵转、机械卡滞相关的具体症状描述，本模式暂未判定为当前case的已触发风险，如设计确实存在堵转工况请补充描述' }),

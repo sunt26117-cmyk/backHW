@@ -13,6 +13,7 @@ import { DesignReviewRegressionView } from './DesignReviewRegressionView';
 import { RecommendationRaciView } from './RecommendationRaciView';
 import { EngineeringDocsView } from './EngineeringDocsView';
 import { EngineeringCalculatorView } from './EngineeringCalculatorView';
+import TraceAuditView from './TraceAuditView';
 import { useScenario } from '../contexts/ScenarioContext';
 import { useAnalysis } from '../contexts/AnalysisContext';
 import { useUI } from '../contexts/UIContext';
@@ -164,6 +165,14 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = ({
           context={context}
           issue={issue}
           setIssue={setIssue}
+        />
+      )}
+
+      {activeTab === 'trace-audit' && (
+        <TraceAuditView
+          context={context}
+          issue={issue}
+          result={result}
         />
       )}
     </>

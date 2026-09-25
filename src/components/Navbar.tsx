@@ -705,6 +705,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 { id: 'recommendation', label: '9. 团队博弈推演 · RACI (团队隐秘担忧点+领导多方博弈)' },
                 { id: 'docs', label: '10. 受控文档 & EDR' },
                 { id: 'calc', label: '11. 确定性物理计算器' },
+                { id: 'trace-audit', label: '12. Trace 审计' },
               ].map((tab) => (
                 <option key={tab.id} value={tab.id} className="bg-slate-900 text-slate-200">
                   {tab.label}
@@ -744,6 +745,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 { id: 'recommendation', label: '9. 团队博弈推演 · RACI' },
                 { id: 'docs', label: '10. 受控文档 & EDR' },
                 { id: 'calc', label: '11. 确定性物理计算器' },
+                { id: 'trace-audit', label: '12. Trace 审计' },
               ].map((tab) => {
                 const isActive = activeTab === tab.id;
                 return (

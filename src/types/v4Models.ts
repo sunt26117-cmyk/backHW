@@ -3,7 +3,7 @@
  * 遵循唯一权威原则：AI 文本/机理，Engine 物理计算，Engineer 决策，Test 闭环，History 知识沉淀
  */
 
-import { AsilLevel, ProjectPhase, RiskLevel } from '../types';
+import { AsilLevel, ProjectPhase, RiskLevel, TraceNode } from '../types';
 
 // ==========================================
 // 2. Evidence & Confidence 模型 (Section 2)
@@ -208,6 +208,7 @@ export interface PatternOutputItem {
   sideEffects: string[];
   verificationItems: string[];
   unknownsToTest: string[];
+  trace?: TraceNode[]; // Phase 5：确定性输出的输入→公式→阈值→Verdict 追溯链
 }
 
 // ==========================================
