@@ -5,6 +5,7 @@ import { SAMPLE_FMEDA_ROWS, SAMPLE_FTA_TREE, SAMPLE_SAFETY_TRACEABILITY_CHAIN } 
 import { getPhaseReviewChecklist } from '../data/designReviewEngine';
 import { resolveEngineeringDomain, getDomainPhysics } from './scenarioDomainEngine';
 import { loadDevices, getDeviceCurve } from './deviceLibrary';
+import { readMeasuredNumber } from './unifiedStateExtractor';
 
 const allText = (issue: IssueInput) => [
   ...(issue.issueCategories || []),
@@ -28,10 +29,15 @@ function firstNumber(text: string, patterns: RegExp[], fallback: number) {
   return fallback;
 }
 
+// ── 这一层是「第二套判断」，和确定性引擎的 isMeasuredValuePresent() 不是一回事，别互相假设 ──
+// 分工：确定性引擎只认结构化实测输入（缺 -> INSUFFICIENT_INPUT）；pattern 引擎这一层做的是
+// 「实测优先、没填才回落自由文本推断」，所以这里用 NaN（而不是 undefined / 0 哨兵）表示「缺」。
+// 但「读到什么值」统一走 readMeasuredNumber()：以前自己 Number(raw)，会把 ''/null 读成 0
+// （Number('') === 0），于是 preferMeasured 认为「实测填了 0」，把文本推断出来的 48V 顶掉 ——
+// 这与 preferMeasured 自身的语义（没填才回落）相矛盾。
 function measuredNumber(issue: IssueInput, key: string): number {
-  const raw = issue.measuredValues?.[key];
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : NaN;
+  const value = readMeasuredNumber(issue.measuredValues, key);
+  return value === undefined ? NaN : value;
 }
 
 function preferMeasured(issue: IssueInput, key: string, parsed: number): number {

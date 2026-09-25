@@ -1,6 +1,6 @@
 import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } from '../types';
 import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
-import { extractUnifiedEngineeringModel } from '../utils/unifiedStateExtractor';
+import { extractUnifiedEngineeringModel, readMeasuredNumber } from '../utils/unifiedStateExtractor';
 import { recalculateStandardWeightedScore } from '../utils/scoringWeights';
 
 function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): number {
@@ -13,10 +13,9 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
   const bus = deterministic.find((item) => item.id === 'BLDC_BUS_PUMPING');
   const miller = deterministic.find((item) => item.id === 'BLDC_MILLER_RISK');
   const mv = issue.measuredValues || {};
-  const n = (key: string) => {
-    const value = Number(mv[key]);
-    return Number.isFinite(value) ? value : undefined;
-  };
+  // 走统一读数原语：以前这里自己 Number(mv[key])，''/null 会变成 0（把「没填」当成「量到 0」），
+  // 而 vds 就参与 vds - bus.value 的裕量比较，等于凭空造出一个假的裕量结论。
+  const n = (key: string) => readMeasuredNumber(mv, key);
   const busPeakMeasured = n('busVoltagePeakV');
   const rpm = n('rpm');
   const vth = n('vthMinV');

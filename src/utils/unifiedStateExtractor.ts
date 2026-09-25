@@ -20,6 +20,35 @@ export function isMeasuredValuePresent(issue: IssueInput, key: string): boolean 
   return !isNaN(num);
 }
 
+/**
+ * 从 measuredValues 读一个「工程师真的填了」的数值 —— 全项目唯一的数值读取原语。
+ *
+ * 缺输入（undefined / null / 空串 / 纯空白 / 非数字 / 非有限值）一律 undefined；
+ * **合法的 0 会被保留**（0A 电流、0℃ 环境温度都是真实测量值，不能被当成「没填」）。
+ *
+ * 与 isMeasuredValuePresent() 的分工：本函数回答「值是多少」，它回答「到底填没填」。
+ * 需要「缺输入就必须 INSUFFICIENT_INPUT」的判定，必须用 isMeasuredValuePresent()。
+ *
+ * 提取它的原因：此前 bldcMotorExpert.ts 自己写了一份 Number(...) 读数（对 ''/null 会返回 0，
+ * 把「没填」当成「量到 0」），加 unifiedStateExtractor 内部两份、scenarioDerived 三件套，
+ * 全项目有 4 套独立实现，各自可能漂移。
+ */
+export function readMeasuredNumber(
+  measuredValues: Record<string, unknown> | undefined | null,
+  key: string,
+): number | undefined {
+  const raw = measuredValues?.[key];
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (text === '') return undefined;
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 // 统一的状态提取器：只读 issue.measuredValues 结构化输入，不做正则文本兜底。
 // 文本推断(如从"3800rpm"提取转速)由 pattern 引擎的 deriveBldcEvaluationInput 单独负责，
 // 这里是确定性引擎的"结构化事实"来源，二者各司其职、不再各写一套正则互相分叉。
@@ -28,33 +57,22 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
   // 缺输入时返回 0 / undefined，由下游引擎用 isMeasuredValuePresent() 判断 INSUFFICIENT_INPUT。
   // 之前这里用正则 + 写死默认值(如 vbusNominal=12、cbusUf=1000、rpm=3000、rdsOn=2.5)，
   // 既和 pattern 引擎的 deriveBldcEvaluationInput 分叉，还会把自由文本里的"37.8V"误读成标称电压。
-  const getNum = (key: string, _patterns?: RegExp[], _fallback?: number | null): number => {
-    const raw = issue.measuredValues?.[key];
-    if (raw !== undefined && raw !== null && raw !== '') {
-      const parsed = Number(raw);
-      if (!isNaN(parsed)) return parsed;
-    }
-    return 0;
-  };
-  
-  const getOptionalNum = (key: string, _patterns?: RegExp[], _fallback?: number | null): number | undefined => {
-    const raw = issue.measuredValues?.[key];
-    if (raw !== undefined && raw !== null && raw !== '') {
-      const parsed = Number(raw);
-      if (!isNaN(parsed)) return parsed;
-    }
-    return undefined;
-  };
+  // 两个包装都走同一个 readMeasuredNumber，区别只在「缺输入」如何表达：
+  //   getNum         -> 0 哨兵（老代码大量依赖 state.xxx 是数字）
+  //   getOptionalNum -> undefined（真正的「缺失」语义）
+  const getNum = (key: string, _patterns?: RegExp[], _fallback?: number | null): number =>
+    readMeasuredNumber(issue.measuredValues, key) ?? 0;
+
+  const getOptionalNum = (key: string, _patterns?: RegExp[], _fallback?: number | null): number | undefined =>
+    readMeasuredNumber(issue.measuredValues, key);
 
   // 多个候选 key 中取第一个「真的填了」的值（按顺序）。
   // 用途：同一个工程量在目录/历史版本里可能有两个 key（如 ambientTempC vs tAmbientC），
   // 用 || 会吞掉合法的 0 值（0℃ 是真实环境温度），所以必须判断「是否填写」而不是「是否非零」。
   const firstPresent = (...keys: string[]): number => {
     for (const k of keys) {
-      const raw = issue.measuredValues?.[k];
-      if (raw === undefined || raw === null || raw === '') continue;
-      const parsed = Number(raw);
-      if (!isNaN(parsed)) return parsed;
+      const value = readMeasuredNumber(issue.measuredValues, k);
+      if (value !== undefined) return value;
     }
     return 0;
   };

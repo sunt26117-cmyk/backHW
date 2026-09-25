@@ -19,10 +19,11 @@
  */
 import assert from 'node:assert/strict';
 import type { IssueInput, ProjectContext } from '../src/types';
-import { extractUnifiedEngineeringModel } from '../src/utils/unifiedStateExtractor';
+import { extractUnifiedEngineeringModel, readMeasuredNumber } from '../src/utils/unifiedStateExtractor';
 import { calculateBldcDeterministicCalculations } from '../src/utils/bldcDeterministicEngine';
 import { calculateRobotJointDeterministicCalculations } from '../src/utils/robotJointDeterministicEngine';
 import { calculateThermalCascade } from '../src/utils/thermalCascadeEngine';
+import { deriveBldcEvaluationInput } from '../src/utils/scenarioDerived';
 
 const CONTEXT = {
   projectName: 'guard', projectPhase: 'DV', customer: 'x', ecuType: 'x',
@@ -162,6 +163,61 @@ check('护栏清单本身非空且每个目标都有闸门字段（防止测试�
     assert.ok(g.gated.length > 0, g.name + ' 的闸门字段为空');
     assert.ok(Object.keys(g.baseline).length > 0, g.name + ' 的完整输入为空');
   }
+});
+
+console.log('\n=== 读数原语语义：0 是合法值；空/空白/null/非数字 才是「缺输入」 ===');
+
+const MV_SEMANTICS: Record<string, unknown> = {
+  zero: 0, zeroStr: '0', num48: 48, str48: '48', spaced: '  48  ',
+  empty: '', blank: '   ', nullish: null, text: 'abc', inf: 'Infinity',
+};
+
+check('真实 0 必须被保留（0A / 0℃ 是合法实测值，不是「没填」）', () => {
+  assert.equal(readMeasuredNumber(MV_SEMANTICS, 'zero'), 0);
+  assert.equal(readMeasuredNumber(MV_SEMANTICS, 'zeroStr'), 0);
+});
+
+check('数字与数字字符串都能读出，前后空白被裁掉', () => {
+  assert.equal(readMeasuredNumber(MV_SEMANTICS, 'num48'), 48);
+  assert.equal(readMeasuredNumber(MV_SEMANTICS, 'str48'), 48);
+  assert.equal(readMeasuredNumber(MV_SEMANTICS, 'spaced'), 48);
+});
+
+check('空串/纯空白/null/非数字/非有限值/缺键 -> undefined（不再被当成 0）', () => {
+  for (const k of ['empty', 'blank', 'nullish', 'text', 'inf', 'notExists']) {
+    assert.equal(readMeasuredNumber(MV_SEMANTICS, k), undefined, k + ' 应为 undefined');
+  }
+  assert.equal(readMeasuredNumber(undefined, 'anything'), undefined, 'measuredValues 整体缺失应安全');
+  assert.equal(readMeasuredNumber(null, 'anything'), undefined);
+});
+
+check('bldcMotorExpert.n() 已委托该原语：n(\'\') / n(null) 不再造出 0', () => {
+  // n() 现为 readMeasuredNumber(mv, key) 的直接委托，因此钉住原语即钉住 n()。
+  // 旧实现 Number(mv[key]) 对 '' 与 null 都返回 0，而 vds 参与 vds - bus.value 裕量比较，
+  // 等于凭空造出一个假裕量；这条断言就是关闭那条路径的回归锁。
+  assert.equal(readMeasuredNumber({ vdsRatingV: '' }, 'vdsRatingV'), undefined);
+  assert.equal(readMeasuredNumber({ vdsRatingV: null }, 'vdsRatingV'), undefined);
+  assert.equal(readMeasuredNumber({ vdsRatingV: 60 }, 'vdsRatingV'), 60);
+});
+
+check('path A 读数：实测字段为空串时回落文本推断，而不是被当成 0', () => {
+  const mk = (v: unknown) => ({
+    issueCategories: ['BLDC Motor Drive'], failurePhenomenon: '', requirement: '',
+    testCondition: '', actualMeasurement: '48V 母线供电', engineeringConcern: '', notes: '',
+    measuredValues: { busVoltageNominalV: v },
+  } as unknown as IssueInput);
+  const blank = deriveBldcEvaluationInput(CONTEXT, mk(''));
+  assert.equal(blank.vbusNominal, 48, '空串实测值不得把文本推断的 48V 顶成 0，实际=' + blank.vbusNominal);
+});
+
+check('path A 读数：真的填了 0 时实测优先（0 是合法值，仍然压过文本推断）', () => {
+  const zeroIssue = {
+    issueCategories: ['BLDC Motor Drive'], failurePhenomenon: '', requirement: '',
+    testCondition: '', actualMeasurement: '48V 母线供电', engineeringConcern: '', notes: '',
+    measuredValues: { busVoltageNominalV: 0 },
+  } as unknown as IssueInput;
+  const zero = deriveBldcEvaluationInput(CONTEXT, zeroIssue);
+  assert.equal(zero.vbusNominal, 0, '实测 0 必须压过文本推断，实际=' + zero.vbusNominal);
 });
 
 for (const g of GUARDS) {
