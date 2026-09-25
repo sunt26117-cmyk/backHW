@@ -58,3 +58,6 @@ App
 
 ## Phase 4.1 — 已完成
 见 `P2_PHASE4_SCENARIO_PURITY.md` 末尾：历史案例泄漏修复、purity 审计接入 `npm test`、`AppTabRouter`/`AppModals` props 瘦身。`Navbar` props 已从 23 个降到 6 个。
+
+## Phase 4.2 — 已完成；Phase 5 — 交接给下一个执行者
+示波器波形显示与指标算法修正已完成（见 P2_PHASE4_SCENARIO_PURITY.md）。结论可追溯 + 判断流程图尚未开始，交接文档：`P2_PHASE5_TRACE_AND_DIAGRAM_HANDOFF.md`。

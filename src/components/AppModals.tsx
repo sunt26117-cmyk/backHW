@@ -91,6 +91,7 @@ export const AppModals: React.FC<AppModalsProps> = ({
           }));
         }}
         showToast={showToast}
+        scenarioId={currentScenarioId}
       />
 
       <AiOfflineModal

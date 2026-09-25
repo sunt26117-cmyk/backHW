@@ -9,7 +9,7 @@
     "start": "node dist/server.cjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/verify-engines.ts && tsx scripts/smoke-decisionframe-render.tsx",
+    "test": "tsx scripts/verify-engines.ts && tsx scripts/verify-waveform.ts && tsx scripts/smoke-decisionframe-render.tsx && tsx scripts/smoke-waveform-render.tsx",
     "test:engines": "tsx scripts/verify-engines.ts",
     "test:render": "tsx scripts/smoke-decisionframe-render.tsx"
   },

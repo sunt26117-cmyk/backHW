@@ -55,3 +55,18 @@
 
 ### 仍未验证
 沙箱无完整 `node_modules`，`npm run lint / build` 未跑；`release/ecu-copilot-offline.html` 是旧代码构建产物，需本地 `npm run build` 重新生成。
+
+## Phase 4.2 — 示波器波形显示 + 指标算法修正（已完成）
+
+见 `scripts/verify-waveform.ts` / `scripts/smoke-waveform-render.tsx`（已接入 `npm test`）。
+
+- `dv/dt`：改为 20%–80% 边沿法（`oscilloscopeImport.ts: detectEdge`），旧的"相邻两点最大斜率"在有噪声时会显著偏大（合成测试：真实 0.8V/ns，旧算法算出 1.42V/ns），仅作为 `dvDtRawMaxVns` 保留对照。
+- 振铃频率：改为只在主边沿之后的窗口内找振铃峰间隔（`detectRinging`），旧算法对整段波形数过零点，纯方波（无振铃）会被误判出一个虚假频率（合成测试：旧算法输出 75038Hz，实际应为 null）。
+- 标称电压：改为触发前 10% 样本的中位数（`baselineLevel`），不再用波形谷值——谷值天然低于稳态标称值。
+- 通道映射（`buildMeasurementsFromChannels`）：同时选 Vbus 与 Vds 时，母线峰值固定取 Vbus，不再被"后遍历到的通道"静默覆盖；置信度不再固定 90%，采样不足/基线不稳/回退算法时会明确降级并写明原因。
+- 新增 `WaveformPlot.tsx`（纯 SVG，无第三方图表库，适配离线单文件导出）：标出峰值/基线/20-80%边沿/振铃峰，保尖峰降采样（min/max 分桶），支持缩放/平移/光标读数。
+- 新增 `waveformStorage.ts`：导入后的波形（降采样后）留存在 localStorage，供后续"依据可查"功能回看原始波形，不止是几个数字。
+
+## Phase 5 — 未做，交接见 `P2_PHASE5_TRACE_AND_DIAGRAM_HANDOFF.md`
+
+结论可追溯（每条输出的公式/输入来源/阈值可查）+ 判断流程图，尚未开始。已定义好统一的 `TraceNode` 数据结构设计方案，具体实现见交接文档，包含分步骤指导、验收标准和参考文件清单。
