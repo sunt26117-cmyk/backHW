@@ -27,7 +27,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [oscilloscopeOpen, setOscilloscopeOpen] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
   const [themeState, setThemeState] = useState<AppTheme>(() => {
-    try { const s = localStorage.getItem('ecu_copilot_theme'); if (s === 'light' || s === 'eyecare' || s === 'dark') return s; } catch {}
+    try { const s = localStorage.getItem('ecu_copilot_theme'); if (s === 'light' || s === 'eyecare' || s === 'warm' || s === 'dark') return s; } catch {}
     return 'dark';
   });
   const [modelConfig, setModelConfigState] = useState<ModelApiConfig>(() => {

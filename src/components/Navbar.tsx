@@ -9,6 +9,7 @@ import {
   Moon,
   Sun,
   Leaf,
+  Sunset,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -264,10 +265,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {theme === 'dark' && <Moon className="w-3.5 h-3.5 text-blue-400" />}
                 {theme === 'light' && <Sun className="w-3.5 h-3.5 text-amber-400" />}
                 {theme === 'eyecare' && <Leaf className="w-3.5 h-3.5 text-emerald-400" />}
+                {theme === 'warm' && <Sunset className="w-3.5 h-3.5 text-amber-500" />}
                 <span className="hidden sm:inline font-medium">
                   {theme === 'dark' && '曜石黑'}
                   {theme === 'light' && '纯净白'}
                   {theme === 'eyecare' && '豆沙绿'}
+                  {theme === 'warm' && '暖沙金'}
                 </span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
@@ -278,7 +281,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="fixed inset-0 z-30"
                     onClick={() => setShowThemeMenu(false)}
                   />
-                  <div className="ecu-theme-menu absolute right-0 mt-2 w-44 rounded-xl border shadow-xl py-1 z-40 text-xs animate-in fade-in zoom-in-95 duration-150">
+                  <div className="ecu-theme-menu absolute right-0 mt-2 w-48 rounded-xl border shadow-xl py-1 z-40 text-xs animate-in fade-in zoom-in-95 duration-150">
                     <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
                       选择界面配色
                     </div>
@@ -341,6 +344,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                         </div>
                       </div>
                       {theme === 'eyecare' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                    </button>
+
+                    {/* Warm Sand */}
+                    <button
+                      onClick={() => {
+                        setTheme('warm');
+                        setShowThemeMenu(false);
+                      }}
+                      className={`w-full px-3 py-2 flex items-center justify-between text-left ecu-menu-item-hover transition cursor-pointer ${
+                        theme === 'warm' ? 'text-amber-500 font-semibold bg-slate-800/60' : 'text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sunset className="w-3.5 h-3.5 text-amber-500" />
+                        <div>
+                          <div>暖沙羊皮纸 (暖色)</div>
+                          <div className="text-[10px] text-slate-500 font-normal">温润舒适暖阳纸书质感</div>
+                        </div>
+                      </div>
+                      {theme === 'warm' && <Check className="w-3.5 h-3.5 text-amber-500" />}
                     </button>
                   </div>
                 </>

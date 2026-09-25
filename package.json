@@ -9,9 +9,11 @@
     "start": "node dist/server.cjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/verify-engines.ts && tsx scripts/verify-waveform.ts && tsx scripts/smoke-decisionframe-render.tsx && tsx scripts/smoke-waveform-render.tsx",
+    "test": "tsx scripts/verify-engines.ts && tsx scripts/verify-waveform.ts && tsx scripts/smoke-decisionframe-render.tsx && tsx scripts/smoke-waveform-render.tsx && tsx scripts/test-theme-contrast.ts",
+    "test:waveform": "tsx scripts/verify-waveform.ts && tsx scripts/smoke-waveform-render.tsx",
     "test:engines": "tsx scripts/verify-engines.ts",
-    "test:render": "tsx scripts/smoke-decisionframe-render.tsx"
+    "test:render": "tsx scripts/smoke-decisionframe-render.tsx",
+    "test:theme": "tsx scripts/test-theme-contrast.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -249,11 +249,24 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
   },
 ];
 
+type PatternLike = {
+  id: string;
+  triggered: boolean;
+  vetoTriggered?: boolean;
+  calculatedValues?: Record<string, string | number>;
+};
+
 export function runGoldStandardCaseRegression(caseId: string): {
   caseInfo: GoldStandardCase;
   matchedPattern: string;
   isPatternMatch: boolean;
   status: 'PASS' | 'FAIL';
+  /** 引擎实际触发的全部模式 id（供回归视图展示，不是把 expectedPattern 照抄回来） */
+  triggeredPatterns: string[];
+  /** 命中预期模式（否则取首个实际触发模式）的引擎真实物理量输出 */
+  calculatedValues: Record<string, string | number>;
+  /** 该用例是否触发一票否决 */
+  vetoTriggered: boolean;
   summary: string;
 } {
   const c = GOLD_STANDARD_CASES.find((item) => item.caseId === caseId) || GOLD_STANDARD_CASES[1];
@@ -268,13 +281,23 @@ export function runGoldStandardCaseRegression(caseId: string): {
   const isRobotJointCase = c.expectedPattern.startsWith('J');
 
   let triggeredIds: string[] = [];
+  let engineCalculatedValues: Record<string, string | number> = {};
+  let vetoTriggered = false;
   try {
+    // 回归视图需要展示「引擎实际输出」，这里把真实触发的模式、物理量以及该用例
+    // 是否触发一票否决一并带出去（此前只带 triggeredIds，视图却引用了
+    // triggeredPatterns / calculatedValues / vetoTriggered，导致 tsc 直接报错）。
+    const collect = (results: PatternLike[]) => {
+      const triggered = results.filter((p) => p.triggered);
+      triggeredIds = triggered.map((p) => p.id);
+      vetoTriggered = results.some((p) => p.vetoTriggered === true);
+      const hit = triggered.find((p) => p.id === c.expectedPattern) || triggered[0];
+      engineCalculatedValues = hit?.calculatedValues ? { ...hit.calculatedValues } : {};
+    };
     if (isRobotJointCase) {
-      const evalInput = deriveRobotJointEvaluationInput(issue);
-      triggeredIds = evaluateAllRobotJointPatterns(evalInput).filter((p) => p.triggered).map((p) => p.id);
+      collect(evaluateAllRobotJointPatterns(deriveRobotJointEvaluationInput(issue)));
     } else {
-      const evalInput = deriveBldcEvaluationInput(context, issue);
-      triggeredIds = evaluateAllBldcPatterns(evalInput).filter((p) => p.triggered).map((p) => p.id);
+      collect(evaluateAllBldcPatterns(deriveBldcEvaluationInput(context, issue)));
     }
   } catch (err) {
     return {
@@ -282,6 +305,9 @@ export function runGoldStandardCaseRegression(caseId: string): {
       matchedPattern: '(引擎调用异常)',
       isPatternMatch: false,
       status: 'FAIL',
+      triggeredPatterns: [],
+      calculatedValues: {},
+      vetoTriggered: false,
       summary: `自动化用例 ${c.caseId} [${c.title}] 校验失败：调用模式引擎时抛出异常 - ${(err as Error).message}`,
     };
   }
@@ -294,6 +320,9 @@ export function runGoldStandardCaseRegression(caseId: string): {
     matchedPattern,
     isPatternMatch,
     status: isPatternMatch ? 'PASS' : 'FAIL',
+    triggeredPatterns: triggeredIds,
+    calculatedValues: engineCalculatedValues,
+    vetoTriggered,
     summary: isPatternMatch
       ? `自动化用例 ${c.caseId} [${c.title}] 校验通过：模式引擎实际触发 ${matchedPattern}，包含预期的 ${c.expectedPattern}。`
       : `自动化用例 ${c.caseId} [${c.title}] 校验失败：预期触发 ${c.expectedPattern}，模式引擎实际触发 ${matchedPattern}。`,

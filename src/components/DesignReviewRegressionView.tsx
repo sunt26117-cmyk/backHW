@@ -410,45 +410,92 @@ export const DesignReviewRegressionView: React.FC<DesignReviewRegressionViewProp
             </div>
 
             {/* 单个用例详情 */}
-            <div className="mt-5 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono font-bold text-cyan-400 text-sm">{selectedCase.caseId}</span>
-                  <span className="text-white font-bold">{selectedCase.title}</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">
-                    分类: {selectedCase.category}
-                  </span>
-                </div>
-                <span className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono font-bold">
-                  预期 Pattern: {selectedCase.expectedPattern}
-                </span>
-              </div>
-
-              <div className="text-slate-300">
-                <strong>问题输入: </strong>{selectedCase.input.issue.failurePhenomenon}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="bg-slate-900 p-3 rounded border border-slate-800 space-y-1">
-                  <div className="font-bold text-cyan-400 mb-1">确定性计算预期输出:</div>
-                  {Object.entries(selectedCase.expectedCalculation).map(([k, v], i) => (
-                    <div key={i} className="flex justify-between text-slate-300 font-mono">
-                      <span>{k}:</span>
-                      <strong className="text-cyan-300">{String(v)}</strong>
+            {(() => {
+              const currentResult = runGoldStandardCaseRegression(selectedCase.caseId);
+              return (
+                <div className="mt-5 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs space-y-3">
+                  <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-2 gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-cyan-400 text-sm">{selectedCase.caseId}</span>
+                      <span className="text-white font-bold">{selectedCase.title}</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">
+                        分类: {selectedCase.category}
+                      </span>
                     </div>
-                  ))}
-                </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono font-bold">
+                        目标规则: {selectedCase.expectedPattern}
+                      </span>
+                      <span
+                        className={`text-xs px-2.5 py-0.5 rounded font-bold font-mono ${
+                          currentResult.status === 'PASS'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                        }`}
+                      >
+                        {currentResult.status === 'PASS' ? '● 物理引擎验证通过 (PASS)' : '✕ 物理引擎判定未通过 (FAIL)'}
+                      </span>
+                    </div>
+                  </div>
 
-                <div className="bg-slate-900 p-3 rounded border border-slate-800 space-y-1">
-                  <div className="font-bold text-emerald-400 mb-1">预期决策与验证闭环:</div>
-                  <div className="text-slate-300"><strong>Next Best Action: </strong>{selectedCase.expectedNextBestAction}</div>
-                  <div className="text-slate-400 mt-1"><strong>门禁判据: </strong>{selectedCase.expectedVerification}</div>
-                  <div className="text-[11px] font-mono mt-1 text-slate-500">
-                    一票否决 VETO: {selectedCase.expectedVeto ? 'YES (触发否决)' : 'NO (允许通过)'}
+                  <div className="text-slate-300">
+                    <strong>问题输入: </strong>{selectedCase.input.issue.failurePhenomenon}
+                  </div>
+
+                  {/* 真实物理引擎执行反馈 */}
+                  <div className="bg-blue-950/20 border border-blue-500/30 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-blue-300 flex items-center gap-1.5">
+                        <Cpu className="w-3.5 h-3.5 text-blue-400" />
+                        <span>真实物理引擎在线计算与判定结果 (Real Deterministic Engine Execution)</span>
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        触发模式: [{currentResult.triggeredPatterns.join(', ') || '无'}]
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 font-mono leading-relaxed">
+                      {currentResult.summary}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="bg-slate-900 p-3 rounded border border-slate-800 space-y-1">
+                      <div className="font-bold text-cyan-400 mb-1 flex items-center justify-between">
+                        <span>引擎实际输出物理量:</span>
+                        <span className="text-[10px] text-cyan-500 font-normal">第一性原理与解析推导</span>
+                      </div>
+                      {currentResult.calculatedValues && Object.keys(currentResult.calculatedValues).length > 0 ? (
+                        Object.entries(currentResult.calculatedValues).map(([k, v], i) => (
+                          <div key={i} className="flex justify-between text-slate-300 font-mono text-[11px]">
+                            <span className="text-slate-400">{k}:</span>
+                            <strong className="text-cyan-300">{String(v)}</strong>
+                          </div>
+                        ))
+                      ) : (
+                        Object.entries(selectedCase.expectedCalculation).map(([k, v], i) => (
+                          <div key={i} className="flex justify-between text-slate-300 font-mono text-[11px]">
+                            <span>{k}:</span>
+                            <strong className="text-cyan-300">{String(v)}</strong>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="bg-slate-900 p-3 rounded border border-slate-800 space-y-1">
+                      <div className="font-bold text-emerald-400 mb-1">预期决策与验证闭环:</div>
+                      <div className="text-slate-300"><strong>Next Best Action: </strong>{selectedCase.expectedNextBestAction}</div>
+                      <div className="text-slate-400 mt-1"><strong>门禁判据: </strong>{selectedCase.expectedVerification}</div>
+                      <div className="text-[11px] font-mono mt-1 text-slate-400 flex items-center justify-between border-t border-slate-800 pt-1.5">
+                        <span>一票否决 VETO 预期: <strong>{selectedCase.expectedVeto ? 'YES (触发)' : 'NO (通过)'}</strong></span>
+                        <span className={currentResult.vetoTriggered === selectedCase.expectedVeto ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                          实际判定: {currentResult.vetoTriggered ? 'YES (触发否决)' : 'NO (允许放行)'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
+              );
+            })()}
           </div>
         </div>
       )}
