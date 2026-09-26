@@ -65,7 +65,7 @@ interface FunctionalSafetyReliabilityViewProps {
   issue: IssueInput;
   result: CopilotAnalysisResult | null;
   /** 把页内一键填入的结果**写回工程输入**（否则只在本页生效，分析与 Prompt 拿不到）。 */
-  onApplyMeasuredValues?: (values: Record<string, number>, sourceLabel: string) => void;
+  onApplyMeasuredValues?: (values: Record<string, number | string>, sourceLabel: string) => void;
   /** 初始子页（用于深链与渲染冒烟测试）；默认 HARA 追溯链。 */
   initialSubTab?: 'HARA_TRACE' | 'FMEDA' | 'FTA' | 'CAPACITOR_LIFE' | 'SECOND_SOURCE_PCN' | 'EMC_IMMUNITY';
 }

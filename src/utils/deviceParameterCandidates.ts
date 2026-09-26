@@ -1,5 +1,5 @@
 import type { DeviceEntry } from './deviceLibrary';
-import { buildVariantSummaryCandidates, buildGenericUnmappedCandidates, deriveCgdFromCrss, deriveCgs, deriveGateVoltageMin, deriveLegacyUnmappedCandidates } from './deviceCandidateAuxiliary';
+import { buildVariantSummaryCandidates, buildGenericUnmappedCandidates, deriveCgdFromCrss, deriveCgs, deriveGateVoltageMin, deriveLegacyUnmappedCandidates, deriveVthMax } from './deviceCandidateAuxiliary';
 import { getAllEngineeringMeasurementFields } from './scenarioDomainEngine';
 import type { DomainMeasurementField } from './scenarioDomainEngine';
 import { MOSFET_FIELD_TABLE, MOSFET_TARGET_CATEGORY_BY_KEY } from './mosfetFieldTable';
@@ -281,6 +281,9 @@ export function buildDeviceParameterCandidates(
 
   const gateMin = deriveGateVoltageMin(device, currentFieldKeys);
   if (gateMin) candidates.push(gateMin);
+
+  const vthMax = deriveVthMax(device, currentFieldKeys);
+  if (vthMax) candidates.push(vthMax);
 
   const legacyCandidates = deriveLegacyUnmappedCandidates(device, currentFieldKeys);
   candidates.push(...legacyCandidates);

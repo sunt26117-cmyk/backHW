@@ -39,6 +39,10 @@ const DUT_FIELDS: Array<{ key: string; targetKey: string }> = [
   { key: 'qgNc', targetKey: 'gateChargeQgNc' },
   { key: 'qgdNc', targetKey: 'qgdNc' },
   { key: 'vdsRatingV', targetKey: 'vdsRatingV' },
+  // VGS(th) 最小值与最大值都要带出来：datasheet 给 min/typ/max，只带最小值无法判断
+  // "给定 Gate 驱动电压能否可靠开通"。
+  { key: 'vthMinV', targetKey: 'vthMinV' },
+  { key: 'vthMaxV', targetKey: 'vthMaxV' },
 ];
 
 /** COMPONENT 页里必须实测、规格书给不了的字段（如实提示，绝不凭空填）。 */
@@ -75,12 +79,30 @@ export function readDeviceScalarAtTj(
   if (scalar?.value !== null && scalar?.value !== undefined && Number.isFinite(value)) {
     return { value, from: 'SCALAR', note: `${path}.value（规格标量）` };
   }
-  if (targetKey === 'rdsOnMilliOhm') {
-    const curve = getDeviceCurve(device, 'rdsOn');
-    if (curve && curve.length >= 2) {
-      const interpolated = linearInterp(curve, curveTjC).value;
+  // VGS(th) 最大值：优先独立字段（上面的标量分支已覆盖 staticParams.vthMax.value），
+  // 否则从 staticParams.vth.variants 里的 MAX 恢复（datasheet 普遍给 min/typ/max）。
+  if (targetKey === 'vthMaxV') {
+    const variants = (readRaw(device.raw, 'staticParams.vth') as any)?.variants;
+    const maxima = Array.isArray(variants)
+      ? variants.map((v: any) => Number(v?.value)).filter((n: number) => Number.isFinite(n))
+      : [];
+    if (maxima.length) return { value: Math.max(...maxima), from: 'SCALAR', note: 'staticParams.vth.variants 中的 MAX（datasheet min/typ/max）' };
+    return { from: 'NONE', note: '规格未给出 VGS(th) 最大值（既无 staticParams.vthMax.value，也无 variants MAX）' };
+  }
+  // 曲线回落：**单点也算**。真实器件常只给一个 TYP/MIN 点（如 BUK9M6R0-40H 的
+  // staticParams.rdsOn = { points:[{x:25,y:4.9}] }），那一点就是规格标称值；
+  // 此前要求「>=2 点才认」，直接把这种器件判成"未提供 Rds(on)"。
+  const curveKey: 'rdsOn' | 'vth' | undefined = targetKey === 'rdsOnMilliOhm' ? 'rdsOn' : targetKey === 'vthMinV' ? 'vth' : undefined;
+  if (curveKey) {
+    const curve = getDeviceCurve(device, curveKey);
+    const usable = (curve || []).filter((p) => Number.isFinite(Number(p?.y)) && Number(p?.y) > 0);
+    if (usable.length === 1) {
+      return { value: Number(usable[0].y), from: 'SCALAR', note: `${curveKey === 'rdsOn' ? 'Rds(on)' : 'Vth'} 曲线上唯一的数据点 @${usable[0].x}（规格只给一个点，未做温漂外推）` };
+    }
+    if (usable.length >= 2) {
+      const interpolated = linearInterp(usable as Array<{ x: number; y: number }>, curveTjC).value;
       if (Number.isFinite(interpolated) && interpolated > 0) {
-        return { value: interpolated, from: 'CURVE_AT_TJ', note: `Rds(on) 曲线 @${curveTjC}℃ 取点（规格未给标量）` };
+        return { value: interpolated, from: 'CURVE_AT_TJ', note: `${curveKey === 'rdsOn' ? 'Rds(on)' : 'Vth'} 曲线 @${curveTjC}℃ 取点（规格未给标量）` };
       }
     }
   }
@@ -88,8 +110,8 @@ export function readDeviceScalarAtTj(
 }
 
 export interface SupplyPairFill {
-  /** key -> 数值，可直接写入 issue.measuredValues（全部来源为 DATASHEET）。 */
-  values: Record<string, number>;
+  /** key -> 值（数值字段为数字；器件型号/供应商等文本字段为字符串），可直接写入 issue.measuredValues。 */
+  values: Record<string, number | string>;
   sources: Record<string, string>;
   notes: Record<string, string>;
   /** 器件库确实给不出来的项（人话列表，用于提示而不是编一个数填上）。 */
@@ -101,7 +123,7 @@ export function buildSupplyPairFill(
   secondary?: DeviceEntry,
   curveTjC = 125,
 ): SupplyPairFill {
-  const values: Record<string, number> = {};
+  const values: Record<string, number | string> = {};
   const sources: Record<string, string> = {};
   const notes: Record<string, string> = {};
   const missing: string[] = [];
@@ -138,6 +160,24 @@ export function buildSupplyPairFill(
     values[key] = read.value;
     sources[key] = 'DATASHEET';
     if (read.note) notes[key] = read.note;
+  }
+
+  // 文本字段：器件型号 = PCN/替代评估的**目标器件**（有二供取二供，否则取一供）；
+  // 供应商取同一颗的制造商。此前这两格在界面上永远是空的——它们压根不在填入清单里，
+  // 而器件库里明明就有 partNumber / manufacturer。
+  const textSource = secondary ?? primary;
+  if (textSource) {
+    const sideLabel = secondary ? '二供/替代目标器件' : '一供器件';
+    if (textSource.partNumber) {
+      values.componentPartNumber = textSource.partNumber;
+      sources.componentPartNumber = 'DATASHEET';
+      notes.componentPartNumber = `${sideLabel}型号（${textSource.manufacturer || '制造商未记录'}）`;
+    }
+    if (textSource.manufacturer) {
+      values.supplierName = textSource.manufacturer;
+      sources.supplierName = 'DATASHEET';
+      notes.supplierName = `${sideLabel}制造商`;
+    }
   }
 
   return { values, sources, notes, missing };

@@ -169,6 +169,42 @@ export function deriveGateVoltageMin(device: DeviceEntry, currentFieldKeys?: Rea
   };
 }
 
+/**
+ * VGS(th) 最大值。datasheet 普遍给 min/typ/max，而工程侧此前只有"最小值"一个字段，
+ * 于是"给定 VGS 驱动能否可靠开通"这个判断缺一半依据。来源优先级：
+ *   ① staticParams.vthMax.value（datasheet 直给，可自动导入）
+ *   ② staticParams.vth.variants 里 stat=MAX 的那条（从 min/typ/max 的 variants 恢复，需工程确认）
+ */
+export function deriveVthMax(device: DeviceEntry, currentFieldKeys?: ReadonlySet<string>): DeviceParameterCandidate | null {
+  const vth = rawPath(device.raw, 'staticParams.vth') as any;
+  const variants = Array.isArray(vth?.variants)
+    ? vth.variants
+        .map((v: any) => ({ value: finiteNumber(v?.value), stat: String(v?.stat ?? '').toUpperCase(), source: v?.source, confidence: finiteNumber(v?.confidence) }))
+        .filter((it: any) => it.value !== undefined && (it.stat === 'MAX' || it.stat === 'MAXIMUM'))
+    : [];
+  const standalone = finiteNumber((rawPath(device.raw, 'staticParams.vthMax') as any)?.value);
+  const value = standalone ?? (variants.length ? Math.max(...variants.map((v: any) => v.value)) : undefined);
+  if (value === undefined) return null;
+  const mapped = currentFieldKeys ? currentFieldKeys.has('vthMaxV') : true;
+  const direct = standalone !== undefined;
+  return {
+    id: `${device.id}:staticParams.vth|max:${value}`,
+    rawPath: 'staticParams.vth|max',
+    targetKey: mapped ? 'vthMaxV' : null,
+    label: 'Vgs 阈值 Vth 最大值', unit: 'V', value,
+    sourceType: 'DATASHEET_DIRECT', valueType: 'MAX',
+    confidence: Math.max(0.9, Math.min(1, (variants[0]?.confidence as number) ?? 0.95)),
+    sourceRef: typeof variants[0]?.source === 'string' ? variants[0].source : undefined,
+    conditions: vth?.conditions && typeof vth.conditions === 'object' ? vth.conditions : undefined,
+    evidence: direct ? 'staticParams.vthMax.value' : 'staticParams.vth.variants MAX',
+    note: 'VGS(th) 最大值：与最小值分开保留，用于判断给定 Gate 驱动电压能否可靠开通。',
+    importable: mapped && direct,
+    mappingStatus: mapped ? 'mapped' : 'unmapped',
+    candidateKind: mapped ? (direct ? 'DIRECT_SCALAR' : 'DERIVED_OR_ESTIMATE') : 'NO_MAPPING',
+    category: '静态',
+  };
+}
+
 export function deriveLegacyUnmappedCandidates(device: DeviceEntry, currentFieldKeys?: ReadonlySet<string>): DeviceParameterCandidate[] {
   const items = (device.raw as any)?.extractionHints?.unmappedImportantData;
   if (!Array.isArray(items)) return [];

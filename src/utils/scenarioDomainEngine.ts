@@ -142,6 +142,7 @@ const P: Record<EngineeringDomain, DomainProfile> = {
       {key:'rgOffOhm',label:'关断栅极电阻 Rg_off',unit:'Ω',description:'下桥MOSFET关断驱动电阻，影响米勒直通风险评估',tag:'SPEC'},
       {key:'cgdPf',label:'米勒电容 Cgd',unit:'pF',description:'MOSFET栅漏电容，用于米勒直通尖峰 Vgs_induced 计算',tag:'SPEC'},
       {key:'vthMinV',label:'Vgs开启阈值(最小值)',unit:'V',description:'器件数据手册最小开启阈值，用于判定米勒尖峰是否会误导通',tag:'SPEC'},
+      {key:'vthMaxV',label:'Vgs开启阈值(最大值)',unit:'V',description:'器件数据手册最大开启阈值，用于判断给定 Gate 驱动电压能否可靠开通',tag:'SPEC'},
       {key:'dvdtVns',label:'dv/dt',unit:'V/ns',description:'开关节点电压变化率，用于 BLDC Miller 风险确定性计算',tag:'MEASURED'},
       {key:'keVkrpm',label:'反电动势常数 Ke',unit:'V/krpm',description:'电机反电动势系数，用于交叉核验实测泵升与理论泵升是否一致',tag:'SPEC'},
 

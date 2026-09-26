@@ -125,6 +125,11 @@ export const MOSFET_PARAM_TEMPLATE = {
     vth: {
       xAxis: 'tj', xUnit: '℃', yUnit: 'V', conditions: { id: null, vds: null }, stat: 'MIN',
       points: [], source: null, sourceType: 'DATASHEET_GRAPH_ESTIMATE', confidence: null, note: null,
+      variants: [],
+    },
+    vthMax: {
+      value: null, unit: 'V', conditions: { id: null, vds: null, tj: null }, stat: 'MAX',
+      source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [],
     },
     bodyChannelCurrent: { value: null, unit: 'A', conditions: {}, stat: 'TYP', source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [] },
     vbrDss: { value: null, unit: 'V', conditions: { tj: null, id: null }, stat: 'MIN', source: null, sourceType: 'DATASHEET_DIRECT', confidence: null, note: null, variants: [] },
@@ -184,7 +189,8 @@ export const DEVICE_FIELD_MEANINGS: Array<{ field: string; engine: string }> = [
   { field: 'maxRatings.tjMax', engine: '器件绝对最大结温边界 → tjMaxC；严禁映射为 junctionTempC（当前工况结温）' },
   { field: 'maxRatings.tstg', engine: '器件存储温度范围；当前工程无等价单值输入，保留作器件能力边界证据' },
   { field: 'staticParams.rdsOn 曲线', engine: 'P006 结温迭代；完整曲线留在器件库，工程输入可选取 25℃点' },
-  { field: 'staticParams.vth 曲线', engine: 'P003 米勒直通裕量；工程输入候选 vthMinV' },
+  { field: 'staticParams.vth 曲线', engine: 'P003 米勒直通裕量；工程输入候选 vthMinV（最小值）' },
+  { field: 'staticParams.vthMax / vth.variants(MAX)', engine: 'VGS(th) 最大值 → vthMaxV；与最小值分开保留，用于判断给定驱动电压能否可靠开通' },
   { field: 'capacitanceParams.crss 曲线', engine: 'P003 米勒位移电流；可作为 cgdPf 候选，原始名称保持 Crss' },
   { field: 'capacitanceParams.ciss/coss', engine: '器件规格直接进入 cissPf/cossPf；Cgs 仍保留 Ciss-Crss 的推导链，不把推导冒充 direct Cgs' },
   { field: 'gateCharge.qg/qgs/qgd/qsw/gatePlateauV', engine: '分别进入 gateChargeQgNc/qgsNc/qgdNc/qswNc/gatePlateauV；用于 P012/驱动能力与瞬态边界' },

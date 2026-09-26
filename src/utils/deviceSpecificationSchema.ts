@@ -6,6 +6,7 @@ export const DEVICE_SPEC_FIELDS = [
   { key: 'vdsRatingV', label: 'Vds 额定耐压', unit: 'V', description: 'MOSFET 数据手册额定耐压，不是当前工况 VDS 实测值。', tag: 'SPEC' as const, category: '功率级' as const },
   { key: 'rdsOnMilliOhm', label: 'RDS(on) 数据手册基准值', unit: 'mΩ', description: '从器件 datasheet 主条件提取的 RDS(on) 基准值；工程引擎优先使用器件曲线按结温插值。', tag: 'SPEC' as const, category: '静态' as const },
   { key: 'vthMinV', label: 'VGS(th) 最小值', unit: 'V', description: '器件数据手册最小阈值；不得等同为实际 Gate 驱动电压。', tag: 'SPEC' as const, category: '静态' as const },
+  { key: 'vthMaxV', label: 'VGS(th) 最大值', unit: 'V', description: '器件数据手册最大阈值；与最小值分开保留——只留最小值无法判断给定 Gate 驱动电压能否可靠开通。', tag: 'SPEC' as const, category: '静态' as const },
   { key: 'cgdPf', label: 'Cgd / Miller 电容', unit: 'pF', description: '直接 Cgd 才作为 DATASHEET 规格；Crss→Cgd 仅保留为 DERIVED 工程近似。', tag: 'SPEC' as const, category: '电容' as const },
   { key: 'cgsPf', label: 'Cgs', unit: 'pF', description: 'Datasheet 直接 Cgs 或 Ciss-Crss 派生近似；派生值必须保留其来源。', tag: 'SPEC' as const, category: '电容' as const },
   { key: 'gateChargeQgNc', label: '总栅电荷 Qg', unit: 'nC', description: 'Datasheet Gate charge 总量。', tag: 'SPEC' as const, category: '栅极驱动' as const },

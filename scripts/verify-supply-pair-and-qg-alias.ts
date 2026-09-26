@@ -10,6 +10,8 @@
  */
 import { importDeviceFromJson, saveDevice } from '../src/utils/deviceLibrary';
 import { buildSupplyPairFill, readDeviceScalarAtTj, rawPathForTargetKey, MEASURED_ONLY_COMPONENT_FIELDS } from '../src/utils/deviceSupplyPair';
+import { buildDeviceParameterCandidates } from '../src/utils/deviceParameterCandidates';
+import { DEVICE_SPEC_FIELDS } from '../src/utils/deviceSpecificationSchema';
 import { deriveBldcEvaluationInput } from '../src/utils/scenarioDerived';
 import { extractUnifiedEngineeringModel } from '../src/utils/unifiedStateExtractor';
 
@@ -23,6 +25,7 @@ const memory = new Map<string, string>();
 const eq = (name: string, got: unknown, expected: unknown) => {
   if (got !== expected) throw new Error(`${name}: got ${String(got)}, expected ${String(expected)}`);
 };
+const ok_ = (cond: boolean, message: string) => { if (!cond) throw new Error(message); };
 const near = (name: string, got: unknown, expected: number, tol = 1e-9) => {
   if (typeof got !== 'number' || !Number.isFinite(got) || Math.abs(got - expected) > tol) {
     throw new Error(`${name}: got ${String(got)}, expected ≈${expected}`);
@@ -47,7 +50,7 @@ const mosfet = (partNumber: string, extra: Record<string, unknown>) => {
 };
 
 const primary = mosfet('SUPPLY-PRIMARY', {
-  staticParams: { rdsOn: { value: 4.9 }, vth: { points: [{ x: 25, y: 1.45 }, { x: 175, y: 0.7 }] } },
+  staticParams: { rdsOn: { value: 4.9 }, vth: { points: [{ x: 25, y: 1.45 }, { x: 175, y: 0.7 }], variants: [{ value: 2.1, unit: 'V', stat: 'MAX' }] } },
   gateCharge: { qg: { value: 26 }, qgd: { value: 12 } },
   thermalParams: { rthJc: { value: 2.14 } },
   bodyDiode: { qrr: { value: 17 } },
@@ -87,15 +90,23 @@ eq('映射单一来源·rthJc', rawPathForTargetKey('rthJcCPerW'), 'thermalParam
 eq('映射单一来源·vds', rawPathForTargetKey('vdsRatingV'), 'maxRatings.vds');
 
 const fill = buildSupplyPairFill(primary, secondary);
-const expectedPairs: Array<[string, number]> = [
+const expectedPairs: Array<[string, number | string]> = [
   ['primaryRdsOnMilliOhm', 4.9], ['secondaryRdsOnMilliOhm', 6.2],
   ['primaryQgNc', 26], ['secondaryQgNc', 30],
   ['primaryQrrNc', 17], ['secondaryQrrNc', 20],
   ['primaryRthJcCPerW', 2.14], ['secondaryRthJcCPerW', 2.5],
   // COMPONENT 页里属于当前器件的字段也一并继承
   ['rdsOnMilliOhm', 4.9], ['qgNc', 26], ['qgdNc', 12], ['vdsRatingV', 40],
+  // VGS(th) 最小/最大都要带出来（datasheet 给 min/typ/max；125℃ 插值 = 1.45 + (0.7-1.45)*100/150 = 0.95）
+  ['vthMinV', 0.95], ['vthMaxV', 2.1],
+  // 文本字段：器件型号取二供（PCN/替代目标器件），供应商取同一颗的制造商
+  ['componentPartNumber', 'SUPPLY-SECONDARY'], ['supplierName', 'T'],
 ];
-for (const [key, value] of expectedPairs) near(`一键填入·${key}`, fill.values[key], value);
+for (const [key, value] of expectedPairs) {
+  // 文本字段（器件型号/供应商）用相等比较，数值字段用容差比较
+  if (typeof value === 'string') eq(`一键填入·${key}`, fill.values[key], value);
+  else near(`一键填入·${key}`, fill.values[key], value);
+}
 eq('一键填入·项数', Object.keys(fill.values).length, expectedPairs.length);
 eq('一键填入·无缺失', fill.missing.length, 0);
 for (const key of Object.keys(fill.values)) eq(`一键填入·${key} 来源=DATASHEET`, fill.sources[key], 'DATASHEET');
@@ -119,5 +130,31 @@ if (!String(curveFill.notes.primaryRdsOnMilliOhm || '').includes('125')) {
 }
 eq('曲线回落·曲线器件缺 Qg 时必须如实报缺',
   curveFill.missing.some((m) => m.includes('Qg')), true);
+
+// ----------------------------------------------------- 3) 真实器件形态：单点曲线必须认
+// 现场故障：BUK9M6R0-40H 的 staticParams.rdsOn 是 { points:[{x:25,y:4.9}] }（单点、无 value、单位用 yUnit），
+// 此前要求「曲线 >=2 点才认」-> 直接判"未提供 Rds(on)"，一键填入少 3 项。
+const realShape = mosfet('REAL-SINGLE-POINT', {
+  staticParams: {
+    rdsOn: { xAxis: 'tj', yUnit: 'mΩ', stat: 'TYP', points: [{ x: 25, y: 4.9 }], sourceType: 'DATASHEET_DIRECT' },
+    vth: { xAxis: 'tj', yUnit: 'V', stat: 'MIN', points: [{ x: 25, y: 1.45 }], variants: [{ value: 2.1, unit: 'V', stat: 'MAX' }], sourceType: 'DATASHEET_DIRECT' },
+  },
+  gateCharge: { qg: { value: 26 } },
+  thermalParams: { rthJc: { value: 2.14 } },
+  bodyDiode: { qrr: { value: 17 } },
+});
+const realFill = buildSupplyPairFill(realShape, undefined);
+near('真实形态·单点 Rds(on) 必须认（此前被 >=2 点门槛丢弃）', realFill.values.primaryRdsOnMilliOhm, 4.9);
+near('真实形态·单点 Vth 最小值必须认', realFill.values.vthMinV, 1.45);
+near('真实形态·Vth 最大值从 variants 恢复', realFill.values.vthMaxV, 2.1);
+eq('真实形态·器件型号（文本字段）', realFill.values.componentPartNumber, 'REAL-SINGLE-POINT');
+eq('真实形态·供应商（文本字段）', realFill.values.supplierName, 'T');
+eq('真实形态·单点来源说明写明未做温漂外推',
+  String(realFill.notes.primaryRdsOnMilliOhm || '').includes('未做温漂外推'), true);
+// 器件规格候选侧：Vth 最大值也要生成候选
+const realCandidates = buildDeviceParameterCandidates(realShape, new Set([...DEVICE_SPEC_FIELDS.map(f => f.key)]));
+const vthMaxCandidate = realCandidates.find((c) => c.targetKey === 'vthMaxV');
+ok_(!!vthMaxCandidate, 'Vth 最大值必须生成候选');
+near('Vth 最大值候选值', vthMaxCandidate!.value, 2.1);
 
 console.log('supply-pair-and-qg-alias: PASS');

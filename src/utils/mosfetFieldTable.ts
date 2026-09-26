@@ -2,7 +2,7 @@ import type { CandidateSourceType, CandidateValueType, DeviceParameterCategory, 
 import { DEVICE_SPEC_FIELDS } from './deviceSpecificationSchema';
 
 export const MOSFET_TARGET_CATEGORY_BY_KEY: Record<string, DeviceParameterCategory> = {
-  vdsRatingV: '功率级', easEnergyMj: '功率级', rdsOnMilliOhm: '静态', vthMinV: '静态',
+  vdsRatingV: '功率级', easEnergyMj: '功率级', rdsOnMilliOhm: '静态', vthMinV: '静态', vthMaxV: '静态',
   cgdPf: '电容', cgsPf: '电容', gateChargeQgNc: '栅极驱动', qgdNc: '栅极驱动',
   turnOffDelayNs: '动态', fallTimeNs: '动态', thermalResistanceCPerW: '热', rthCaOrJa: '热',
   diodeForwardVoltageV: '二极管', qrrNc: '二极管', soaShortCircuitTimeUs: '保护/可靠性',
@@ -22,6 +22,7 @@ export const MOSFET_FIELD_TABLE: FieldSpec[] = [
 
   { rawPath: 'staticParams.rdsOn', label: 'Rds(on)（曲线选点）', unit: 'mΩ', targetKey: 'rdsOnMilliOhm', category: '静态', defaultSourceType: 'DATASHEET_GRAPH_ESTIMATE', defaultConfidence: 0.82, valueType: 'TYP', valueKind: 'curve', evidence: 'Rds(on) vs Tj 曲线选点', note: '当前工程字段是单值，完整曲线继续保留在器件库。' },
   { rawPath: 'staticParams.vth', label: 'Vgs 阈值 Vth（曲线选点）', unit: 'V', targetKey: 'vthMinV', category: '静态', defaultSourceType: 'DATASHEET_GRAPH_ESTIMATE', defaultConfidence: 0.82, valueType: 'MIN', valueKind: 'curve', evidence: 'Vth vs Tj 曲线选点', note: '曲线估读不得冒充保证值。' },
+  { rawPath: 'staticParams.vthMax', label: 'Vgs 阈值 Vth 最大值', unit: 'V', targetKey: 'vthMaxV', category: '静态', defaultSourceType: 'DATASHEET_DIRECT', defaultConfidence: 0.9, valueType: 'MAX', evidence: 'VGS(th) 最大值（datasheet 表格）', note: '与最小值分开保留。' },
   { rawPath: 'staticParams.bodyChannelCurrent', label: '体沟道电流能力', unit: 'A', targetKey: null, category: '静态', defaultSourceType: 'DATASHEET_DIRECT', defaultConfidence: 0.90, valueType: 'TYP', evidence: 'Static body-channel current' },
   { rawPath: 'staticParams.vbrDss', label: 'V(BR)DSS 最小击穿电压', unit: 'V', targetKey: 'vbrDssMinV', category: '功率级', defaultSourceType: 'DATASHEET_DIRECT', defaultConfidence: 0.95, valueType: 'MIN', evidence: 'Drain-source breakdown voltage' },
   { rawPath: 'staticParams.idss', label: '漏极漏电 IDSS', unit: 'μA', targetKey: 'idssUa', category: '静态', defaultSourceType: 'DATASHEET_DIRECT', defaultConfidence: 0.95, valueType: 'MAX', evidence: 'Drain leakage IDSS' },
