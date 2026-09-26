@@ -12,3 +12,6 @@ coverage/
 *.zip
 *.7z
 *.rar
+
+# verify-snapshot.ps1 的默认输出目录（避免验证脚本弄脏工作区）
+_verify/
