@@ -104,6 +104,9 @@ export interface BldcEvaluationInput {
   // 器件曲线（可选）：来自器件库，按当前工况插值，替代写死系数。
   rdsOnCurve?: Array<{ x: number; y: number }>;  // x=Tj(℃), y=Rds(on)(mΩ)
   crssCurve?: Array<{ x: number; y: number }>;   // x=Vds(V), y=Crss(pF)
+  /** Cgd 取点说明：由 scenarioDerived 经 deviceCapacitance.resolveEffectiveCgdPf 唯一解析后带下来，
+   *  供 Trace 如实展示取点电压与假设（不再由 pattern 各自二次解析）。 */
+  cgdResolutionNote?: string;
   vthCurve?: Array<{ x: number; y: number }>;    // x=Tj(℃), y=Vth(V)
 
   // ---- 以下为本次修复新增：P009/P010/P011/P018 此前是无条件 triggered:true 的硬编码

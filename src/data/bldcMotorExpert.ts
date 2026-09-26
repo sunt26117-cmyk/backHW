@@ -9,7 +9,7 @@ function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): 
 
 export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueInput): CopilotAnalysisResult {
   const state = extractUnifiedEngineeringModel(context, issue);
-  const deterministic = calculateBldcDeterministicCalculations(issue, state);
+  const deterministic = calculateBldcDeterministicCalculations(issue, state, context);
   const bus = deterministic.find((item) => item.id === 'BLDC_BUS_PUMPING');
   const miller = deterministic.find((item) => item.id === 'BLDC_MILLER_RISK');
   const mv = issue.measuredValues || {};

@@ -78,7 +78,7 @@ export function runDeterministicPrecomputations(
   // Phase 2: 安全与电气时序判据 (如 Bus Pumping, Miller)
   // 此时的 BLDC 引擎将透明地使用 Phase 1 恶化过的高温 Vth!
   if (resolveEngineeringDomains(issue).includes('BLDC')) {
-    const bldcCalculations = calculateBldcDeterministicCalculations(issue, state);
+    const bldcCalculations = calculateBldcDeterministicCalculations(issue, state, context);
 
     for (const calc of bldcCalculations) {
       if (calc.status === 'INSUFFICIENT_INPUT') {

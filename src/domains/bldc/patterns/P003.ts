@@ -2,7 +2,7 @@ import type { PatternOutputItem } from '../../../types';
 import type { BldcEvaluationInput } from '../types';
 import type { BldcPatternContext } from '../context';
 
-import { linearInterp } from '../../../utils/deviceLibrary';
+import { resolveWorstCaseVthMinV } from '../../../utils/deviceCapacitance';
 import { checkMillerRisk } from '../../../physics/motorPhysicsEngine';
 import { traceSource, traceEvidenceId, traceValue, makeTraceInput, makeTraceNode } from '../trace';
 
@@ -10,12 +10,22 @@ export function evaluateP003(input: BldcEvaluationInput, ctx: BldcPatternContext
   // P003: 高dv/dt→米勒误导通 (Section 4)
   // ----------------------------------------------------
   // 若器件库提供了 Crss@Vds / Vth@Tj 曲线，按当前工况插值替代写死标量
-  const cgdPfEff = input.crssCurve && input.crssCurve.length >= 2
-    ? linearInterp(input.crssCurve, ctx.vbusNominalSafe).value
-    : input.cgdPf;
-  const vthMinVEff = input.vthCurve && input.vthCurve.length >= 2
-    ? linearInterp(input.vthCurve, 25).value
-    : input.vthMinV;
+  // Cgd 的取值优先级已由 scenarioDerived 经 deviceCapacitance.resolveEffectiveCgdPf 唯一解析
+  // （实测 > 器件 Crss 曲线@工况Vbus > 直接 Cgd > Qgd 换算），这里不再二次覆盖：
+  // 此前 P003 让 crssCurve 无条件压过 input.cgdPf，会把工程师实测的 Cgd 顶掉。
+  const cgdPfEff = input.cgdPf;
+  const cgdNote = input.cgdResolutionNote
+    ?? (input.traceSources?.cgdPf === 'DATASHEET' ? '器件规格/Crss 曲线取点' : undefined);
+  // Vth 取点：米勒误导通的最坏情况是 Vth **最低**，即结温**最高**。固定 25 ℃ 取点会算出更大的裕量，
+  // 等于低估风险。取点规则与 path B（bldcDeterministicEngine.buildMiller）**共用同一个函数**
+  // （deviceCapacitance.resolveWorstCaseVthMinV）；此前两处各写一份，容易只改一边。
+  const vthResolved = resolveWorstCaseVthMinV({
+    providedVthMinV: input.vthMinV,
+    vthCurve: input.vthCurve,
+    tjMaxC: input.tjMaxC,
+  });
+  const vthMinVEff = vthResolved.value ?? input.vthMinV;
+  const vthHotTjC = vthResolved.tjC;
 
   // [统一共享核心] 原先这里是 P003 自己写的一份"阻性界 + 容性分压界 + 源极电感过冲 + 实测优先"
   // 米勒模型；现已把该模型提升进 motorPhysicsEngine.checkMillerRisk（共享核心），P003 与
@@ -58,7 +68,7 @@ export function evaluateP003(input: BldcEvaluationInput, ctx: BldcPatternContext
   } else {
     p003CalculatedValues['⚠ 数据缺口'] = '未提供 Cgs，暂只能给出阻性上界，开关沿较短时可能显著高估实际感应电压';
   }
-  p003CalculatedValues['门极最小开通阈值 Vth_min (V，@25℃)'] = vthMinVEff;
+  p003CalculatedValues['门极最小开通阈值 Vth_min (V，最坏情况取点' + (vthHotTjC !== undefined ? ' @' + vthHotTjC + '℃' : '') + ')'] = vthMinVEff;
   p003CalculatedValues['源极电感 di/dt 过冲项 ΔVgs_inductive (V)'] = Number(inductiveVgsSpike.toFixed(2));
   p003CalculatedValues['理论估算(米勒耦合+源极电感过冲) Vgs_theoretical (V)'] = Number(vgateInducedTheoreticalTotal.toFixed(2));
   if (hasGateSpikeMeasured) {
@@ -75,14 +85,14 @@ export function evaluateP003(input: BldcEvaluationInput, ctx: BldcPatternContext
     unit: 'V',
     inputs: [
       makeTraceInput('dvdtVns', '开关节点 dv/dt', traceValue(input.dvDtVns), traceSource(input, 'dvdtVns', !Number.isFinite(input.dvDtVns)), 'V/ns', undefined, traceEvidenceId(input, 'dvdtVns')),
-      makeTraceInput('cgdPf', 'Cgd / Crss', traceValue(cgdPfEff), traceSource(input, 'cgdPf', Boolean(input.crssCurve?.length && input.crssCurve.length >= 2)), 'pF', input.crssCurve?.length && input.crssCurve.length >= 2 ? '由器件库 Crss 曲线按当前 Vbus 插值' : !Number.isFinite(input.cgdPf) ? '未提供，当前模型仅能给出缺输入保护' : undefined, traceEvidenceId(input, 'cgdPf')),
+      makeTraceInput('cgdPf', 'Cgd / Crss', traceValue(cgdPfEff), traceSource(input, 'cgdPf', !Number.isFinite(input.cgdPf)), 'pF', Number.isFinite(input.cgdPf) ? cgdNote : '未提供，当前模型仅能给出缺输入保护', traceEvidenceId(input, 'cgdPf')),
       ...(input.cgsPf !== undefined ? [makeTraceInput('cgsPf', '栅源电容 Cgs', input.cgsPf, traceSource(input, 'cgsPf'), 'pF', undefined, traceEvidenceId(input, 'cgsPf'))] : [makeTraceInput('cgsPf', '栅源电容 Cgs', '缺输入', 'ASSUMED_DEFAULT', 'pF', '未提供；当前只能使用阻性上界')]),
       makeTraceInput('rgOffOhm', '关断回路总电阻 Rg_off', traceValue(input.rgOffOhm), traceSource(input, 'rgOffOhm', !Number.isFinite(input.rgOffOhm)), 'Ω', undefined, traceEvidenceId(input, 'rgOffOhm')),
       makeTraceInput('vbusNominal', '母线电压', ctx.vbusNominalSafe, traceSource(input, 'vbusNominal', ctx.vbusNominalWasAssumed), 'V', ctx.vbusNominalWasAssumed ? '未提供，按13.5V假设' : undefined, traceEvidenceId(input, 'vbusNominal')),
       makeTraceInput('sourceInductanceNh', '源极寄生电感', traceValue(input.sourceInductanceNh), traceSource(input, 'sourceInductanceNh', input.sourceInductanceNh === undefined), 'nH', input.sourceInductanceNh === undefined ? '未提供，理论源极电感过冲项不可单独核实' : undefined, traceEvidenceId(input, 'sourceInductanceNh')),
       makeTraceInput('diDtANs', 'di/dt', traceValue(input.diDtANs), traceSource(input, 'diDtANs', input.diDtANs === undefined), 'A/ns', input.diDtANs === undefined ? '未提供，源极电感过冲项缺输入' : undefined, traceEvidenceId(input, 'diDtANs')),
       makeTraceInput('gateSpikeV', '门极 Vgs 实测尖峰', hasGateSpikeMeasured ? input.gateSpikeMeasuredV! : '未导入', hasGateSpikeMeasured ? traceSource(input, 'gateSpikeV') : 'USER_INPUT', 'V', hasGateSpikeMeasured ? undefined : '没有实测门极波形，判据取理论模型值', traceEvidenceId(input, 'gateSpikeV')),
-      makeTraceInput('vthMinV', 'MOSFET Vth 最小值', vthMinVEff, traceSource(input, 'vthMinV', Boolean(input.vthCurve?.length && input.vthCurve.length >= 2)), 'V', input.vthCurve?.length && input.vthCurve.length >= 2 ? '由器件库 Vth 曲线 @25℃ 插值' : undefined, traceEvidenceId(input, 'vthMinV')),
+      makeTraceInput('vthMinV', 'MOSFET Vth 最小值', vthMinVEff, traceSource(input, 'vthMinV', Boolean(input.vthCurve?.length && input.vthCurve.length >= 2)), 'V', input.vthCurve?.length && input.vthCurve.length >= 2 ? `取最坏情况高温点 @${vthHotTjC ?? '?'}℃ 的曲线值，并与工程师标量取较小者（Vth 越低越危险）` : undefined, traceEvidenceId(input, 'vthMinV')),
     ],
     formula: 'I_miller=Cgd·dv/dt；Vgs_induced=min(阻性界, 容性分压界)+L_source·di/dt；有实测 Vgs 时以实测优先',
     standardRef: 'MOSFET 栅极驱动数据手册 / 实测 Vgs 过冲边界',
@@ -102,7 +112,7 @@ export function evaluateP003(input: BldcEvaluationInput, ctx: BldcPatternContext
     evidenceType: hasGateSpikeMeasured ? 'MEASURED' : 'CALCULATED',
     vetoTriggered: p003ShootThroughRisk,
     vetoReason: p003ShootThroughRisk
-      ? `门极抬升电压 (${vgateInducedTotal.toFixed(2)}V${hasGateSpikeMeasured ? '，示波器实测' : '，理论估算'}) 已超出MOSFET阈值下限 (${input.vthMinV}V)，同桥臂直通 (Shoot-Through) 致命风险触发一票否决！`
+      ? `门极抬升电压 (${vgateInducedTotal.toFixed(2)}V${hasGateSpikeMeasured ? '，示波器实测' : '，理论估算'}) 已超出MOSFET阈值下限 (${vthMinVEff}V)，同桥臂直通 (Shoot-Through) 致命风险触发一票否决！`
       : undefined,
     candidateMeasures: [
       '门极回路增加有源米勒钳位电路 (Active Miller Clamp) 或门极对地反向二极管+低阻下拉',

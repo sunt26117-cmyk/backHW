@@ -845,7 +845,7 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
   const metrics: Array<{label:string; value:string; note:string; tag:'MEASURED'|'CALCULATED'|'SPEC'|'BENCHMARK'}> = [];
   if (d === 'BLDC') {
     const state = extractUnifiedEngineeringModel(context, issue);
-    const evidence = calculateBldcDeterministicCalculations(issue, state);
+    const evidence = calculateBldcDeterministicCalculations(issue, state, context);
     evidence.forEach((item) => {
       if (item.status === 'CALCULATED' && item.value !== undefined) {
         metrics.push({

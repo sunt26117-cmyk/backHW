@@ -91,3 +91,122 @@ export function worstCaseHotTjC(device: DeviceEntry | undefined, tjMaxC?: number
   if (curve && curve.length) return curve.reduce((m, p) => (p.x > m ? p.x : m), curve[0].x);
   return undefined;
 }
+
+/** Vbus 未由工程师提供时，Crss 曲线取点所用的假设母线电压（与 BLDC pattern context 的 13.5V 假设一致）。 */
+export const ASSUMED_VBUS_FOR_CURVE_V = 13.5;
+
+export type CgdSourceKind = 'MEASURED_INPUT' | 'CRSS_CURVE_AT_VBUS' | 'CGD_DIRECT' | 'QGD_DERIVED' | 'NONE';
+
+export interface EffectiveCgdResolution {
+  value?: number;
+  from: CgdSourceKind;
+  /** 曲线取点用的 Vds（仅 CRSS_CURVE_AT_VBUS 时有意义）。 */
+  vdsV?: number;
+  /** 取点用的是假设母线电压——调用方必须把这件事如实显示给工程师。 */
+  vdsAssumed?: boolean;
+  /** 供 Trace / UI 展示的取点说明。 */
+  note?: string;
+}
+
+/**
+ * Cgd 的**唯一**优先级解析。path A（scenarioDerived→P003）与 path B
+ * （bldcDeterministicEngine.buildMiller）必须共用本函数，否则同一个器件在两条链路上会算出不同的
+ * 米勒电流。此前正是如此：P003 让 Crss 曲线**压过**工程师实测的 Cgd，而确定性引擎完全不看曲线。
+ *
+ * 优先级：实测/导入 > 器件 Crss 曲线@工况Vbus > 规格直接给出的 Cgd > Qgd 换算（工程近似，须标注）。
+ */
+export function resolveEffectiveCgdPf(args: {
+  /** 工程师结构化输入/导入的实测 Cgd（pF）。 */
+  measuredCgdPf?: number;
+  device?: DeviceEntry;
+  /** 直接给出曲线时可不传 device（P003 只有曲线、没有器件对象）。 */
+  crssCurve?: Array<{ x: number; y: number }>;
+  /** 曲线取点的工况母线电压（V）。 */
+  vdsV?: number;
+  /** vdsV 是否为假设值（调用方知道，本函数无法判断）。 */
+  vdsAssumed?: boolean;
+  /** 无实测、无器件曲线时的换算源（nC）。 */
+  qgdNc?: number;
+  /** Qgd→Cgd 换算假定的电压摆幅（V），默认 12。 */
+  qgdSwingV?: number;
+}): EffectiveCgdResolution {
+  const measured = args.measuredCgdPf;
+  if (measured !== undefined && Number.isFinite(measured) && measured > 0) {
+    return { value: measured, from: 'MEASURED_INPUT', note: '工程师结构化输入/导入实测，不被器件曲线覆盖' };
+  }
+  const curve = args.crssCurve ?? (args.device ? getDeviceCurve(args.device, 'crss') : undefined);
+  const vdsV = args.vdsV !== undefined && Number.isFinite(args.vdsV) ? args.vdsV : undefined;
+  if (curve && curve.length >= 2 && vdsV !== undefined) {
+    const v = linearInterp(curve, vdsV).value;
+    if (Number.isFinite(v) && v > 0) {
+      return {
+        value: v,
+        from: 'CRSS_CURVE_AT_VBUS',
+        vdsV,
+        vdsAssumed: args.vdsAssumed,
+        note: `按器件 Crss 曲线在 Vds=${vdsV}V 插值（Crss ≡ Cgd）${args.vdsAssumed ? '，⚠ 母线电压未提供，该取点为假设值' : ''}`,
+      };
+    }
+  }
+  const direct = args.device ? num((rawPath(args.device.raw, 'capacitanceParams.cgdDirect') as any)?.value) : undefined;
+  if (direct !== undefined && direct > 0) {
+    return { value: direct, from: 'CGD_DIRECT', note: '器件规格直接给出的 Cgd（非曲线取点）' };
+  }
+  const qgdNc = args.qgdNc;
+  if (qgdNc !== undefined && Number.isFinite(qgdNc) && qgdNc > 0) {
+    const swing = args.qgdSwingV ?? 12;
+    return { value: (qgdNc * 1000) / swing, from: 'QGD_DERIVED', note: `由 Qgd=${qgdNc}nC 按假定摆幅 ${swing}V 换算（工程近似，非实测）` };
+  }
+  return { from: 'NONE', note: '未提供 Cgd、器件无 Crss 曲线、也无 Qgd 可用' };
+}
+
+export type VthSourceKind = 'PROVIDED' | 'CURVE_AT_HOT_TJ' | 'MIN_OF_PROVIDED_AND_CURVE' | 'NONE';
+
+export interface WorstCaseVthResolution {
+  value?: number;
+  from: VthSourceKind;
+  /** 曲线取点用的结温（最坏情况 = 结温最高）。 */
+  tjC?: number;
+  note?: string;
+}
+
+/**
+ * 米勒误导通判据用的 Vth_min。**最坏情况是 Vth 最低，即结温最高**：把 Vth 固定在 25℃ 会算出更大的
+ * 安全裕量，等于低估风险。取「工程师标量 / 上游高温恶化值」与「器件 vth 曲线在最坏高温点」的较小者。
+ * path A（P003）与 path B（buildMiller）必须共用本函数，否则同一个器件在两条链路上会得到不同的判据阈值。
+ */
+export function resolveWorstCaseVthMinV(args: {
+  /** 工程师给出的标量或上游（热级联）恶化后的 Vth（V）。 */
+  providedVthMinV?: number;
+  device?: DeviceEntry;
+  /** 直接给出曲线时可不传 device（P003 只有曲线）。 */
+  vthCurve?: Array<{ x: number; y: number }>;
+  /** 器件绝对最大结温（℃）。缺省时退回器件规格 maxRatings.tjMax / vth 曲线最高温点。 */
+  tjMaxC?: number;
+}): WorstCaseVthResolution {
+  const curve = args.vthCurve ?? (args.device ? getDeviceCurve(args.device, 'vth') : undefined);
+  const specTj = args.tjMaxC !== undefined && Number.isFinite(args.tjMaxC) ? args.tjMaxC : undefined;
+  const deviceTj = args.device ? worstCaseHotTjC(args.device) : undefined;
+  const curveTj = curve && curve.length ? curve.reduce((m, p) => (p.x > m ? p.x : m), curve[0].x) : undefined;
+  const hotTj = specTj ?? deviceTj ?? curveTj;
+
+  const curveVthRaw = curve && curve.length >= 2 && hotTj !== undefined ? linearInterp(curve, hotTj).value : undefined;
+  const curveVth = curveVthRaw !== undefined && Number.isFinite(curveVthRaw) && curveVthRaw > 0 ? curveVthRaw : undefined;
+  const provided = args.providedVthMinV !== undefined && Number.isFinite(args.providedVthMinV) && args.providedVthMinV > 0
+    ? args.providedVthMinV
+    : undefined;
+
+  if (provided === undefined && curveVth === undefined) {
+    return { from: 'NONE', tjC: hotTj, note: '未提供 Vth，也无可用 vth 曲线' };
+  }
+  const value = Math.min(...[provided, curveVth].filter((v): v is number => v !== undefined));
+  const from: VthSourceKind = provided !== undefined && curveVth !== undefined
+    ? 'MIN_OF_PROVIDED_AND_CURVE'
+    : curveVth !== undefined
+      ? 'CURVE_AT_HOT_TJ'
+      : 'PROVIDED';
+  const note = curveVth !== undefined
+    ? `Vth 取最坏情况高温点 @${hotTj ?? '?'}℃ 的曲线值 ${curveVth}V${provided !== undefined ? `，与给出值 ${provided}V 取较小者` : ''}（Vth 越低越危险）`
+    : '使用工程师给出的 Vth 标量（器件无 vth 曲线，未计入温漂）';
+  return { value, from, tjC: hotTj, note };
+}

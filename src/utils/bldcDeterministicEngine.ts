@@ -1,7 +1,14 @@
 import { IssueInput, MeasurementSource, ProjectContext } from '../types';
 import { UnifiedEngineeringModel } from '../types/v4Models';
 import { calculateBusPumping, checkMillerRisk } from '../physics/motorPhysicsEngine';
-import { extractUnifiedEngineeringModel, isDecisionReadyValuePresent } from './unifiedStateExtractor';
+import { extractUnifiedEngineeringModel, isDecisionReadyValuePresent, readMeasuredNumber } from './unifiedStateExtractor';
+import {
+  ASSUMED_VBUS_FOR_CURVE_V,
+  resolveCgsPf,
+  resolveEffectiveCgdPf,
+  resolveWorstCaseVthMinV,
+} from './deviceCapacitance';
+import { loadDevices } from './deviceLibrary';
 
 export type DeterministicCalculationStatus = 'CALCULATED' | 'INSUFFICIENT_INPUT';
 
@@ -92,37 +99,88 @@ function buildBusPumping(issue: IssueInput, state: UnifiedEngineeringModel): Bld
   };
 }
 
-function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel): BldcCalculationEvidence {
+function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel, context?: ProjectContext): BldcCalculationEvidence {
   const inputs = ['dvdtVns', 'cgdPf', 'rgOffOhm', 'vthMinV'];
   
-  // Cgd 允许用米勒电荷 Qgd 换算（Cgd ≈ Qgd / 假定电压摆幅12V），但前提是 cgdPf 或 qgdNc
-  // 至少有一个是工程师真实填写的结构化输入——qgdNc 在 unifiedStateExtractor 里对未填写的情况
-  // 也有写死的经验默认值（15nC），不能直接信任 state.powerStage.qgdNc 是否存在。
+  // Cgd 的取值优先级与 path A（scenarioDerived→P003）**共用同一个函数**
+  // （deviceCapacitance.resolveEffectiveCgdPf）：实测/导入 > 器件 Crss 曲线@工况Vbus > 规格直接 Cgd
+  // > Qgd 换算。此前这里只有「实测 cgdPf 或 Qgd÷12」两条路、完全不看器件 Crss 曲线，而 P003 又让
+  // 曲线压过实测值 —— 同一个器件在两条链路上会算出不同的米勒电流。
+  //
+  // qgdNc 在 unifiedStateExtractor 里对未填写的情况也有写死的经验默认值（15nC），
+  // 因此不能直接信任 state.powerStage.qgdNc 是否存在，必须先用 isDecisionReadyValuePresent 判定。
   const cgdPfIsReady = isDecisionReadyValuePresent(issue, 'cgdPf');
   const qgdNcIsReady = isDecisionReadyValuePresent(issue, 'qgdNc');
-  const cgdPfPresent = cgdPfIsReady || qgdNcIsReady;
+  const device = context?.selectedDeviceId ? loadDevices().find((d) => d.id === context.selectedDeviceId) : undefined;
+  const vbusProvided = isDecisionReadyValuePresent(issue, 'busVoltageNominalV');
+  // 与 path A（P003 用 ctx.vbusNominalSafe）同一取点规则：实测 Vbus；未提供时用同一个假设电压。
+  const vbusForMiller = Number.isFinite(state.electrical.vbusNominal)
+    ? (vbusProvided ? state.electrical.vbusNominal : ASSUMED_VBUS_FOR_CURVE_V)
+    : ASSUMED_VBUS_FOR_CURVE_V;
+  const cgdResolved = resolveEffectiveCgdPf({
+    measuredCgdPf: cgdPfIsReady ? state.powerStage.cgdPf : undefined,
+    device,
+    vdsV: vbusForMiller,
+    vdsAssumed: !vbusProvided,
+    qgdNc: qgdNcIsReady ? state.powerStage.qgdNc : undefined,
+  });
+  const cgdPfPresent = cgdResolved.value !== undefined;
+  // 器件规格派生值绝不能伪装成工程师实测：来源按实际解析结果如实标注。
+  const cgdSource: MeasurementSource | 'MISSING' = cgdResolved.from === 'MEASURED_INPUT'
+    ? sourceFor(issue, 'cgdPf')
+    : cgdResolved.from === 'QGD_DERIVED'
+      // 与 path A 一致：Qgd→Cgd 是**换算**出来的近似值，不能标成工程师实测的 Cgd。
+      ? 'DERIVED'
+      : cgdResolved.from === 'NONE'
+        ? 'MISSING'
+        : 'DATASHEET';
+
+  // Cgs：与 path A 同源同点 —— 实测 Cgs > 器件直接给出的 Cgs > **同一 Vds 点**的 Ciss − Crss。
+  // Cgs 决定共享核心里的「容性分压界」（min(阻性界, 容性界)）；此前 path B 完全不传 Cgs，
+  // 只能给阻性上界，于是同一个器件在两条链路上报出两个不同的感应电压。
+  const cgsMeasured = readMeasuredNumber(issue.measuredValues, 'cgsPf');
+  const cgsDevice = resolveCgsPf(device);
+  const cgsPf = cgsMeasured !== undefined && cgsMeasured > 0 ? cgsMeasured : cgsDevice.value;
+  const cgsSource: MeasurementSource | 'MISSING' = cgsMeasured !== undefined && cgsMeasured > 0
+    ? sourceFor(issue, 'cgsPf')
+    : cgsDevice.from === 'CGS_DIRECT'
+      ? 'DATASHEET'
+      : cgsDevice.from === 'CISS_MINUS_CRSS'
+        ? 'DERIVED'
+        : 'MISSING';
+
+  // Vth：与 P003 共用最坏情况取点（Vth 最低 = 结温最高）。取点温度优先用工程师给出的 Tj_max，
+  // 否则用器件绝对最大结温 / vth 曲线最高温点；不能用 25℃ 标量，否则会低估误导通风险。
+  const vthResolved = resolveWorstCaseVthMinV({
+    providedVthMinV: state.powerStage.vthMinV,
+    device,
+    tjMaxC: isDecisionReadyValuePresent(issue, 'tjMaxC') ? state.environment.tjMaxC : undefined,
+  });
+  const vthMinVEff = vthResolved.value ?? state.powerStage.vthMinV;
 
   const values: Record<string, number | undefined> = {
     dvdtVns: state.powerStage.dvdtVns,
-    cgdPf: cgdPfPresent
-      ? (cgdPfIsReady ? state.powerStage.cgdPf : (state.powerStage.qgdNc! * 1000) / 12)
-      : undefined,
+    cgdPf: cgdResolved.value,
     rgOffOhm: state.powerStage.rgOffOhm,
-    vthMinV: state.powerStage.vthMinV,
+    vthMinV: vthMinVEff,
   };
 
   const missingInputs = inputs.filter((key) => {
     if (key === 'cgdPf') return !cgdPfPresent;
+    // 器件 vth 曲线@最坏高温点与工程师标量对判据是等效的：只要解析出有效阈值就不算缺输入。
+    // 否则同一个器件在 pattern 层能算（P003 用曲线）、在确定性引擎层却报 INSUFFICIENT_INPUT。
+    if (key === 'vthMinV') return vthMinVEff === undefined;
     return !isDecisionReadyValuePresent(issue, key);
   });
   const inputSources = Object.fromEntries(
-    inputs.map((key) => [
-      key,
-      key === 'cgdPf'
-        ? (cgdPfPresent ? (cgdPfIsReady ? sourceFor(issue, 'cgdPf') : sourceFor(issue, 'qgdNc')) : 'MISSING')
-        : sourceFor(issue, key),
-    ])
+    inputs.map((key) => [key, key === 'cgdPf' ? cgdSource : sourceFor(issue, key)])
   ) as BldcCalculationEvidence['inputSources'];
+  // 模型额外取用的量（不是“必需输入”，但会改变结果）：如实披露来源，避免两条链路各算一个数却不说明。
+  if (cgsPf !== undefined) inputSources.cgsPf = cgsSource;
+  inputSources.busVoltageNominalV = vbusProvided ? sourceFor(issue, 'busVoltageNominalV') : 'ASSUMPTION';
+  if (vthResolved.from === 'MIN_OF_PROVIDED_AND_CURVE' || vthResolved.from === 'CURVE_AT_HOT_TJ') {
+    inputSources.vthMinV = 'DATASHEET';
+  }
 
   if (missingInputs.length > 0) {
     return {
@@ -144,6 +202,9 @@ function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel): BldcCal
   const miller = checkMillerRisk({
     V_th_min: values.vthMinV!,
     C_gd_pF: values.cgdPf!,
+    // Cgs/Vbus 启用共享核心的「容性分压界」，与 P003 传入的是同一批数（同器件、同 Vbus、同点 Cgs）。
+    C_gs_pF: cgsPf,
+    V_bus_V: vbusForMiller,
     R_g_pulldown_ohm: values.rgOffOhm!,
     dv_dt_V_per_ns: values.dvdtVns!,
   });
@@ -164,10 +225,14 @@ function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel): BldcCal
     specThreshold: values.vthMinV,
     safetyMargin: miller.safetyMarginV,
     complianceVerdict: miller.isRiskOfShootThrough ? 'CRITICAL' : miller.safetyMarginV < 0.5 ? 'MARGINAL' : 'PASS',
-    directiveForAi: `BLDC Miller 感应门极峰值由本地 motorPhysicsEngine 计算为 ${miller.vGateInducedV.toFixed(2)}V；Vth=${values.vthMinV}V，安全裕量 ${miller.safetyMarginV.toFixed(2)}V。不得自行重算出另一套当前项目数值。`,
+    directiveForAi: `BLDC Miller 感应门极峰值由本地 motorPhysicsEngine 计算为 ${miller.vGateInducedV.toFixed(2)}V（Cgd=${cgdResolved.value}pF[${cgdResolved.from}]、Cgs=${cgsPf ?? '未提供'}pF[${cgsPf !== undefined ? cgsSource : 'MISSING'}]、Rg_off=${values.rgOffOhm}Ω、dv/dt=${values.dvdtVns}V/ns、Vbus=${vbusForMiller}V）；Vth_min=${values.vthMinV}V（${vthResolved.from}），安全裕量 ${miller.safetyMarginV.toFixed(2)}V。不得自行重算出另一套当前项目数值。`,
   };
 }
 
-export function calculateBldcDeterministicCalculations(issue: IssueInput, state: UnifiedEngineeringModel): BldcCalculationEvidence[] {
-  return [buildBusPumping(issue, state), buildMiller(issue, state)];
+export function calculateBldcDeterministicCalculations(
+  issue: IssueInput,
+  state: UnifiedEngineeringModel,
+  context?: ProjectContext,
+): BldcCalculationEvidence[] {
+  return [buildBusPumping(issue, state), buildMiller(issue, state, context)];
 }

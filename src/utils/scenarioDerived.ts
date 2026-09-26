@@ -4,7 +4,8 @@ import { FmedaRow, FtaNode, SafetyTraceabilityNode, PhaseCheckItem, WorstCaseCom
 import { SAMPLE_FMEDA_ROWS, SAMPLE_FTA_TREE, SAMPLE_SAFETY_TRACEABILITY_CHAIN } from '../data/safetyReliabilityEngine';
 import { getPhaseReviewChecklist } from '../data/designReviewEngine';
 import { resolveEngineeringDomain, getDomainPhysics } from './scenarioDomainEngine';
-import { loadDevices, getDeviceCurve, linearInterp } from './deviceLibrary';
+import { loadDevices, getDeviceCurve } from './deviceLibrary';
+import { ASSUMED_VBUS_FOR_CURVE_V, resolveCgsPf, resolveEffectiveCgdPf } from './deviceCapacitance';
 import { readMeasuredNumber } from './unifiedStateExtractor';
 import { mapMeasurementSourceToTraceSource } from './trace';
 import { TraceInputSource } from '../types';
@@ -177,7 +178,7 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   const jInertia = preferMeasured(issue, 'rotorInertiaKgm2', NaN);
 
   // 从器件库读取当前选中器件，提取曲线用于按工况插值（无选中器件时退回写死默认值）
-  const selectedDeviceId = (context as any).selectedDeviceId;
+  const selectedDeviceId = context.selectedDeviceId;
   const selectedDevice = selectedDeviceId ? loadDevices().find((d) => d.id === selectedDeviceId) : undefined;
   let rdsOnCurve: Array<{ x: number; y: number }> | undefined;
   let crssCurve: Array<{ x: number; y: number }> | undefined;
@@ -200,23 +201,27 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     const vth25 = vthCurve.find((point) => point.x === 25) || vthCurve[0];
     if (Number.isFinite(vth25?.y)) vthMinV = vth25.y;
   }
-  const cgdDirect = deviceSpec('cgdDirectPf');
-  if (positiveOrUndefined(optMeas(issue, 'cgdPf')) === undefined && cgdDirect !== undefined) cgdPf = cgdDirect;
+  // Cgd 的取值优先级**只在这里定义一次**（deviceCapacitance.resolveEffectiveCgdPf）：
+  // 工程师实测/导入 > 器件 Crss 曲线@工况Vbus > 规格直接给出的 Cgd > Qgd 换算。
+  // 此前这里把 cgdDirect 折叠进 cgdPf，而 P003 又让 crssCurve 无条件压过 cgdPf —— 结果是
+  // 「工程师实测的 Cgd 会被器件曲线顶掉」，且与 path B（确定性引擎）各解析一套、各算一个数。
+  // benchmark 的 45 pF 是演示值，必须与实测值同层（否则会被曲线顶掉），但来源仍标注为假设。
+  const cgdResolved = resolveEffectiveCgdPf({
+    measuredCgdPf: positiveOrUndefined(optMeas(issue, 'cgdPf')) ?? (isBenchmark ? 45 : undefined),
+    crssCurve,
+    vdsV: Number.isFinite(vbusNominal) ? vbusNominal : ASSUMED_VBUS_FOR_CURVE_V,
+    vdsAssumed: !Number.isFinite(vbusNominal),
+    qgdNc: optMeas(issue, 'qgdNc'),
+  });
+  if (cgdResolved.value !== undefined) cgdPf = cgdResolved.value;
 
-  // Device Specification 层自动提供 Cgs：优先直接值；没有直接 Cgs 时，使用同一 VDS 点的 Ciss-Crss 派生。
-  // 该值只进入确定性计算，不回写为“用户实测输入”，并在 Trace 中明确标成 DERIVED。
-  let deviceCgsDerived: number | undefined;
-  const deviceCgsDirect = deviceSpec('cgsPf');
-  if (deviceCgsDirect !== undefined) {
-    deviceCgsDerived = deviceCgsDirect;
-  } else {
-    const ciss = deviceSpec('cissPf');
-    if (ciss !== undefined && crssCurve && crssCurve.length >= 1) {
-      const crssAtVbus = linearInterp(crssCurve, vbusNominal).value;
-      const derived = ciss - crssAtVbus;
-      if (Number.isFinite(derived) && derived > 0) deviceCgsDerived = derived;
-    }
-  }
+  // Device Specification 层自动提供 Cgs：优先规格书直接给出的 Cgs；否则用**与 Ciss 同一个 Vds 点**的
+  // Ciss − Crss。此前实现是 Ciss@标注点(25 V) − Crss@工况Vbus —— 跨了两个电压点，而这三个电容随 Vds
+  // 变化剧烈（真实器件 Crss 从 0.1 V 的 400 pF 掉到 100 V 的 60 pF，6.7 倍）。规格未标注 Ciss 的测试 Vds
+  // 时不派生：宁可没有值，也不跨点相减。
+  // 该值只进入确定性计算，不回写为“用户实测输入”，Trace 中按来源如实标注。
+  const deviceCgs = resolveCgsPf(selectedDevice);
+  const deviceCgsDerived = deviceCgs.value;
   const effectiveCgsPf = positiveOrUndefined(optMeas(issue, 'cgsPf')) ?? deviceCgsDerived;
   rthJc = effectiveSpec('rthJcCPerW', 'rthJcCPerW') ?? rthJc;
   rdsOnMilliOhm = effectiveSpec('rdsOnMilliOhm', 'rdsOnMilliOhm') ?? rdsOnMilliOhm;
@@ -296,11 +301,12 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   markDeviceSpecTrace('rthJaCPerW', 'rthJaCPerW', 'rthJaCPerW');
   markDeviceSpecTrace('tjMaxC', 'tjMaxC', 'tjMaxC');
   if (optMeas(issue, 'cgsPf') === undefined && effectiveCgsPf !== undefined) {
-    traceSources.cgsPf = deviceCgsDirect !== undefined ? 'DATASHEET' : 'DERIVED';
+    traceSources.cgsPf = deviceCgs.from === 'CGS_DIRECT' ? 'DATASHEET' : 'DERIVED';
   }
   markDeviceSpecTrace('easEnergyMj', 'easEnergyMj', 'easEnergyMj');
   if (optMeas(issue, 'vthMinV') === undefined && vthCurve?.length) traceSources.vthMinV = 'DATASHEET';
-  if (optMeas(issue, 'cgdPf') === undefined && cgdDirect !== undefined) traceSources.cgdPf = 'DATASHEET';
+  if (cgdResolved.from === 'CRSS_CURVE_AT_VBUS' || cgdResolved.from === 'CGD_DIRECT') traceSources.cgdPf = 'DATASHEET';
+  else if (cgdResolved.from === 'QGD_DERIVED') traceSources.cgdPf = 'DERIVED';
 
   // ----------------------------------------------------------------
   // P009/P010/P011/P018 的“是否适用当前 case”属于故障症状/架构证据层。
@@ -427,6 +433,7 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     traceEvidenceIds,
     rdsOnCurve,
     crssCurve,
+    cgdResolutionNote: cgdResolved.note,
     vthCurve,
     motorSensorType,
     hallFaultRiskIndicated: structuredHallFault ?? (hallFaultRiskIndicated || undefined),
