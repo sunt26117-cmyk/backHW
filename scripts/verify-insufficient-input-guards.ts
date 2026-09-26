@@ -283,6 +283,20 @@ check('path A 读数：真的填了 0 时必须保留为 0（0 是合法值，�
   assert.equal(zero.vbusNominal, 0, '实测 0 必须保留为 0，实际=' + zero.vbusNominal);
 });
 
+console.log('\n=== 0 pF 的电容不得被当成有效输入（会让米勒判据静默失效）===');
+
+check('cgdPf / cgsPf 写成 0 时必须视为「未提供」：不得算出 0 V 感应尖峰', () => {
+  // 真实面板上出现过 Cgd = Cgs = 0 pF（写入端把"清空输入"落成了 Number('') === 0）。
+  // 非正的栅电容不是物理值：Cgd=0 会让 Vgs_induced = Rg·Cgd·dv/dt 恒为 0，米勒风险永不触发。
+  const issue = makeIssue({ vbusNominal: 48, vdsRating: 100, rpm: 3000, rotorInertiaKgm2: 2e-5, cbusUf: 470,
+    tAmbientC: 25, currentPeakA: 30, harnessLengthM: 2.0, deadTimeNs: 500, rgOffOhm: 5, vthMinV: 2,
+    dvdtVns: 8, cgdPf: 0, cgsPf: 0 }, 'BLDC Motor Drive');
+  const derived = deriveBldcEvaluationInput(CONTEXT, issue);
+  assert.equal(Number.isNaN(derived.cgdPf), true, 'cgdPf=0 必须视为缺失(NaN)，实际=' + derived.cgdPf);
+  assert.notEqual(derived.cgdPf, 0, 'cgdPf 绝不能保留 0（会让米勒判据恒不触发）');
+  assert.equal(derived.cgsPf, undefined, 'cgsPf=0 必须视为缺失，实际=' + derived.cgsPf);
+});
+
 console.log('\n=== 缺字段不得凭空造出「一票否决」（同时确认真值仍能触发） ===');
 
 const jointIssue = (measuredValues: Record<string, unknown>) => ({

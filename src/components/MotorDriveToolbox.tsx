@@ -113,7 +113,19 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
 
   const updateIssueMeasuredValue = (key: string, rawValue: string) => {
     if (!issue || !onIssueChange) return;
-    const value = Number(rawValue);
+    const text = String(rawValue ?? '').trim();
+    if (text === '') {
+      // 清空输入 = 「未提供」：必须把这个 key 删掉，绝不能落成 Number('') === 0。
+      // 真实面板上曾出现 Cgd / Cgs = 0 pF（来源不明的 0），而 0 pF 会让米勒判据算出
+      // 0 V 感应尖峰 —— 米勒风险静默失效。这是与"空串被读成 0"同一类错误的写入端。
+      const nextValues = { ...(issue.measuredValues || {}) };
+      const nextProvenance = { ...(issue.measurementProvenance || {}) };
+      delete nextValues[key];
+      delete nextProvenance[key];
+      onIssueChange({ ...issue, measuredValues: nextValues, measurementProvenance: nextProvenance });
+      return;
+    }
+    const value = Number(text);
     if (!Number.isFinite(value)) return;
     const source = new Set(['vdsRatingV', 'cBusUf', 'rotorInertiaKgm2', 'rgOffOhm', 'cgdPf', 'vthMinV']).has(key)
       ? 'SPEC'

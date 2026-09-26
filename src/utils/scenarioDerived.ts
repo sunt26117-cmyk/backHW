@@ -152,7 +152,11 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
 
   let rgOffOhm = optMeas(issue, 'rgOffOhm') ?? (isBenchmark ? 4.7 : NaN);
 
-  let cgdPf = optMeas(issue, 'cgdPf') ?? (isBenchmark ? 45 : NaN);
+  // 0 pF / 负值的 Cgd、Cgs 不是物理值：它只会让米勒判据算出 0 V 感应尖峰而静默失效，
+  // 也会挡住器件规格层的真实值。历史数据里曾因"清空输入框落成 0"产生过这种值，因此这里
+  // 把非正值一律当作「未提供」。（0A 电流、0℃ 仍照常是合法值，这条只针对电容。）
+  const positiveOrUndefined = (v: number | undefined): number | undefined => (v !== undefined && v > 0 ? v : undefined);
+  let cgdPf = positiveOrUndefined(optMeas(issue, 'cgdPf')) ?? (isBenchmark ? 45 : NaN);
 
   // dv/dt 同样只接受结构化输入；EMC / RE_CE 的字段键统一为 dvdtVns。
   let dvDtVns = optMeas(issue, 'dvdtVns') ?? (isBenchmark ? 8.0 : NaN);
@@ -197,7 +201,7 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     if (Number.isFinite(vth25?.y)) vthMinV = vth25.y;
   }
   const cgdDirect = deviceSpec('cgdDirectPf');
-  if (!Number.isFinite(optMeas(issue, 'cgdPf')) && cgdDirect !== undefined) cgdPf = cgdDirect;
+  if (positiveOrUndefined(optMeas(issue, 'cgdPf')) === undefined && cgdDirect !== undefined) cgdPf = cgdDirect;
 
   // Device Specification 层自动提供 Cgs：优先直接值；没有直接 Cgs 时，使用同一 VDS 点的 Ciss-Crss 派生。
   // 该值只进入确定性计算，不回写为“用户实测输入”，并在 Trace 中明确标成 DERIVED。
@@ -213,7 +217,7 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
       if (Number.isFinite(derived) && derived > 0) deviceCgsDerived = derived;
     }
   }
-  const effectiveCgsPf = optMeas(issue, 'cgsPf') ?? deviceCgsDerived;
+  const effectiveCgsPf = positiveOrUndefined(optMeas(issue, 'cgsPf')) ?? deviceCgsDerived;
   rthJc = effectiveSpec('rthJcCPerW', 'rthJcCPerW') ?? rthJc;
   rdsOnMilliOhm = effectiveSpec('rdsOnMilliOhm', 'rdsOnMilliOhm') ?? rdsOnMilliOhm;
   easEnergyMj = effectiveSpec('easEnergyMj', 'easEnergyMj');
