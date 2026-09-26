@@ -266,7 +266,7 @@ modals：ModelSettings · ScenarioManage · SourceDownload · DeviceLibrary · A
 |---|---|---|
 | `ProjectContext` / `IssueInput` | `types.ts` | 输入契约 |
 | `CopilotAnalysisResult` | `types.ts` | 结果契约（13 个 tab 都消费它） |
-| `BldcEvaluationInput` | `data/bldcPatternEngine.ts` | 路径 A 的扁平入参 |
+| `BldcEvaluationInput` | `domains/bldc/types.ts`（`data/bldcPatternEngine.ts` 现为 re-export 壳） | 路径 A 的扁平入参 |
 | `UnifiedEngineeringModel` | `types/v4Models.ts` | 路径 B 的嵌套状态树 |
 | `BusPumpingResult` / `MillerRiskResult` | `types/motorDrive.ts` | 共享物理核心返回 |
 | `ClassifiedInfoItem` · `DFMEAView` · `RaciItem` · `DualTimelineActionPlan` | `types.ts` | 内容块 |
@@ -277,17 +277,40 @@ modals：ModelSettings · ScenarioManage · SourceDownload · DeviceLibrary · A
 .github/workflows/ci.yml
   npm ci → tsc --noEmit(strict) → npm test → npm run build
 
-scripts/verify-engines.ts (342行, tsx 直跑, 无测试框架)
-  · 确定性引擎缺输入 → 必须 INSUFFICIENT_INPUT（不许默认值顶替）
-  · 25 模式负例（温和工况不得触发）+ 重点正例 + CHECKLIST 语义
-  · 16 个金标准验收 case（真实调模式引擎，不是照抄期望值）
-  · P001 必须走共享物理核心（防公式再次分叉）
-  · J 模式健康工况零否决 + 关键失效闭锁（含 PL 未声明 fail-closed）
-  · decisionFrame 归一化 5 条（字符串/分隔符/空数组/畸形类型/幂等）
+npm test 现在是 17 个脚本的串联（&& 链接，任一失败即整链失败），按用途分四组：
 
-scripts/smoke-decisionframe-render.tsx (渲染层冒烟, react-dom/server 真渲染)
-  · 畸形 decisionFrame 下 FirstScreen10sView 不得抛错（旧代码在此精确复现
-    "reversalCriteria.slice(...).join is not a function"）
+① 结构与边界（防"重构把架构拆坏/拆出交叉依赖"）
+   verify-three-tail-fixes.cjs          历史模板隔离 + BLDC 结构化物理输入 + 多域 UI 接口
+   verify-pattern-policy.cjs            READY / ASSUMPTION_BASED / INSUFFICIENT_INPUT 三档语义
+   verify-bldc-modular-boundary.ts      18 个 Pattern 单职责隔离 + 稳定 Registry + 物理层唯一
+   verify-bldc-input-governance.ts      参数分组去重与物理输入治理
+
+② Trace 链（防"Trace 与物理计算脱节/伪造 Trace"）
+   verify-all-pattern-traces.ts         18/18 都有 Trace、ID 命名空间、输入/公式/Verdict 齐备
+   verify-trace.ts                      priority 5 个零降级 + 其余降级必须可指名假设输入 + P012 不可计算 → INFO
+
+③ 确定性引擎与输入纪律（防"缺输入静默算数"）
+   verify-engines.ts                    缺输入必须 INSUFFICIENT_INPUT；25 模式负例；16 个金标准 case
+                                        （真调模式引擎，不照抄期望值）；P001 必走共享物理核心；
+                                        J 模式零误否决 + 关键失效闭锁（含 PL 未声明 fail-closed）；
+                                        工况纯净度：历史 BLDC 指纹不得泄漏
+   verify_insufficient_input.ts         四个确定性入口的缺输入行为
+   verify-insufficient-input-guards.ts  逐字段摘掉必需输入（29 条）+ 读数原语语义（0 合法/空串=缺失）
+                                        + J004/J002「缺字段不得凭空造出否决」成对断言
+
+④ 器件参数与渲染（防"Prompt/字段表/UI 三边各说一套"，见第 9 节规则链）
+   verify-device-parameter-import.ts    字段表 → 候选映射
+   verify-device-candidate-governance.ts 字段表 ↔ Prompt 清单 ↔ candidateKind ↔ 导入闸门一致性
+   verify-device-real-datasheet-mapping.ts 真实器件 JSON 端到端（含 DERIVED 需确认后导入）
+   verify-device-spec-projection.ts     器件规格投影进工程 schema
+   smoke-decisionframe-render.tsx       渲染层冒烟：畸形 decisionFrame 不得白屏
+                                        （旧代码在此精确复现 "reversalCriteria.slice(...).join is not a function"）
+   smoke-waveform-render.tsx            波形渲染冒烟
+   test-theme-contrast.ts               三套主题对比度（WCAG）
+
+补充：仓库自带 `verify-snapshot.ps1`（工作区根目录，非仓库文件）用于对"外部会话产出的快照"做
+准入验证：npm install → tsc → npm test，日志与报告落盘；它用 "*> 文件" 重定向而非管道，避免
+Tee-Object 吃掉退出码导致误判通过。
 ```
 
 ## 12. 被依赖最多的模块（改动的爆炸半径）

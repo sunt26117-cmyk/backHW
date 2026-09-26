@@ -54,3 +54,5 @@ npm test
 ```
 
 本次工作环境无法完成 `npm ci`：安装过程在沙箱网络层超时。因此本轮已完成源码级 TypeScript 检查及静态结构校验，但没有把“完整 npm test 通过”作为已验证事实。
+
+> **后续状态（已在本仓库实测）**：依赖装齐后 `npm run lint` / `npm test` / `npm run build` 均通过（含 `ALL TRACE VERIFY PASS: 18/18 patterns traced` 与 `TRACE ASSUMPTION AUDIT PASS`）。此处「未跑/未验证」只描述当时那个无依赖的沙箱，**不代表当前状态**。

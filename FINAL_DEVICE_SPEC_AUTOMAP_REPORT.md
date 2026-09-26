@@ -22,7 +22,7 @@
 ## BUK9M6R0-40H 实际专项结果
 真实 JSON 结构专项回归：
 - candidates = 36
-- autoImport = 23
+- autoImport = 20（v5 收紧后；此前 23，曲线选点/派生/variants 三项改为需工程确认）
 - unmapped = 8
 - Crss→Cgd / Ciss-Crss→Cgs：已映射但不静默导入，明确要求一次工程确认。
 
@@ -37,4 +37,9 @@
 
 核心编译命令使用本地 TypeScript，RC=0。
 
-完整 `npm test` 未在当前环境宣称通过：该工作区缺少可用的本地 `tsx` 依赖，之前网络安装尝试超时。这里的结论仅基于实际执行的定向回归与本地 TypeScript 编译。
+本轮沙箱无可用本地 `tsx` 依赖（网络安装超时），因此**当时**未宣称完整 `npm test` 通过；结论仅基于当时实际执行的定向回归与本地 TypeScript 编译。
+
+> **后续状态（已在本仓库实测）**：依赖装齐后完整 `npm test` 已跑通（金标准 16/16、18/18 patterns traced、
+  device-candidate-governance / real-datasheet-mapping / spec-projection 全 PASS，97 项）。上面的
+  「未宣称通过」只描述当时那个无依赖的沙箱，不代表当前状态。
+  映射规则链的唯一说明见 `docs/P2_PHASE5_DEVICE_CANDIDATE_GOVERNANCE.md` 第 9 节。

@@ -112,6 +112,50 @@
 
 并增加了“恢复使用”，可以撤销 skip。
 
+### 9. 映射规则链（单一真源）
+
+Prompt、字段表、候选分类、UI 分桶、导入闸门曾各自维护一份「哪些字段能映射」的说法，于是出现
+「字段表已支持、Prompt 却没列出」的漏项（6 个：`idssUa`、`igssNa`、`gateResistanceOhm`、
+`dvdtCapabilityVns`、`didtCapabilityANs`、`soaShortCircuitTimeUs`）。现在收敛成**一条链**，
+上游一改必然传导到下游：
+
+```
+MOSFET_FIELD_TABLE                    ← 唯一声明源：rawPath / targetKey / valueKind / defaultSourceType
+      │  （清单由代码生成，不手写）
+      ├─ DIRECT_MAPPABLE_TARGET_KEYS    datasheet 直给 + 单值标量
+      └─ CONFIRM_REQUIRED_TARGET_KEYS   曲线选点图估 + 派生 + variants 恢复
+      │
+DEVICE_PARAM_PROMPT                   ← 由上面两份清单 join 生成，结构上不可能落后于字段表
+      │
+makeCandidate() → candidateKind       ← 单一分类函数
+      │
+DeviceCandidatePanel 四桶（可直接导入 / 需确认 / 仅曲线 / 未映射）
+      │
+buildDeviceCandidateImportPayload()   ← 唯一写入口：只有 DIRECT_SCALAR 自动写入
+```
+
+| candidateKind | 判据 | 能否自动导入 |
+|---|---|---|
+| `DIRECT_SCALAR` | 字段表 `DATASHEET_DIRECT` 且非曲线/集合 | 可以 |
+| `DERIVED_OR_ESTIMATE` | 派生值、曲线选点图估、由 variants 恢复 | 不可以，需工程师确认 |
+| `CURVE_ONLY` | 有 targetKey，但只有曲线/多条件，拿不出单值 | 不可以 |
+| `NO_MAPPING` | 没有安全且同语义的工程字段 | 不可以 |
+
+**需确认清单目前 4 项，原因都写在 Prompt 里**：`cgsPf`（模板无直接 Cgs 字段，只能 `Ciss − Crss` 派生）、
+`rdsOnMilliOhm` / `vthMinV`（曲线选点图估，不是规格书保证值）、`gateVoltageMinV`（无独立字段，
+从 `protectionAndRobustness.gateVoltageMax` 的负向 variant 恢复）。
+
+**可直接导入清单不在文档里复制**——复制即漂移。要看当前值：
+
+```bash
+npx tsx -e "import {DIRECT_MAPPABLE_TARGET_KEYS,CONFIRM_REQUIRED_TARGET_KEYS} from './src/data/deviceTemplate'; console.log(DIRECT_MAPPABLE_TARGET_KEYS); console.log(CONFIRM_REQUIRED_TARGET_KEYS);"
+```
+
+`scripts/verify-device-candidate-governance.ts` 负责让这条链不被破坏：字段表每个 `targetKey` 必须恰好
+落在两份清单之一、分类必须与 `sourceType/valueKind` 一致、Prompt 文本必须包含两份清单的每个 key、
+Prompt 必须写明 `cgdPf` 的直给/派生双来源与 `gateVoltageMinV` 的 variants 恢复规则，且
+**非 `DIRECT_SCALAR` 一律不得 `importable`**。Prompt 再落后于字段表，测试会直接失败。
+
 ## 验证结果
 
 ### 定向运行时验证
@@ -173,4 +217,20 @@ verify-bldc-input-governance: PASS
 
 “自动匹配”和“自动导入”是两个不同门槛。当前实现会自动采用 JSON `extractionHints.mapping`、字段表映射以及全工程 schema 中的唯一同单位字段；只有语义一致且工程字段真实存在时才进入 `mapped`。
 
-因此 `ID` / `ID pulse` / `PD` / `Tjmax` / `Ciss` / `Coss` / `Qgs` / `Qsw` / `tr` / `td(on)` / `trr` / `IrrM` / Gate 电压上限 / ESD / SOA 曲线等，在当前 schema 没有同语义目标时仍保持 `unmapped`，这是防止把“器件能力/内部参数/曲线”误写成当前工况输入，而不是漏接。
+> **更正（v5）**：上面这段列举的 `ID` / `ID pulse` / `PD` / `Tjmax` / `Ciss` / `Coss` /
+> `Qgs` / `Qsw` / `tr` / `td(on)` / `trr` / `IrrM` / Gate 电压上限 / ESD 在本轮已由
+> **Device Specification 层**提供 canonical 字段并**自动映射**（治理测试逐条断言），
+> 因此它们**不是**未映射项。当前真正保持 `targetKey: null` 的是下面 6 项——这是物理语义隔离，
+> 不是命名问题：`maxRatings.tstg`（存储温度，≠ 当前工况结温）、`soaCurve`（曲线，无标量字段可承载）、
+> `staticParams.bodyChannelCurrent`（体沟道电流能力，≠ ID 额定）、`capacitanceParams.crss`（保留原始
+> Crss，不冒充 Cgd）、`gateCharge.gateChargeCurve`（曲线）、`thermalParams.zthJc`（ZθJC(t) 瞬态曲线，
+> 不能当成单个 RθJC）。
+
+### v5 把五处说法收敛成一条链
+
+- Prompt 的 targetKey 清单改为**从 `MOSFET_FIELD_TABLE` 生成**，修掉 6 个漏项；
+- `rdsOnMilliOhm` / `vthMinV` / `gateVoltageMinV` 从「可直接导入」移入「需确认」，该器件夹具的
+  `autoImport` 由 23 变为 20（确认后再导入的通道不变，仍有断言覆盖）；
+- 新增 `candidateKind` 四分类与 UI 第 4 个区块「已识别，但只有曲线/多条件、无单值」，
+  曲线候选不再和数值型派生候选挤在同一区；
+- `cgdPf` 的直给/派生双来源、`gateVoltageMinV` 的 variants 恢复规则都写进了 Prompt。

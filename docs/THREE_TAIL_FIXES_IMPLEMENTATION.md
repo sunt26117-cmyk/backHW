@@ -32,5 +32,7 @@
 
 - 新增 `scripts/verify-three-tail-fixes.cjs`，验证 legacy runtime isolation、Pattern 间无交叉依赖、结构化物理输入以及多域 UI 接口。
 - 本机无完整 `node_modules`，`npm ci` 在沙箱中超时，因此无法把完整 `npm test` 宣称为通过。
+
+> **后续状态（已在本仓库实测）**：依赖装齐后 `npm run lint` / `npm test` / `npm run build` 均通过（含 `decisionPillars runtime isolation` / `PATTERN_POLICY_STATIC_PASS` / `BLDC MODULAR BOUNDARY PASS`）。此处「未跑/未验证」只描述当时那个无依赖的沙箱，**不代表当前状态**。
 - TypeScript 语法/类型边界需以仓库依赖安装后的完整 `tsc` 为准；本次修复额外做无依赖静态检查。
 - 三项尾项静态回归：PASS；并新增 ASSUMPTION_BASED 保留 `triggered`、禁止 VETO 的策略护栏。

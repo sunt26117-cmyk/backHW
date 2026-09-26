@@ -61,6 +61,10 @@ AI 明确禁止猜测；图表估读必须降低置信度并标记 DATASHEET_GRA
 3. P008/P014 等模式共享字段造成重复显示；BLDC 参数分组现在按首次归属去重，68 个字段不会重复渲染。
 4. `Tjmax` 不能映射成当前工况 `junctionTempC`，Crss→Cgd / Ciss-Crss→Cgs 只能作为低置信度派生候选，不能伪装为 datasheet 直接值。
 
+> **映射规则链的唯一说明**在 `docs/P2_PHASE5_DEVICE_CANDIDATE_GOVERNANCE.md` 第 9 节
+> （Field Table → 由代码生成的 Prompt 清单 → candidateKind → UI 四桶 → 唯一导入闸门）。
+> 本文不再复制「哪些字段可直接映射」的清单——在文档里复制一份，就等于多一个会漂移的副本。
+
 另有一项结构性限制保留在下一阶段：当前模板对同一参数的多个 typ/min/max、多个不同测试条件，仍主要依赖 `variants` / 原始 JSON 保留，工程候选导入目前只选一个主值；后续可把“多条件候选”做成独立选择器，不应在 AI 提取层丢失数据。
 
 ## v2 review（外部复核）：发现并修复一个未覆盖的证据等级闸门缺口

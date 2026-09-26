@@ -53,8 +53,10 @@
 - `AppModals`：26 个 props → 3 个（选择工况、另存为自定义工况、导入 AI 结果）。
 - `Navbar`：23 个 props → 6 个（选择/删除工况、备份导出/导入、Markdown 导出、打印，均需 App 层编排）。离线 HTML 下载已并入 Navbar 内部。
 
-### 仍未验证
+### 当时仍未验证（后续均已实测）
 沙箱无完整 `node_modules`，`npm run lint / build` 未跑；`release/ecu-copilot-offline.html` 是旧代码构建产物，需本地 `npm run build` 重新生成。
+
+> **后续状态（已在本仓库实测）**：依赖装齐后 `npm run lint` / `npm test` / `npm run build` 均通过，离线单文件已多次重建并提交；重建后与仓库内产物做过 SHA256 一致性校验，确认它确由当前源码可复现地生成。此处「未跑/未验证」只描述当时那个无依赖的沙箱，**不代表当前状态**。
 
 ## Phase 4.2 — 示波器波形显示 + 指标算法修正（已完成）
 
