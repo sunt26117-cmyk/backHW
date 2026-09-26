@@ -130,6 +130,21 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = ({
           context={context}
           issue={issue}
           result={result}
+          onApplyMeasuredValues={(values, sourceLabel) => {
+            // 一键填入的每一项都以 DATASHEET 记录来源：它是规格书值，不是工程师实测值。
+            const measuredValues = { ...(issue.measuredValues || {}) };
+            const measurementProvenance = { ...(issue.measurementProvenance || {}) };
+            for (const [key, value] of Object.entries(values)) {
+              measuredValues[key] = value;
+              measurementProvenance[key] = {
+                ...(measurementProvenance[key] || {}),
+                source: 'DATASHEET',
+                sourceLabel,
+                enteredAt: new Date().toISOString(),
+              };
+            }
+            setIssue({ ...issue, measuredValues, measurementProvenance });
+          }}
         />
       )}
 

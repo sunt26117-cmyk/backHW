@@ -976,7 +976,8 @@ export function calculateSingleDomainMetrics(issue: IssueInput, context: Project
     if (finite(tj)&&finite(ta)) metrics.push({label:'ΔTj-Ta',value:`${(tj-ta).toFixed(1)} ℃`,note:'CALCULATED',tag:'CALCULATED'});
     if (finite(tj)&&finite(lim)) metrics.push({label:'Tj裕量',value:`${(lim-tj).toFixed(1)} ℃`,note:'Tj_limit - Tj',tag:'CALCULATED'});
   } else if (d === 'COMPONENT') {
-    const qg=n('qgNc'), qgd=n('qgdNc'), soa=n('soaMarginPct');
+    // Qg 有两个 key（COMPONENT 的 qgNc / DEVICE_SPEC 的 gateChargeQgNc），互为别名。
+    const qg=n('qgNc') ?? n('gateChargeQgNc'), qgd=n('qgdNc'), soa=n('soaMarginPct');
     if (finite(qg)&&finite(qgd)&&qg>0) metrics.push({label:'Qgd/Qg',value:`${(qgd/qg*100).toFixed(1)}%`,note:'米勒电荷占比',tag:'CALCULATED'});
     if (finite(soa)) metrics.push({label:'SOA裕量',value:`${soa}%`,note:noteFor('soaMarginPct'),tag:tagFor('soaMarginPct')});
   } else if (d === 'POWER_TRANSIENT') {

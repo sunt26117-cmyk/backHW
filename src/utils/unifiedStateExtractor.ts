@@ -133,7 +133,8 @@ export function extractUnifiedEngineeringModel(context: ProjectContext, issue: I
       vthMinV: getOptionalNum('vthMinV', [/Vth_min\s*=\s*([0-9.]+)\s*V/i, /阈值下限\s*([0-9.]+)\s*V/i]),
       dvdtVns: getOptionalNum('dvdtVns', [/dv\/dt\s*([0-9.]+)\s*V\/ns/i, /dvdt\s*([0-9.]+)\s*V\/ns/i]),
       cgdPf: getOptionalNum('cgdPf', [/Cgd\s*=\s*([0-9.]+)\s*pF/i, /米勒电容\s*([0-9.]+)\s*pF/i]),
-      qgNc: getNum('qgNc', [/Qg\s*=\s*([0-9.]+)\s*nC/i], 50),
+      // Qg 有两个 key：DEVICE_SPEC 的 gateChargeQgNc 与 COMPONENT 的 qgNc —— 同一物理量、互为别名。
+      qgNc: readMeasuredNumber(issue.measuredValues, 'qgNc') ?? readMeasuredNumber(issue.measuredValues, 'gateChargeQgNc') ?? getNum('qgNc', [/Qg\s*=\s*([0-9.]+)\s*nC/i], 50),
       qgdNc: getNum('qgdNc', [/Qgd\s*=\s*([0-9.]+)\s*nC/i, /米勒电荷\s*([0-9.]+)\s*nC/i], 15),
       qrrNc: getNum('qrrNc', [/Qrr\s*=\s*([0-9.]+)\s*nC/i], 100),
       gateDriverPartNumber: 'Unknown_Driver',

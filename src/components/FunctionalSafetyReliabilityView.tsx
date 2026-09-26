@@ -35,6 +35,8 @@ import { ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
 import { deriveSafetyTraceability, deriveFmedaRows, deriveFtaTree, deriveSafetyCollateral } from '../utils/scenarioDerived';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
+import { loadDevices } from '../utils/deviceLibrary';
+import { buildSupplyPairFill, MEASURED_ONLY_COMPONENT_FIELDS } from '../utils/deviceSupplyPair';
 
 const FSR_INPUT_KEYS = ['primaryRdsOnMilliOhm','secondaryRdsOnMilliOhm','primaryQgNc','secondaryQgNc','primaryQrrNc','secondaryQrrNc','primaryRthJcCPerW','secondaryRthJcCPerW','componentPartNumber','supplierName','pcnChangeDescription','esdLevelKv','esdPeakCurrentA','recoveryTimeMs','canErrorCount','affectedPort','tvsClampingVoltageV','harnessLengthM','bciInjectionMa','bciSensitiveFreqMhz','commonModeCurrentMa','bciNodeVoltageV','currentSenseErrorPct'] as const;
 
@@ -62,10 +64,14 @@ interface FunctionalSafetyReliabilityViewProps {
   context: ProjectContext;
   issue: IssueInput;
   result: CopilotAnalysisResult | null;
+  /** 把页内一键填入的结果**写回工程输入**（否则只在本页生效，分析与 Prompt 拿不到）。 */
+  onApplyMeasuredValues?: (values: Record<string, number>, sourceLabel: string) => void;
+  /** 初始子页（用于深链与渲染冒烟测试）；默认 HARA 追溯链。 */
+  initialSubTab?: 'HARA_TRACE' | 'FMEDA' | 'FTA' | 'CAPACITOR_LIFE' | 'SECOND_SOURCE_PCN' | 'EMC_IMMUNITY';
 }
 
-export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabilityViewProps> = ({ context, issue, result }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'HARA_TRACE' | 'FMEDA' | 'FTA' | 'CAPACITOR_LIFE' | 'SECOND_SOURCE_PCN' | 'EMC_IMMUNITY'>('HARA_TRACE');
+export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabilityViewProps> = ({ context, issue, result, onApplyMeasuredValues, initialSubTab }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'HARA_TRACE' | 'FMEDA' | 'FTA' | 'CAPACITOR_LIFE' | 'SECOND_SOURCE_PCN' | 'EMC_IMMUNITY'>(initialSubTab ?? 'HARA_TRACE');
 
   const safetyTraceabilityChain = useMemo(() => deriveSafetyTraceability(context, issue, result), [context, issue, result]);
   const fmedaRows = useMemo(() => deriveFmedaRows(context, issue, result), [context, issue, result]);
@@ -97,6 +103,41 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
     setFsrInputs(next);
   }, [issue.measuredValues]);
   const setF = (k: string) => (v: string) => setFsrInputs((p) => ({ ...p, [k]: v }));
+
+  // ---------------------------------------------------------------- 器件库一键填入（一供 / 二供）
+  // 8 个一供/二供字段 + COMPONENT 页里属于当前器件的字段，直接按规格书填，不再逐项手抄。
+  const deviceLibrary = useMemo(() => loadDevices(), [activeSubTab]);
+  // 初值直接取「当前绑定器件」，而不是等 effect 再补（否则会有一帧空白选中，容易让人以为是别的器件）。
+  const [primaryDeviceId, setPrimaryDeviceId] = useState<string>(context.selectedDeviceId || '');
+  const [secondaryDeviceId, setSecondaryDeviceId] = useState<string>('');
+  const [supplyFillMessage, setSupplyFillMessage] = useState<string>('');
+  useEffect(() => {
+    // 一供默认跟随「当前绑定器件」；当前器件是唯一被物理引擎按工况插值使用的那个。
+    setPrimaryDeviceId((prev) => prev || context.selectedDeviceId || '');
+  }, [context.selectedDeviceId]);
+
+  const applySupplyPairFill = () => {
+    const primary = deviceLibrary.find((d) => d.id === primaryDeviceId);
+    const secondary = deviceLibrary.find((d) => d.id === secondaryDeviceId);
+    const fill = buildSupplyPairFill(primary, secondary);
+    const written = Object.keys(fill.values);
+    if (written.length === 0) {
+      setSupplyFillMessage('器件库里没有可用参数：请先导入 / 选择器件。');
+      return;
+    }
+    setFsrInputs((prev) => {
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(fill.values)) next[k] = String(v);
+      return next;
+    });
+    const label = `器件库一键填入 · ${primary ? primary.partNumber || primary.id : '一供未选'} / ${secondary ? secondary.partNumber || secondary.id : '二供未选'}`;
+    onApplyMeasuredValues?.(fill.values, label);
+    setSupplyFillMessage(
+      `已填入 ${written} 项（${label}）` +
+        (fill.missing.length ? `；器件库未提供：${fill.missing.join('、')}` : '') +
+        `；仍须实测输入：${MEASURED_ONLY_COMPONENT_FIELDS.join('、')}`,
+    );
+  };
 
   const capLifeResult = calculateCapacitorLife(
     capParams.nominalHours,
@@ -566,6 +607,47 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
               <NumCell label="二供 Qrr" unit="nC" value={fsrInputs.secondaryQrrNc || ''} onChange={setF('secondaryQrrNc')} />
               <NumCell label="一供 Rth(j-c)" unit="℃/W" value={fsrInputs.primaryRthJcCPerW || ''} onChange={setF('primaryRthJcCPerW')} />
               <NumCell label="二供 Rth(j-c)" unit="℃/W" value={fsrInputs.secondaryRthJcCPerW || ''} onChange={setF('secondaryRthJcCPerW')} />
+            </div>
+            <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 p-2 space-y-2">
+              <div className="text-[10px] text-slate-400">
+                从器件库一键填入（一供默认 = 当前绑定器件；映射沿用器件字段表，不手抄）
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <select
+                  value={primaryDeviceId}
+                  onChange={(e) => setPrimaryDeviceId(e.target.value)}
+                  className={cellInputCls}
+                  aria-label="一供器件"
+                >
+                  <option value="">一供：请选择器件</option>
+                  {deviceLibrary.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {(d.partNumber || d.id) + (d.id === context.selectedDeviceId ? '（当前器件）' : '')}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={secondaryDeviceId}
+                  onChange={(e) => setSecondaryDeviceId(e.target.value)}
+                  className={cellInputCls}
+                  aria-label="二供器件"
+                >
+                  <option value="">二供：请选择器件</option>
+                  {deviceLibrary.map((d) => (
+                    <option key={d.id} value={d.id}>{d.partNumber || d.id}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={applySupplyPairFill}
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1 rounded"
+                >
+                  从器件库填入
+                </button>
+              </div>
+              {supplyFillMessage && (
+                <div className="text-[10px] text-amber-300 leading-relaxed">{supplyFillMessage}</div>
+              )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
               <TextCell label="器件型号" value={fsrInputs.componentPartNumber || ''} onChange={setF('componentPartNumber')} />

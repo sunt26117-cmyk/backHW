@@ -284,6 +284,9 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     const v = optMeas(issue, key);
     if (v !== undefined) registerTraceSource(key, [key], v);
   });
+  // 同一个物理量有两个 key（DEVICE_SPEC 的 gateChargeQgNc / COMPONENT 的 qgNc）：互为别名，
+  // 谁填了都算填了，Trace 按实际填写的那个 key 的来源标注。
+  registerTraceSource('gateChargeQgNc', ['gateChargeQgNc', 'qgNc'], optMeas(issue, 'gateChargeQgNc') ?? optMeas(issue, 'qgNc'));
 
   const markDeviceSpecTrace = (targetKey: string, issueKey: string, deviceKey: DeviceSpecKey) => {
     if (optMeas(issue, issueKey) === undefined && deviceSpec(deviceKey) !== undefined) {
@@ -297,7 +300,9 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   markDeviceSpecTrace('fallTimeNs', 'fallTimeNs', 'fallTimeNs');
   markDeviceSpecTrace('diodeForwardVoltageV', 'diodeForwardVoltageV', 'diodeForwardVoltageV');
   markDeviceSpecTrace('qrrNc', 'qrrNc', 'qrrNc');
-  markDeviceSpecTrace('gateChargeQgNc', 'gateChargeQgNc', 'gateChargeQgNc');
+  if (optMeas(issue, 'gateChargeQgNc') === undefined && optMeas(issue, 'qgNc') === undefined && deviceSpec('gateChargeQgNc') !== undefined) {
+    traceSources.gateChargeQgNc = 'DATASHEET';
+  }
   markDeviceSpecTrace('rthJaCPerW', 'rthJaCPerW', 'rthJaCPerW');
   markDeviceSpecTrace('tjMaxC', 'tjMaxC', 'tjMaxC');
   if (optMeas(issue, 'cgsPf') === undefined && effectiveCgsPf !== undefined) {
@@ -416,7 +421,10 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     loopInductanceNh: optMeas(issue, 'loopInductanceNh'),
     cgsPf: effectiveCgsPf,
     magnetLowTempFluxUpliftPct: optMeas(issue, 'magnetLowTempFluxUpliftPct'),
-    gateChargeQgNc: effectiveSpec('gateChargeQgNc', 'gateChargeQgNc'),
+    // Qg 有两个 key：DEVICE_SPEC 的 gateChargeQgNc 与 COMPONENT 的 qgNc —— 同一个物理量。
+    // 此前它们互不相干：工程师在 COMPONENT 填的 Qg 永远进不了 P012 自举判据，而 P012 读的是
+    // DEVICE_SPEC 的 gateChargeQgNc。现在谁填了都算填了（实测优先于器件规格）。
+    gateChargeQgNc: optMeas(issue, 'gateChargeQgNc') ?? optMeas(issue, 'qgNc') ?? deviceSpec('gateChargeQgNc'),
     bootRefreshWindowUs: optMeas(issue, 'bootRefreshWindowUs'),
     bootChargeLoopOhm: optMeas(issue, 'bootChargeLoopOhm'),
     capInitialTolerancePct: optMeas(issue, 'capInitialTolerancePct'),
