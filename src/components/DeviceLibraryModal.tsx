@@ -84,11 +84,42 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
       return;
     }
     if (r.device) {
-      setDevices(saveDevice(r.device));
-      setCandidateDeviceId(r.device.id);
+      const device = r.device;
+      setDevices(saveDevice(device));
+      setCandidateDeviceId(device.id);
       setSelectedCandidates([]);
       setMappingDrafts({});
-      setImportResult({ ok: '已导入器件：' + r.device.partNumber, warnings: r.warnings || [] });
+      // 【关键修复】此前这里只 saveDevice —— 器件进了库，但 issue.measuredValues 没被写回，
+      // 于是「器件库有数据、当前工程 SPEC 全是空的」。现在导入即设为当前器件，并用与「设为当前」
+      // 按钮完全同一条的安全链路（getAutoImportCandidateIds 闸）自动带入高置信度规格参数：
+      // 仅映射到位 && importable && DATASHEET_DIRECT && confidence>=0.9 的有限数字单值会进去；
+      // 曲线选点 / 派生候选 / 自由文本一律仍进「待确认」，绝不静默入库（不违反"不能让 AI 随便
+      // 一个数字就自动写工程"的既有约束）。
+      onSelectDevice?.(device.id);
+      const candidatesForDevice = applyCandidateDecisions(
+        buildDeviceParameterCandidates(device, currentFieldKeys),
+        device.candidateDecisions,
+        currentFieldKeys,
+      );
+      const autoIds = getAutoImportCandidateIds(
+        candidatesForDevice, issue?.measuredValues, issue?.measurementProvenance, issue?.measuredValueSource,
+      );
+      const autoPayload = onApplyToIssue
+        ? buildDeviceCandidateImportPayload(
+            candidatesForDevice, autoIds, issue?.measuredValues, device.partNumber, undefined,
+            new Set(), issue?.measurementProvenance, issue?.measuredValueSource,
+          )
+        : null;
+      if (autoPayload && Object.keys(autoPayload.values).length) {
+        onApplyToIssue?.(autoPayload.values, autoPayload.provenance);
+      }
+      setImportResult({
+        ok: '已导入器件：' + device.partNumber
+          + (autoPayload && autoPayload.importedIds.length
+            ? `；已自动带入 ${autoPayload.importedIds.length} 项高置信度规格参数`
+            : '；已保存到器件库（无新增安全直导参数，曲线/派生候选请在下方确认）'),
+        warnings: r.warnings || [],
+      });
       setImportText('');
     }
   };
