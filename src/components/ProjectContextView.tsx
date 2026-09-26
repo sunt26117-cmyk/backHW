@@ -1,5 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { ProjectContext, IssueInput, IssueCategory, ProjectPhase, AsilLevel, HwLeadStyle, IssueAttachment } from '../types';
+import { loadDevices } from '../utils/deviceLibrary';
+import { buildSupplyPairFill } from '../utils/deviceSupplyPair';
+import { ASSUMED_VBUS_FOR_CURVE_V, resolveCgsPf, resolveEffectiveCgdPf } from '../utils/deviceCapacitance';
+import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 import { resolveFieldDisplayKey, getDomainDataQuality, getDomainMeasurementFields, getDomainMeasurementGroups, getEngineeringDomainLabel, extractMeasurementsFromText, extractTextInferredMeasurements, resolveEngineeringDomain, getBldcParameterSections, getDeviceSpecificationMeasurementFields } from '../utils/scenarioDomainEngine';
 import {
   Layers,
@@ -94,6 +98,67 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [expandedBldcGroups, setExpandedBldcGroups] = useState<Record<string, boolean>>({ BASE: true });
   const [selectedBldcModes, setSelectedBldcModes] = useState<string[]>([]);
+  // 一供/二供（替代料对比）一键填入：入口必须放在**字段所在的地方**（COMPONENT 主导域），
+  // 否则工程师对着 8 个空框找不到任何入口（现场反馈"我咋导入不了"）。
+  // 注意：器件列表每次渲染现取，不用 useMemo —— 否则导入新器件后下拉里看不到它。
+  const deviceLibrary = loadDevices();
+  const [supplyPrimaryId, setSupplyPrimaryId] = useState<string>(context.selectedDeviceId || '');
+  const [supplySecondaryId, setSupplySecondaryId] = useState<string>('');
+  const [supplyFillMsg, setSupplyFillMsg] = useState<string>('');
+  const applySupplyPairToIssue = () => {
+    const primary = deviceLibrary.find((d) => d.id === supplyPrimaryId) ?? deviceLibrary.find((d) => d.id === context.selectedDeviceId);
+    const secondary = deviceLibrary.find((d) => d.id === supplySecondaryId);
+    const fill = buildSupplyPairFill(primary, secondary);
+    const keys = Object.keys(fill.values);
+    if (keys.length === 0) {
+      setSupplyFillMsg('器件库里没有可用参数：请先在器件库导入规格书。');
+      return;
+    }
+    const measuredValues = { ...(issue.measuredValues || {}) };
+    const measurementProvenance = { ...(issue.measurementProvenance || {}) };
+    for (const [key, value] of Object.entries(fill.values)) {
+      measuredValues[key] = value;
+      measurementProvenance[key] = {
+        ...(measurementProvenance[key] || {}),
+        source: 'DATASHEET',
+        sourceLabel: `器件库填入（一供 ${primary?.partNumber || '—'} / 二供 ${secondary?.partNumber || '—'}）`,
+        enteredAt: new Date().toISOString(),
+      };
+    }
+    setIssue({ ...issue, measuredValues, measurementProvenance });
+    setSupplyFillMsg(
+      `已填入 ${keys.length} 项（一供 ${primary?.partNumber || '—'} / 二供 ${secondary?.partNumber || '—'}）`
+      + (fill.missing.length ? `；器件库未提供：${fill.missing.join('、')}` : '')
+      + '；仍须实测：开关延迟 / 结温 / SOA 裕量',
+    );
+  };
+
+  // 器件规格里"本来就由曲线/派生关系算出来"的字段：不该再给一个空的可编辑框。
+  // 绑定器件时直接只读显示引擎实际会用的派生值 + 取点说明；工程师手工填过则尊重其输入。
+  const derivedReadonlyValue = (key: string): { value?: number; note: string } | undefined => {
+    if (key !== 'cgdPf' && key !== 'cgsPf') return undefined;
+    if (!context.selectedDeviceId) return undefined;
+    const device = deviceLibrary.find((d) => d.id === context.selectedDeviceId);
+    if (!device) return undefined;
+    if (key === 'cgdPf') {
+      // 与引擎完全同一套优先级解析（实测 > Crss 曲线@工况Vbus > 直接 Cgd > Qgd），
+      // 所以这里显示的就是引擎实际会用的那个值，不是另算一个。
+      const measuredVbus = readMeasuredNumber(issue.measuredValues, 'busVoltageNominalV');
+      const r = resolveEffectiveCgdPf({
+        device,
+        vdsV: measuredVbus ?? ASSUMED_VBUS_FOR_CURVE_V,
+        vdsAssumed: measuredVbus === undefined,
+      });
+      return { value: r.value, note: r.note || '器件规格未提供 Cgd / Crss 曲线' };
+    }
+    const r = resolveCgsPf(device);
+    const note = r.value !== undefined
+      ? (r.from === 'CGS_DIRECT'
+          ? '器件规格直接给出的 Cgs'
+          : `由**同一个 Vds 点**的 Ciss − Crss 派生（Vds=${r.vdsV ?? '?'} V）`)
+      : (r.reason || '器件规格未提供 Cgs');
+    return { value: r.value, note };
+  };
 
   // [Phase 5 修复] renderField 原来定义在下面"可量化参数"那个大 IIFE 内部，只有该 IIFE
   // 内的 JSX 能用到它；新增的"器件规格·Datasheet参数"区块在 IIFE 外部也要渲染字段，
@@ -107,6 +172,26 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
     const displayValue = issue.measuredValues?.[display.valueKey];
     const fieldProvenance = issue.measurementProvenance?.[key]
       || (display.aliased ? issue.measurementProvenance?.[display.valueKey] : undefined);
+    // 派生字段 + 已绑定器件 + 工程师没手工填过 -> 只读显示派生值（不给空框，也不让人误以为缺数据）
+    const derived = displayValue === undefined ? derivedReadonlyValue(key) : undefined;
+    if (derived) {
+      return (
+        <div key={key}>
+          <label className="block text-[10px] text-slate-500 mb-1">
+            {field.label} {field.unit ? `(${field.unit})` : ''}
+            <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">自动派生</span>
+          </label>
+          <input
+            type="text"
+            readOnly
+            disabled
+            value={derived.value !== undefined ? String(derived.value) : '— 器件规格未提供'}
+            className={`w-full border rounded px-2 py-1.5 font-mono text-xs cursor-not-allowed ${derived.value !== undefined ? 'bg-emerald-950/20 border-emerald-900/40 text-emerald-200' : 'bg-slate-900/50 border-slate-800 text-slate-500'}`}
+          />
+          <div className="mt-0.5 text-[9px] text-slate-500 leading-snug">{derived.note}（无需手填）</div>
+        </div>
+      );
+    }
     return (
       <div key={key}>
         <label className="block text-[10px] text-slate-500 mb-1">
@@ -996,9 +1081,37 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
                               </div>
                             </>
                           ) : (
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-                              {visibleFields.map(renderField)}
-                            </div>
+                            <>
+                              {group.domain === 'COMPONENT' && (
+                                <div className="mb-2 rounded-lg border border-slate-800 bg-slate-950 p-2 space-y-2">
+                                  <div className="text-[10px] text-slate-400">
+                                    一供/二供对比参数可从器件库一键填入（一供默认 = 当前绑定器件；映射沿用器件字段表）
+                                  </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <select value={supplyPrimaryId} onChange={(e) => setSupplyPrimaryId(e.target.value)} aria-label="一供器件"
+                                      className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700 text-xs">
+                                      <option value="">一供：请选择器件</option>
+                                      {deviceLibrary.map((d) => (
+                                        <option key={d.id} value={d.id}>{(d.partNumber || d.id) + (d.id === context.selectedDeviceId ? '（当前器件）' : '')}</option>
+                                      ))}
+                                    </select>
+                                    <select value={supplySecondaryId} onChange={(e) => setSupplySecondaryId(e.target.value)} aria-label="二供器件"
+                                      className="w-full bg-slate-900 text-white font-mono px-2 py-1 rounded border border-slate-700 text-xs">
+                                      <option value="">二供：请选择器件</option>
+                                      {deviceLibrary.map((d) => <option key={d.id} value={d.id}>{d.partNumber || d.id}</option>)}
+                                    </select>
+                                    <button type="button" onClick={applySupplyPairToIssue}
+                                      className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1 rounded cursor-pointer">
+                                      从器件库填入一供/二供
+                                    </button>
+                                  </div>
+                                  {supplyFillMsg && <div className="text-[10px] text-amber-300 leading-relaxed">{supplyFillMsg}</div>}
+                                </div>
+                              )}
+                              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                                {visibleFields.map(renderField)}
+                              </div>
+                            </>
                           )}
                         </div>
                       );

@@ -106,7 +106,8 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
 
   // ---------------------------------------------------------------- 器件库一键填入（一供 / 二供）
   // 8 个一供/二供字段 + COMPONENT 页里属于当前器件的字段，直接按规格书填，不再逐项手抄。
-  const deviceLibrary = useMemo(() => loadDevices(), [activeSubTab]);
+  // 每次渲染现取：若用 useMemo([activeSubTab])，导入新器件后下拉里看不到它（现场反馈"导入不了"的成因之一）。
+  const deviceLibrary = loadDevices();
   // 初值直接取「当前绑定器件」，而不是等 effect 再补（否则会有一帧空白选中，容易让人以为是别的器件）。
   const [primaryDeviceId, setPrimaryDeviceId] = useState<string>(context.selectedDeviceId || '');
   const [secondaryDeviceId, setSecondaryDeviceId] = useState<string>('');
