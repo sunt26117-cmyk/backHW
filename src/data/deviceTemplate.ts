@@ -4,6 +4,30 @@
  * 产出的 JSON 既可进入器件库，也可通过候选池选择性导入当前工程输入。
  */
 
+import { MOSFET_FIELD_TABLE } from '../utils/mosfetFieldTable';
+
+/**
+ * Prompt 的映射清单不再手写，而是从 canonical 字段表推导 —— 这样「字段表比 Prompt 新」这类
+ * 漂移在结构上不可能再发生（本轮就修过 6 个：idssUa / igssNa / gateResistanceOhm /
+ * dvdtCapabilityVns / didtCapabilityANs / soaShortCircuitTimeUs 存在于字段表却不在 Prompt 里）。
+ * 治理测试 scripts/verify-device-candidate-governance.ts 会断言这三组与字段表一致。
+ */
+
+/** ① 可直接自动导入：datasheet 直给、且是单值标量（非曲线/集合）。 */
+export const DIRECT_MAPPABLE_TARGET_KEYS: readonly string[] = MOSFET_FIELD_TABLE
+  .filter((spec) => spec.targetKey !== null && spec.defaultSourceType === 'DATASHEET_DIRECT' && !spec.valueKind)
+  .map((spec) => spec.targetKey as string);
+
+/** ② 只能作为「需工程确认」候选：曲线选点（图估）出来的 targetKey。 */
+export const CURVE_ESTIMATE_TARGET_KEYS: readonly string[] = MOSFET_FIELD_TABLE
+  .filter((spec) => spec.targetKey !== null && (spec.valueKind === 'curve' || spec.defaultSourceType === 'DATASHEET_GRAPH_ESTIMATE'))
+  .map((spec) => spec.targetKey as string);
+
+/** ③ 只能作为「需工程确认」候选：由其它量派生或由 variants 恢复，字段表里没有直源。 */
+export const DERIVED_TARGET_KEYS: readonly string[] = ['cgsPf', 'gateVoltageMinV'];
+
+export const CONFIRM_REQUIRED_TARGET_KEYS: readonly string[] = [...CURVE_ESTIMATE_TARGET_KEYS, ...DERIVED_TARGET_KEYS];
+
 export const DEVICE_PARAM_PROMPT = [
   '你是汽车电子功率器件 datasheet 参数提取助手。输入可能是一份 MOSFET 规格书的全文、OCR 文本、表格文本或图片转写结果。',
   '你的任务不是做工程判断，而是把规格书中“明确给出的数据”尽可能完整地结构化提取出来，供另一个软件做工程风险分析。',
@@ -43,7 +67,9 @@ export const DEVICE_PARAM_PROMPT = [
   '',
   '【工程映射】',
   '请同时在 extractionHints.mapping 中给出该数据最可能支持的工程字段 targetKey（仅从模板列出的 targetKey 中选择），但不要强行映射不能确定的字段。无法安全映射的参数必须进入 unmappedImportantData，而不是丢弃。',
-  '可直接自动映射的器件规格字段包括：vdsRatingV、idRatingA、idPulseRatingA、tjMaxC、vbrDssMinV、pdMaxW、easEnergyMj、easCurrentA、rdsOnMilliOhm、vthMinV、cgdPf、cgsPf、cissPf、cossPf、gateChargeQgNc、qgsNc、qgdNc、qswNc、gatePlateauV、turnOnDelayNs、riseTimeNs、turnOffDelayNs、fallTimeNs、rthJcCPerW、rthJaCPerW、diodeForwardVoltageV、qrrNc、trrNs、irrPeakA、gateVoltageMaxV、esdRatingKv。已有明确 targetKey 的参数应优先按 mapping 自动对齐，不要要求工程师重复选择。无法安全投影成当前工程单值的多条件/曲线数据继续保留为 unmapped，不得为了减少提示而选取错误条件。',
+  '可直接自动导入的器件规格字段（datasheet 直给的单值标量，共 ' + DIRECT_MAPPABLE_TARGET_KEYS.length + ' 个）：' + DIRECT_MAPPABLE_TARGET_KEYS.join('、') + '。',
+  '以下 targetKey 只能作为「需工程确认」的候选，禁止在 mapping 里标成可直接自动导入：' + CONFIRM_REQUIRED_TARGET_KEYS.join('、') + '。原因：cgsPf 当前模板没有直接 Cgs 字段，只能由 Ciss 减 Crss 派生；rdsOnMilliOhm / vthMinV 来自曲线选点（图估），不是规格书保证值；gateVoltageMinV 没有独立字段，是从 protectionAndRobustness.gateVoltageMax 的负向 variant 恢复出来的；cgdPf 若取自 capacitanceParams.cgdDirect 属直接值，若由 Crss 换算而来则属派生值，必须在 sourceType 上如实区分，不得把 Crss 冒充成 datasheet 直给 Cgd。',
+  '已有明确 targetKey 的参数应优先按 extractionHints.mapping 自动对齐，不要要求工程师重复选择；无法安全投影成工程单值的多条件/曲线数据（SOA、ZthJC(t)、Crss 原始曲线、gate-charge 曲线、Tstg、bodyChannelCurrent 等）继续保留在器件库与 unmappedImportantData 中，不得为了减少提示而选取错误条件或编造 targetKey。',
 ].join('\n');
 
 export const MOSFET_PARAM_TEMPLATE = {

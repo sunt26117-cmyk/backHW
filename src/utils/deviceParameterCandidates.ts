@@ -22,6 +22,15 @@ export type DeviceParameterCategory =
   | 'SOA'
   | '其它';
 
+/**
+ * 候选分类的单一规则（Prompt -> 字段表 -> MappingStatus -> UI 四边唯一依据）：
+ *   DIRECT_SCALAR       datasheet 直给的单值标量        -> 可直接自动导入
+ *   DERIVED_OR_ESTIMATE 派生值 / 曲线选点图估           -> 有数值，但必须工程师确认
+ *   CURVE_ONLY          只有曲线或多条件，没有单值       -> 只算「已提取」，不可导入
+ *   NO_MAPPING          没有安全的工程字段可承接         -> 保留为信息，不导入
+ */
+export type CandidateKind = 'DIRECT_SCALAR' | 'DERIVED_OR_ESTIMATE' | 'CURVE_ONLY' | 'NO_MAPPING';
+
 export interface DeviceParameterCandidate {
   id: string;
   rawPath: string;
@@ -38,6 +47,8 @@ export interface DeviceParameterCandidate {
   note?: string;
   importable: boolean;
   mappingStatus: MappingStatus;
+  /** 分类结果：UI 分桶与导入闸门都只看它，不再各自判断 value 类型。 */
+  candidateKind: CandidateKind;
   category: DeviceParameterCategory;
 }
 
@@ -200,9 +211,16 @@ function makeCandidate(
       : currentFieldKeys
         ? (currentFieldKeys.has(targetKey) ? 'mapped' : 'unmapped')
         : 'mapped';
-  const importable = targetKey !== null
-    && mappingStatus === 'mapped'
-    && typeof extracted.value === 'number';
+  const sourceType = extracted.meta?.sourceType || spec.defaultSourceType;
+  const valueKind = spec.valueKind || 'scalar';
+  // 单一规则：先看有没有安全 target，再看有没有单值，最后看这个单值是不是"算出来的"。
+  const candidateKind: CandidateKind =
+    targetKey === null ? 'NO_MAPPING'
+      : typeof extracted.value !== 'number' ? 'CURVE_ONLY'
+        : (sourceType === 'DERIVED' || sourceType === 'DATASHEET_GRAPH_ESTIMATE' || valueKind === 'curve') ? 'DERIVED_OR_ESTIMATE'
+          : 'DIRECT_SCALAR';
+  // 只有 datasheet 直给的单值才允许自动写入；派生/图估必须工程师确认后才导入。
+  const importable = candidateKind === 'DIRECT_SCALAR' && mappingStatus === 'mapped';
 
   const rawConfidence = extracted.meta?.confidence ?? spec.defaultConfidence;
   const safeConfidence = Math.max(
@@ -220,7 +238,7 @@ function makeCandidate(
     label: spec.label,
     unit: spec.unit,
     value: extracted.value,
-    sourceType: extracted.meta?.sourceType || spec.defaultSourceType,
+    sourceType,
     valueType: extracted.meta?.valueType || spec.valueType,
     confidence: safeConfidence,
     sourceRef: extracted.meta?.source,
@@ -229,6 +247,7 @@ function makeCandidate(
     note: extracted.meta?.note,
     importable,
     mappingStatus,
+    candidateKind,
     category: spec.category,
   };
 }

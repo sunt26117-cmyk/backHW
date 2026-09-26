@@ -102,6 +102,7 @@ export function deriveCgdFromCrss(device: DeviceEntry, currentFieldKeys?: Readon
     // DERIVED 只能进入“需确认”区，不能静默写入工程。
     importable: false,
     mappingStatus,
+    candidateKind: 'DERIVED_OR_ESTIMATE',
     category: '电容',
   };
 }
@@ -133,6 +134,7 @@ export function deriveCgs(device: DeviceEntry, currentFieldKeys?: ReadonlySet<st
     // DERIVED 只能进入“需确认”区，不能静默写入工程。
     importable: false,
     mappingStatus,
+    candidateKind: 'DERIVED_OR_ESTIMATE',
     category: '电容',
   };
 }
@@ -158,7 +160,12 @@ export function deriveGateVoltageMin(device: DeviceEntry, currentFieldKeys?: Rea
     conditions: obj?.conditions && typeof obj.conditions === 'object' ? obj.conditions : undefined,
     evidence: 'protectionAndRobustness.gateVoltageMax.variants MIN',
     note: '从 VGS 正向额定对象的负向 MIN variant 恢复；保留为独立 Gate 最小额定值，不与当前 Gate 驱动实测值混用。',
-    importable: mappingStatus === 'mapped', mappingStatus, category: '保护/可靠性',
+    // 这个值本身取自 datasheet（负向 variant），但工程 targetKey 是从 variants 恢复出来的派生映射，
+    // 属于「需工程确认」，不能自动写入；字段不存在时退化为无安全映射。
+    importable: false,
+    mappingStatus,
+    candidateKind: mappingStatus === 'mapped' ? 'DERIVED_OR_ESTIMATE' : 'NO_MAPPING',
+    category: '保护/可靠性',
   };
 }
 

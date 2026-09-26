@@ -52,8 +52,10 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
   const candidates = candidateDevice
     ? applyCandidateDecisions(baseCandidates, candidateDevice.candidateDecisions, currentFieldKeys)
     : [];
-  const mappedCandidates = candidates.filter(c => c.mappingStatus === 'mapped' && c.importable);
-  const reviewCandidates = candidates.filter(c => c.mappingStatus === 'mapped' && !c.importable);
+  // 分桶只依据 candidateKind（唯一规则）：不再由 UI 各自判断 value 类型或来源，避免与字段表/Prompt 说法不一致。
+  const mappedCandidates = candidates.filter(c => c.candidateKind === 'DIRECT_SCALAR' && c.mappingStatus === 'mapped');
+  const reviewCandidates = candidates.filter(c => c.candidateKind === 'DERIVED_OR_ESTIMATE' && c.mappingStatus === 'mapped');
+  const curveOnlyCandidates = candidates.filter(c => c.candidateKind === 'CURVE_ONLY');
   const autoSelectableCandidateIds = getAutoImportCandidateIds(candidates, issue?.measuredValues);
   const autoSelectableCandidates = candidates.filter((candidate) => autoSelectableCandidateIds.has(candidate.id));
   const unmappedCandidates = candidates.filter(c => c.mappingStatus !== 'mapped');
@@ -178,6 +180,7 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
             candidates={candidates}
             mappedCandidates={mappedCandidates}
             reviewCandidates={reviewCandidates}
+            curveOnlyCandidates={curveOnlyCandidates}
             autoSelectableCandidates={autoSelectableCandidates}
             skippedCandidates={skippedCandidates}
             visibleUnmappedCandidates={visibleUnmappedCandidates}

@@ -10,6 +10,8 @@ interface Props {
   candidates: DeviceParameterCandidate[];
   mappedCandidates: DeviceParameterCandidate[];
   reviewCandidates: DeviceParameterCandidate[];
+  /** 已识别到目标工程参数，但只有曲线/多条件、拿不出单值的候选（不可导入）。 */
+  curveOnlyCandidates: DeviceParameterCandidate[];
   autoSelectableCandidates: DeviceParameterCandidate[];
   skippedCandidates: DeviceParameterCandidate[];
   visibleUnmappedCandidates: DeviceParameterCandidate[];
@@ -33,7 +35,7 @@ interface Props {
 }
 
 export const DeviceCandidatePanel: React.FC<Props> = ({
-  candidateDevice, candidates, mappedCandidates, reviewCandidates, autoSelectableCandidates, skippedCandidates, visibleUnmappedCandidates,
+  candidateDevice, candidates, mappedCandidates, reviewCandidates, curveOnlyCandidates, autoSelectableCandidates, skippedCandidates, visibleUnmappedCandidates,
   selectedCandidates, setSelectedCandidates, showUnmapped, setShowUnmapped, showSkipped, setShowSkipped,
   mappingDrafts, setMappingDrafts, issueLabel, mappingOptions, onSkip, onRestore, onMap, onRequestParameter, onImport, onConfirmReview, formatConditions,
 }) => (
@@ -49,7 +51,7 @@ export const DeviceCandidatePanel: React.FC<Props> = ({
       <div className='flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2'>
         <span className='text-xs font-semibold text-slate-200'>{candidateDevice.partNumber}</span>
         <span className='text-[10px] text-slate-500'>当前工程域：{issueLabel} · 全工程 schema 自动匹配</span>
-        <span className='text-[10px] text-slate-500'>可导入 {mappedCandidates.length} · 需确认 {reviewCandidates.length} · 未映射 {visibleUnmappedCandidates.length} · 待创建 {Object.keys(candidateDevice.candidateRequests || {}).length}</span>
+        <span className='text-[10px] text-slate-500'>可导入 {mappedCandidates.length} · 需确认 {reviewCandidates.length} · 仅曲线 {curveOnlyCandidates.length} · 未映射 {visibleUnmappedCandidates.length} · 待创建 {Object.keys(candidateDevice.candidateRequests || {}).length}</span>
         <button type='button' onClick={() => setSelectedCandidates(autoSelectableCandidates.map(c => c.id))} className='ml-auto text-[10px] text-emerald-300 hover:text-white cursor-pointer'>自动选中可安全直导 {autoSelectableCandidates.length} 项</button>
         <button type='button' onClick={() => setSelectedCandidates(mappedCandidates.filter(c => c.confidence >= 0.9).map(c => c.id))} className='text-[10px] text-blue-300 hover:text-white cursor-pointer'>选高置信度</button>
         <button type='button' onClick={() => setSelectedCandidates([])} className='text-[10px] text-slate-400 hover:text-white cursor-pointer'>清空</button>
@@ -85,6 +87,15 @@ export const DeviceCandidatePanel: React.FC<Props> = ({
                 <button type='button' onClick={() => onConfirmReview(c)} className='rounded border border-sky-500/40 bg-sky-600/15 px-2 py-1 text-[9px] text-sky-200 hover:bg-sky-600/25 cursor-pointer'>确认导入</button>
               </div>
             </div>
+          </div>)}
+        </div>
+      </div>}
+      {curveOnlyCandidates.length > 0 && <div className='rounded-lg border border-violet-500/30 bg-violet-950/10'>
+        <div className='px-3 py-2 text-[11px] font-semibold text-violet-200'>已识别对应工程参数，但当前只有曲线/多条件，无法生成单值（不可导入）</div>
+        <div className='border-t border-violet-500/20'>
+          {curveOnlyCandidates.map(c => <div key={c.id} className='px-3 py-2 border-b border-slate-800/80 last:border-b-0'>
+            <div className='text-xs text-slate-200'>{c.label} <span className='text-[10px] text-slate-500'>→ {c.targetKey}</span></div>
+            <div className='text-[9px] text-slate-500'>{c.value} · {c.sourceType} · {c.note || '曲线数据仍保留在器件库；工程输入需要单值，必须由工程师明确取点与条件。'}</div>
           </div>)}
         </div>
       </div>}
