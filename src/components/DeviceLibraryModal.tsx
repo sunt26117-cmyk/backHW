@@ -43,6 +43,7 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
   const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
   const [showUnmapped, setShowUnmapped] = useState(true);
   const [showSkipped, setShowSkipped] = useState(false);
+  const [forceOverwrite, setForceOverwrite] = useState(false);
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, string>>({});
   const candidateDevice = devices.find(d => d.id === candidateDeviceId) || null;
   const activeDomainFields = issue ? getDomainMeasurementFields(issue) : [];
@@ -199,7 +200,7 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
             onMap={(c, key) => { setDevices(updateDeviceCandidateDecision(candidateDevice!.id, c.rawPath, 'mapped_to', key)); setMappingDrafts(prev => ({ ...prev, [c.rawPath]: key })); }}
             onRequestParameter={(c) => { setDevices(requestDeviceCandidateParameter(candidateDevice!.id, c.rawPath, c.label, c.category)); showToast?.('已记录为“待创建工程参数”', 'info'); }}
             onConfirmReview={(c) => {
-              const payload = buildDeviceCandidateImportPayload(candidates, new Set([c.id]), issue?.measuredValues, candidateDevice!.partNumber, undefined, new Set([c.id]));
+              const payload = buildDeviceCandidateImportPayload(candidates, new Set([c.id]), issue?.measuredValues, candidateDevice!.partNumber, undefined, new Set([c.id]), issue?.measurementProvenance, issue?.measuredValueSource, forceOverwrite);
               if (Object.keys(payload.values).length) onApplyToIssue?.(payload.values, payload.provenance);
               if (payload.importedIds.includes(c.id) && c.targetKey) {
                 const next = updateDeviceCandidateDecision(candidateDevice!.id, c.rawPath, 'imported', c.targetKey);
@@ -212,18 +213,21 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
               }
             }}
             onImport={() => {
-              const payload = buildDeviceCandidateImportPayload(candidates, new Set(selectedCandidates), issue?.measuredValues, candidateDevice!.partNumber);
+              const payload = buildDeviceCandidateImportPayload(candidates, new Set(selectedCandidates), issue?.measuredValues, candidateDevice!.partNumber, undefined, new Set(), issue?.measurementProvenance, issue?.measuredValueSource, forceOverwrite);
               if (Object.keys(payload.values).length) onApplyToIssue?.(payload.values, payload.provenance);
               let nextDevices = devices;
               for (const candidate of candidates) if (payload.importedIds.includes(candidate.id) && candidate.targetKey) nextDevices = updateDeviceCandidateDecision(candidateDevice!.id, candidate.rawPath, 'imported', candidate.targetKey);
               if (nextDevices !== devices) setDevices(nextDevices);
               setSelectedCandidates([]);
               const messages = [`已导入 ${payload.importedIds.length} 项`];
-              if (payload.conflicts.length) messages.push(`${payload.conflicts.length} 项因已有输入未覆盖`);
+              if (payload.overwritten.length) messages.push(`${payload.overwritten.length} 项覆盖了原 datasheet/基准值`);
+              if (payload.conflicts.length) messages.push(`${payload.conflicts.length} 项受保护未覆盖${forceOverwrite ? '' : '（可勾选「强制覆盖已有输入」）'}`);
               if (payload.duplicateTargets.length) messages.push(`${payload.duplicateTargets.length} 个目标字段重复，已阻止覆盖`);
               if (payload.invalidCandidates.length) messages.push(`${payload.invalidCandidates.length} 项映射/数值异常未导入`);
               showToast?.(messages.join('；'), payload.importedIds.length ? 'success' : 'info');
             }}
+            forceOverwrite={forceOverwrite}
+            setForceOverwrite={setForceOverwrite}
             formatConditions={formatConditions}
           />
             )}
@@ -255,13 +259,17 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
                             d.candidateDecisions,
                             currentFieldKeys,
                           );
-                          const autoIds = getAutoImportCandidateIds(selectedDeviceCandidates, issue?.measuredValues);
+                          const autoIds = getAutoImportCandidateIds(selectedDeviceCandidates, issue?.measuredValues, issue?.measurementProvenance, issue?.measuredValueSource);
                           const autoPayload = onApplyToIssue
                             ? buildDeviceCandidateImportPayload(
                                 selectedDeviceCandidates,
                                 autoIds,
                                 issue?.measuredValues,
                                 d.partNumber,
+                                undefined,
+                                new Set(),
+                                issue?.measurementProvenance,
+                                issue?.measuredValueSource,
                               )
                             : null;
                           if (autoPayload && Object.keys(autoPayload.values).length) {
@@ -270,7 +278,7 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
                           showToast?.(
                             autoPayload && autoPayload.importedIds.length
                               ? `已设为当前器件：${d.partNumber}；自动带入 ${autoPayload.importedIds.length} 项高置信度规格参数，无需逐项映射。`
-                              : `已设为当前器件：${d.partNumber}；没有新的可安全直导参数，未覆盖已有工程输入。`,
+                              : `已设为当前器件：${d.partNumber}；没有新的可安全直导参数（实测/人工输入不会被覆盖）。`,
                             autoPayload && autoPayload.importedIds.length ? 'success' : 'info',
                           );
                         }}

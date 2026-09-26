@@ -143,4 +143,48 @@ if (trr && getMosfetMappingOptions(trr, [{ key: 'qrrNc', label: 'Qrr', unit: 'nC
   throw new Error('单位不兼容的人工映射没有被过滤');
 }
 
+// ---- 覆盖规则：datasheet 之间可覆盖；实测/工程师输入绝不覆盖 ----
+// 背景：真实器件复核时，面板上出现了与当前器件不符的值（Vds 60 vs 40、Qgd 14.2 vs 2.9）——
+// 预设/演示数据没有逐字段 provenance，却被"绝不覆盖"一刀切挡住，工程师点了导入也没用。
+const idCandidate = expanded.find(c => c.rawPath === 'maxRatings.id');
+if (!idCandidate) throw new Error('缺少用于覆盖规则断言的真实器件候选');
+const runImport = (existingValues: any, provenance?: any, scenarioSource?: any) =>
+  buildDeviceCandidateImportPayload(expanded, new Set([idCandidate.id]), existingValues, 'GOV-TEST', undefined, new Set(), provenance, scenarioSource);
+
+const protectedCases: Array<[string, any, any, any]> = [
+  ['逐字段来源 USER_MEASURED', { idRatingA: 999 }, { idRatingA: { source: 'USER_MEASURED' } }, undefined],
+  ['逐字段来源 IMPORTED', { idRatingA: 999 }, { idRatingA: { source: 'IMPORTED' } }, undefined],
+  ['无逐字段来源 + 场景级 USER_MEASURED', { idRatingA: 999 }, undefined, 'USER_MEASURED'],
+  ['无逐字段来源 + 无场景级来源（来源不明）', { idRatingA: 999 }, undefined, undefined],
+];
+for (const [name, values, provenance, scenarioSource] of protectedCases) {
+  const payload = runImport(values, provenance, scenarioSource);
+  if (payload.values['idRatingA'] !== undefined) throw new Error(`实测/人工输入被 datasheet 覆盖了: ${name}`);
+  if (!payload.conflicts.some(item => item.targetKey === 'idRatingA')) throw new Error(`受保护值必须进 conflicts: ${name}`);
+}
+
+const overwritableCases: Array<[string, any, any, any]> = [
+  ['逐字段来源 DATASHEET', { idRatingA: 999 }, { idRatingA: { source: 'DATASHEET' } }, undefined],
+  ['无 provenance + 场景级 BENCHMARK（预设/演示数据）', { idRatingA: 999 }, undefined, 'BENCHMARK'],
+];
+for (const [name, values, provenance, scenarioSource] of overwritableCases) {
+  const payload = runImport(values, provenance, scenarioSource);
+  if (payload.values['idRatingA'] !== idCandidate.value) throw new Error(`datasheet/基准值应被当前器件覆盖: ${name}`);
+  const recorded = payload.overwritten.find(item => item.targetKey === 'idRatingA');
+  if (!recorded || recorded.previousValue !== '999') throw new Error(`覆盖必须如实记录原值供 UI 告知: ${name}`);
+}
+
+if (!getAutoImportCandidateIds(expanded, { idRatingA: 999 }, { idRatingA: { source: 'DATASHEET' } }).has(idCandidate.id)) {
+  throw new Error('已有 datasheet 值时仍应自动选中（工程师明确选择当前器件 → 当前器件优先）');
+}
+if (getAutoImportCandidateIds(expanded, { idRatingA: 999 }, { idRatingA: { source: 'USER_MEASURED' } }).has(idCandidate.id)) {
+  throw new Error('已有实测值时不得自动选中覆盖');
+}
+// 显式"强制覆盖"开关：勾选后连实测/人工输入也可被当前器件覆盖，且必须记录原值
+const forced = buildDeviceCandidateImportPayload(expanded, new Set([idCandidate.id]), { idRatingA: 999 }, 'GOV-TEST', undefined, new Set(), { idRatingA: { source: 'USER_MEASURED' } }, undefined, true);
+if (forced.values['idRatingA'] !== idCandidate.value) throw new Error('勾选强制覆盖后应写入当前器件值');
+if (!forced.overwritten.some(item => item.targetKey === 'idRatingA' && item.previousSource === 'USER_MEASURED')) {
+  throw new Error('强制覆盖也必须如实记录被覆盖的是实测/人工输入');
+}
+
 console.log(`device-candidate-governance-audit: PASS (table=${MOSFET_FIELD_TABLE.length}, schemaKeys=${schemaKeys.size}, promptDirect=${DIRECT_MAPPABLE_TARGET_KEYS.length}, promptConfirm=${CONFIRM_REQUIRED_TARGET_KEYS.length})`);

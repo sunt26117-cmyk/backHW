@@ -31,19 +31,22 @@ interface Props {
   onRequestParameter: (candidate: DeviceParameterCandidate) => void;
   onImport: () => void;
   onConfirmReview: (candidate: DeviceParameterCandidate) => void;
+  /** 强制覆盖开关：勾选后连实测/人工输入也允许被当前器件规格覆盖（默认关闭，保护实测）。 */
+  forceOverwrite: boolean;
+  setForceOverwrite: React.Dispatch<React.SetStateAction<boolean>>;
   formatConditions: (conditions?: Record<string, unknown>) => string;
 }
 
 export const DeviceCandidatePanel: React.FC<Props> = ({
   candidateDevice, candidates, mappedCandidates, reviewCandidates, curveOnlyCandidates, autoSelectableCandidates, skippedCandidates, visibleUnmappedCandidates,
   selectedCandidates, setSelectedCandidates, showUnmapped, setShowUnmapped, showSkipped, setShowSkipped,
-  mappingDrafts, setMappingDrafts, issueLabel, mappingOptions, onSkip, onRestore, onMap, onRequestParameter, onImport, onConfirmReview, formatConditions,
+  mappingDrafts, setMappingDrafts, issueLabel, mappingOptions, onSkip, onRestore, onMap, onRequestParameter, onImport, onConfirmReview, forceOverwrite, setForceOverwrite, formatConditions,
 }) => (
   <section>
     <div className='flex items-center justify-between mb-2'>
       <div>
         <h3 className='text-sm font-semibold text-blue-300'>4 · 资料参数候选 → 当前工程输入</h3>
-        <div className='text-[10px] text-slate-500 mt-0.5'>系统先按全工程 schema、单位和 AI 明确 mapping 自动匹配；工程师只决定是否导入。已有工程输入不会覆盖。</div>
+        <div className='text-[10px] text-slate-500 mt-0.5'>系统先按全工程 schema、单位和 AI 明确 mapping 自动匹配；工程师只决定是否导入。实测/工程师输入永不被覆盖；已有的 datasheet/基准值会被当前器件覆盖，导入结果会如实告知覆盖了哪几项。</div>
       </div>
       <span className='text-[10px] text-slate-500'>{getCandidateSummary(candidates).total} 项候选</span>
     </div>
@@ -135,7 +138,11 @@ export const DeviceCandidatePanel: React.FC<Props> = ({
       </div>
       <div className='flex flex-col md:flex-row md:items-center gap-2'>
         <button type='button' disabled={!selectedCandidates.length} onClick={onImport} className='inline-flex items-center gap-1.5 rounded-lg bg-blue-600 disabled:bg-slate-800 disabled:text-slate-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-500 cursor-pointer'><Upload className='w-3.5 h-3.5' />导入已选择到工程</button>
-        <div className='text-[9px] text-slate-500 flex items-center gap-1'><Info className='w-3 h-3' /> 已明确映射的 DATASHEET 直接值可一键导入；曲线估读、DERIVED 和没有可靠同义字段的数据不会静默写入。</div>
+        <label className='flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none'>
+          <input type='checkbox' checked={forceOverwrite} onChange={(e) => setForceOverwrite(e.target.checked)} className='accent-rose-500' />
+          强制覆盖已有输入（含实测/人工/来源不明的值）
+        </label>
+        <div className='text-[9px] text-slate-500 flex items-center gap-1'><Info className='w-3 h-3' /> 已明确映射的 DATASHEET 直接值可一键导入；曲线估读、DERIVED 和没有可靠同义字段的数据不会静默写入。默认保护实测/人工输入，只有勾选上面的开关才会覆盖它们。</div>
       </div>
     </div>
   </section>
