@@ -46,6 +46,7 @@ export const DEVICE_PARAM_PROMPT = [
   '10. 同一参数存在多个温度/电压条件时全部保留，不要覆盖；单值字段无法容纳多个口径时，在该对象的 variants 数组中逐条保留。',
   '11. 如果同一参数同时出现 typ/min/max，value 只放一个主值，其他口径必须写入 variants[{value,unit,stat,conditions,source,sourceType,confidence,note}]，不得丢掉。',
   '12. 如果无法从原文确定参数名称、数值、单位、测试条件或来源位置，宁可留空并记录 documentAmbiguities，也不要猜测。',
+  '13. 数值不得只写在 note 里。若该数值在模板中有对应字段（或该字段的 variants），必须同时落到那个字段，note 仅作补充说明。**特别是 Gate 电压额定为双向范围时（例如 -20 V ~ +20 V）**：必须把负向额定作为 protectionAndRobustness.gateVoltageMax.variants 中的一条负值记录（value 为负数，stat / conditions / source / sourceType 与正向一致），不能只写 note —— 工程侧要从 variants 恢复 gateVoltageMinV，只写 note 会让这个值在工程侧完全不可用。同理，任何“范围/双向/多条件”额定值都必须进 variants 而不是进 note。',
   '',
   '【重点提取范围】',
   'A. 最大额定：VDS、ID、ID pulse、TJmax、Tstg、PD、EAS/UIS、雪崩电流等；',

@@ -52,6 +52,12 @@ for (const key of ['cgsPf', 'gateVoltageMinV']) {
 if (!/cgdDirect/.test(DEVICE_PARAM_PROMPT) || !/Crss/.test(DEVICE_PARAM_PROMPT)) throw new Error('Prompt 未区分 cgdPf 的直给来源与 Crss 派生来源');
 // Prompt 必须写明 gateVoltageMinV 是从 gateVoltageMax 的负向 variant 恢复的
 if (!/gateVoltageMinV/.test(DEVICE_PARAM_PROMPT) || !/variant/.test(DEVICE_PARAM_PROMPT)) throw new Error('Prompt 未说明 gateVoltageMinV 由 variants 恢复');
+// 只写 note 不写 variants 会让"双向额定/Gate 负向额定"在工程侧不可用（真实器件曾如此），必须明确要求
+if (!/gateVoltageMax\.variants/.test(DEVICE_PARAM_PROMPT) || !/负向额定/.test(DEVICE_PARAM_PROMPT)) {
+  throw new Error('Prompt 未要求把 Gate 负向额定写入 gateVoltageMax.variants（只写 note 会导致 gateVoltageMinV 无候选）');
+}
+// 通用原则：note 只作补充，数值必须落到字段或 variants
+if (!/不得只写在 note 里/.test(DEVICE_PARAM_PROMPT)) throw new Error('Prompt 缺少“数值不得只写在 note 里”的通用规则');
 }
 for (const key of Object.keys(MOSFET_TARGET_CATEGORY_BY_KEY)) {
   if (!schemaKeys.has(key)) throw new Error(`人工映射 registry 指向不存在字段: ${key}`);
