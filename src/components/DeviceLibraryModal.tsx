@@ -237,10 +237,16 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
                 const next = updateDeviceCandidateDecision(candidateDevice!.id, c.rawPath, 'imported', c.targetKey);
                 setDevices(next);
                 showToast?.(`已确认导入：${c.label} → ${c.targetKey}`, 'success');
+              } else if (payload.superseded.some(s => s.candidateId === c.id)) {
+                showToast?.('已按你手工指定的候选导入；同目标字段的另一条已让位（不再互相顶掉）', 'success');
+              } else if (payload.duplicateTargets.some(d => d.candidateIds.includes(c.id))) {
+                const dup = payload.duplicateTargets.find(d => d.candidateIds.includes(c.id))!;
+                showToast?.(`同一目标字段 ${dup.targetKey} 有多条候选且都没人工指定，为避免互相覆盖已阻止导入；请只保留一条`, 'error');
               } else if (payload.conflicts.length) {
                 showToast?.(`当前工程已有 ${c.targetKey || c.label}，为避免覆盖未导入`, 'info');
               } else {
-                showToast?.('该候选未通过最终导入校验', 'error');
+                // 必须说清原因：此前统一提示"未通过校验"，工程师无法判断是类型不匹配、字段不存在还是别的问题。
+                showToast?.(`该候选未导入：目标字段 ${c.targetKey || '（未映射）'} 的取值类型不匹配（文本字段只收字符串、数值字段只收数字）`, 'error');
               }
             }}
             onImport={() => {
@@ -253,7 +259,8 @@ export const DeviceLibraryModal: React.FC<DeviceLibraryModalProps> = ({ isOpen, 
               const messages = [`已导入 ${payload.importedIds.length} 项`];
               if (payload.overwritten.length) messages.push(`${payload.overwritten.length} 项覆盖了原 datasheet/基准值`);
               if (payload.conflicts.length) messages.push(`${payload.conflicts.length} 项受保护未覆盖${forceOverwrite ? '' : '（可勾选「强制覆盖已有输入」）'}`);
-              if (payload.duplicateTargets.length) messages.push(`${payload.duplicateTargets.length} 个目标字段重复，已阻止覆盖`);
+              if (payload.superseded.length) messages.push(`${payload.superseded.length} 项同目标候选已按人工映射让位`);
+              if (payload.duplicateTargets.length) messages.push(`${payload.duplicateTargets.length} 个目标字段重复（均无人工指定），已阻止覆盖`);
               if (payload.invalidCandidates.length) messages.push(`${payload.invalidCandidates.length} 项映射/数值异常未导入`);
               showToast?.(messages.join('；'), payload.importedIds.length ? 'success' : 'info');
             }}

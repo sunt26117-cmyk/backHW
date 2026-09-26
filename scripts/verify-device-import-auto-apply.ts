@@ -7,7 +7,7 @@
  *  2. 曲线选点（Rds(on)/Vth 只有 points 无标量）与派生候选（Ciss−Crss 之类）绝不能被自动导入；
  *  3. 顺带记录曲线候选的真实 candidateKind，避免把「曲线候选」误说成「已映射的派生值」。
  */
-import { importDeviceFromJson, saveDevice } from '../src/utils/deviceLibrary';
+import { importDeviceFromJson, saveDevice, applyCandidateDecisions } from '../src/utils/deviceLibrary';
 import { buildDeviceParameterCandidates, getMosfetMappingOptions } from '../src/utils/deviceParameterCandidates';
 import { buildDeviceCandidateImportPayload, getAutoImportCandidateIds } from '../src/utils/deviceCandidateImport';
 import { DEVICE_SPEC_FIELDS } from '../src/utils/deviceSpecificationSchema';
@@ -71,5 +71,44 @@ ok_(!autoIdsB.has(cgs?.id ?? '__none__'), 'cgsPf 派生候选严禁被自动导�
 const issue = { measuredValues: { vdsRatingV: 60 }, measurementProvenance: { vdsRatingV: { source: 'USER_MEASURED' } }, measuredValueSource: 'USER_MEASURED' } as any;
 const autoIdsProtected = getAutoImportCandidateIds(candidatesA, issue.measuredValues, issue.measurementProvenance, issue.measuredValueSource);
 ok_(!autoIdsProtected.has('vdsRatingV'), '已实测/人工输入的 vdsRatingV 不得被器件资料覆盖');
+
+// ------------------------------------- 3) 工程师手工映射（现场：RDS(on) 映射不进去 / 器件型号映射不进去）
+const dup = importDeviceFromJson(JSON.stringify({
+  deviceType: 'MOSFET', partNumber: 'DUP-MAP', manufacturer: 'N', package: 'L',
+  maxRatings: { vds: { value: 40 } },
+  staticParams: { rdsOn: { value: 6.0 } },
+  extractionHints: { unmappedImportantData: [
+    { key: 'rdsOn', label: 'RDS(on) 实测@10V', value: '6.1', unit: 'mΩ', category: '静态' },
+    { key: 'partNumber', label: '器件型号', value: 'DUP-MAP', category: '其它' },
+  ] },
+}));
+if (!dup.device) throw new Error(dup.error || 'dup import failed');
+saveDevice(dup.device);
+const dupKeys = new Set([...fieldKeys, 'componentPartNumber', 'supplierName', 'pcnChangeDescription', 'rdsOnMilliOhm']);
+const dupCands = buildDeviceParameterCandidates(dup.device, dupKeys);
+const unmappedRds = dupCands.find(c => c.mappingStatus !== 'mapped' && /rdsOn/i.test(c.rawPath + c.label));
+if (!unmappedRds) throw new Error('未找到未映射的 RDS(on) 候选');
+const partCand = dupCands.find(c => c.mappingStatus !== 'mapped' && /partNumber|型号/i.test(c.rawPath + c.label));
+if (!partCand) throw new Error('未找到器件型号候选');
+
+const decided = applyCandidateDecisions(dupCands, {
+  [unmappedRds.rawPath]: { decision: 'mapped_to', mappedKey: 'rdsOnMilliOhm', decidedAt: new Date().toISOString() } as any,
+  [partCand.rawPath]: { decision: 'mapped_to', mappedKey: 'componentPartNumber', decidedAt: new Date().toISOString() } as any,
+}, dupKeys);
+const decidedIds = new Set(decided.map(c => c.id));
+const mapped = buildDeviceCandidateImportPayload(decided, decidedIds, {}, 'DUP-MAP', undefined, decidedIds, {}, 'USER_MEASURED');
+// 同一目标字段有两条候选时必须以工程师人工映射的那条为准（此前两条一起被丢，人工映射被无视）
+eq('人工映射的 RDS(on) 必须导入', mapped.values.rdsOnMilliOhm, 6.1);
+ok_(mapped.superseded.length >= 1, '同目标让位必须被记录（供 UI 如实告知）');
+ok_(mapped.duplicateTargets.length === 0, '有人工指定时不应再报重复阻塞');
+// 器件型号是字符串：文本型工程字段必须收得进去（此前硬要求 number，永远静默拒绝）
+eq('器件型号（字符串）必须能导入文本字段', mapped.values.componentPartNumber, 'DUP-MAP');
+// 但字符串绝不能写进数值字段
+const badCands = dupCands.map(c => c.id === partCand.id
+  ? { ...c, targetKey: 'vdsRatingV', mappingStatus: 'mapped' as const, manuallyDecided: true, importable: true }
+  : c);
+const badPayload = buildDeviceCandidateImportPayload(badCands, new Set([partCand.id]), {}, 'X', undefined, new Set([partCand.id]), {}, 'USER_MEASURED');
+eq('字符串不得写入数值字段', badPayload.values.vdsRatingV, undefined);
+ok_(badPayload.invalidCandidates.includes(partCand.id), '类型不匹配必须记为 invalid（不能静默丢弃）');
 
 console.log('device-import-auto-apply: PASS');

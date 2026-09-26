@@ -1,4 +1,5 @@
 import type { DeviceParameterCandidate } from './deviceParameterCandidates';
+import { getAllEngineeringMeasurementFields } from './scenarioDomainEngine';
 import type { MeasurementProvenance, MeasurementSource } from '../types';
 
 export interface DeviceCandidateImportPayload {
@@ -10,7 +11,31 @@ export interface DeviceCandidateImportPayload {
   /** 已有值不是实测/工程师输入，已被当前器件规格覆盖（原值一并带出，供 UI 如实告知）。 */
   overwritten: Array<{ targetKey: string; candidateId: string; label: string; previousValue: string; previousSource: string }>;
   duplicateTargets: Array<{ targetKey: string; candidateIds: string[] }>;
+  /** 同一目标字段有多条候选、但工程师已人工指定其中一条：其余让位（不再阻塞导入）。 */
+  superseded: Array<{ targetKey: string; candidateId: string; label: string; keptCandidateId: string }>;
   invalidCandidates: string[];
+}
+
+let cachedTextTargetKeys: Set<string> | undefined;
+/** 文本型工程字段（无单位，如器件型号/供应商/PCN 描述）：允许导入字符串值。 */
+function textTargetKeys(): Set<string> {
+  if (!cachedTextTargetKeys) {
+    cachedTextTargetKeys = new Set(getAllEngineeringMeasurementFields().filter((f) => !f.unit).map((f) => f.key));
+  }
+  return cachedTextTargetKeys;
+}
+
+/**
+ * 唯一写入口的取值类型判定。
+ * 数值字段只收有限数字；文本字段（器件型号等）另收非空字符串。
+ * 此前这里硬要求 number，导致"器件型号"这类字段即使工程师手工映射并确认也永远被静默拒绝。
+ */
+function isImportableValue(candidate: DeviceParameterCandidate): boolean {
+  if (typeof candidate.value === 'number') return Number.isFinite(candidate.value);
+  if (typeof candidate.value === 'string') {
+    return candidate.value.trim() !== '' && typeof candidate.targetKey === 'string' && textTargetKeys().has(candidate.targetKey);
+  }
+  return false;
 }
 
 /** 实测与工程师输入受保护：datasheet 导入不得替换它们。 */
@@ -88,7 +113,7 @@ export function buildDeviceCandidateImportPayload(
   const valid = selected.filter(candidate => {
     const ok = candidate.mappingStatus === 'mapped' && (candidate.importable || confirmedReviewIds.has(candidate.id)) &&
       typeof candidate.targetKey === 'string' && candidate.targetKey.length > 0 &&
-      typeof candidate.value === 'number' && Number.isFinite(candidate.value);
+      isImportableValue(candidate);
     if (!ok) invalidCandidates.push(candidate.id);
     return ok;
   });
@@ -99,10 +124,25 @@ export function buildDeviceCandidateImportPayload(
     byTarget.set(key, [...(byTarget.get(key) || []), candidate]);
   }
   const duplicateTargets: DeviceCandidateImportPayload['duplicateTargets'] = [];
+  const superseded: DeviceCandidateImportPayload['superseded'] = [];
+  const skippedIds = new Set<string>();
   for (const [targetKey, bucket] of byTarget) {
-    if (bucket.length > 1) duplicateTargets.push({ targetKey, candidateIds: bucket.map(c => c.id) });
+    if (bucket.length <= 1) continue;
+    // 同一目标字段有多条候选时，**以工程师的人工决定为准**：
+    // 此前无条件把整组丢掉，于是"我在·已提取但当前没有工程映射·里手工映射了 RDS(on)，却死活导不进去"——
+    // 字段表那条候选同样指向 rdsOnMilliOhm，两条互相顶掉，且面板只给一个含糊的失败提示。
+    const decided = bucket.filter(c => c.manuallyDecided);
+    if (decided.length === 1) {
+      for (const c of bucket) {
+        if (c.id === decided[0].id) continue;
+        skippedIds.add(c.id);
+        superseded.push({ targetKey, candidateId: c.id, label: c.label, keptCandidateId: decided[0].id });
+      }
+      continue;
+    }
+    duplicateTargets.push({ targetKey, candidateIds: bucket.map(c => c.id) });
+    for (const c of bucket) skippedIds.add(c.id);
   }
-  const duplicateIds = new Set(duplicateTargets.flatMap(item => item.candidateIds));
 
   const values: Record<string, number | string> = {};
   const provenance: Record<string, MeasurementProvenance> = {};
@@ -111,7 +151,7 @@ export function buildDeviceCandidateImportPayload(
   const importedIds: string[] = [];
 
   for (const candidate of valid) {
-    if (duplicateIds.has(candidate.id)) continue;
+    if (skippedIds.has(candidate.id)) continue;
     const targetKey = candidate.targetKey!;
     const existing = existingValues?.[targetKey];
     if (existing !== undefined && existing !== null && existing !== '') {
@@ -139,5 +179,5 @@ export function buildDeviceCandidateImportPayload(
     importedIds.push(candidate.id);
   }
 
-  return { values, provenance, importedIds, conflicts, overwritten, duplicateTargets, invalidCandidates };
+  return { values, provenance, importedIds, conflicts, overwritten, duplicateTargets, superseded, invalidCandidates };
 }

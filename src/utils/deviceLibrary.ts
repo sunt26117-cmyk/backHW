@@ -190,7 +190,10 @@ export function applyCandidateDecisions<T extends {
         ...candidate,
         targetKey: decision.mappedKey,
         mappingStatus: mapped ? 'mapped' : 'unmapped',
-        importable: mapped && typeof candidate.value === 'number',
+        // 文本型工程字段（器件型号/供应商/PCN 描述等）的值本来就是字符串；这里只判断"能不能作为值"，
+        // 具体"这个字段能不能收这个类型"由唯一写入口 buildDeviceCandidateImportPayload 严格把关。
+        importable: mapped && (typeof candidate.value === 'number' || typeof candidate.value === 'string'),
+        manuallyDecided: true,
         note: `${candidate.note ? candidate.note + ' ' : ''}工程师已人工映射至 ${decision.mappedKey}。`,
       };
     }

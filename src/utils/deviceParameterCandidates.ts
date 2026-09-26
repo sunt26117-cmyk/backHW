@@ -46,6 +46,8 @@ export interface DeviceParameterCandidate {
   evidence?: string;
   note?: string;
   importable: boolean;
+  /** 工程师在候选面板里人工映射/确认过（用于同目标冲突时"以人的决定为准"）。 */
+  manuallyDecided?: boolean;
   mappingStatus: MappingStatus;
   /** 分类结果：UI 分桶与导入闸门都只看它，不再各自判断 value 类型。 */
   candidateKind: CandidateKind;
