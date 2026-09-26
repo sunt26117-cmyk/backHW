@@ -169,7 +169,14 @@ function valueForSpec(raw: unknown, spec: FieldSpec): { value?: number | string;
   const meta = objectMeta(obj, spec);
   if (spec.valueKind === 'curve') {
     const points = Array.isArray(obj?.points) ? obj.points : [];
-    if (points.length === 0) return {};
+    if (points.length === 0) {
+      // 规格书把 Rds(on)/Vth 给成**表格单值**而不是曲线，是完全正常的形态（真实 datasheet 通常两者都有，
+      // 提取结果可能是任一种）。此前这里直接 return {}，导致该字段连候选都不生成 —— 面板永远填不上，
+      // 工程师连"确认导入"的机会都没有（现场症状：RDS(on)/VGS(th) 一路空）。
+      // 现在回落到读 value：仍是需要工程确认的估计候选（不自动导入），但至少可见、可一键确认。
+      const scalar = finiteNumber(obj?.value);
+      return scalar === undefined ? {} : { value: scalar, meta, evidence: spec.evidence };
+    }
     if (spec.rawPath === 'staticParams.rdsOn' || spec.rawPath === 'staticParams.vth') {
       const point = points.find((p: any) => Number(p?.x) === 25) || points[0];
       const y = finiteNumber(point?.y);

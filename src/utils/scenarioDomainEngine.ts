@@ -639,6 +639,41 @@ export function getDomainMeasurementFields(issue: IssueInput): DomainMeasurement
   return [...merged.values()];
 }
 
+/**
+ * 同一个物理量在历史/不同域里有两个 key 的别名表（取值优先级：本 key > 别名 key）。
+ *
+ * 这几对在 unifiedStateExtractor.firstPresent 里**早已**被引擎当成同一个量合并，但**面板显示**
+ * 此前各读各的 key：器件规格自动填了 gateChargeQgNc 之后，COMPONENT 主导域的 Qg(qgNc) 输入框
+ * 仍然是空的 —— 工程师会以为导入失败。显示层必须与引擎层共用同一张别名表。
+ */
+export const DOMAIN_FIELD_KEY_ALIASES: Record<string, string> = {
+  // 同一个总栅电荷 Qg：DEVICE_SPEC 侧 / COMPONENT 侧
+  qgNc: 'gateChargeQgNc',
+  gateChargeQgNc: 'qgNc',
+  // 以下三对在 unifiedStateExtractor.firstPresent 里早已是别名（目录/历史版本两个 key）
+  ambientTempC: 'tAmbientC',
+  tAmbientC: 'ambientTempC',
+  harnessLengthM: 'harnessLengthMeters',
+  harnessLengthMeters: 'harnessLengthM',
+  rthJcCPerW: 'thermalResistanceCPerW',
+  thermalResistanceCPerW: 'rthJcCPerW',
+};
+
+/** 面板取值：本 key 有值就用本 key，否则按别名表回退（返回实际命中的 key，便于如实标注来源）。 */
+export function resolveFieldDisplayKey(
+  measuredValues: Record<string, unknown> | undefined | null,
+  key: string,
+): { valueKey: string; aliased: boolean } {
+  const own = measuredValues?.[key];
+  if (own !== undefined && own !== null && own !== '') return { valueKey: key, aliased: false };
+  const alias = DOMAIN_FIELD_KEY_ALIASES[key];
+  if (alias) {
+    const other = measuredValues?.[alias];
+    if (other !== undefined && other !== null && other !== '') return { valueKey: alias, aliased: true };
+  }
+  return { valueKey: key, aliased: false };
+}
+
 export function getAllEngineeringMeasurementFields(): DomainMeasurementField[] {
   const merged = new Map<string, DomainMeasurementField>();
   for (const profile of Object.values(P)) {

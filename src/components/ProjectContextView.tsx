@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ProjectContext, IssueInput, IssueCategory, ProjectPhase, AsilLevel, HwLeadStyle, IssueAttachment } from '../types';
-import { getDomainDataQuality, getDomainMeasurementFields, getDomainMeasurementGroups, getEngineeringDomainLabel, extractMeasurementsFromText, extractTextInferredMeasurements, resolveEngineeringDomain, getBldcParameterSections, getDeviceSpecificationMeasurementFields } from '../utils/scenarioDomainEngine';
+import { resolveFieldDisplayKey, getDomainDataQuality, getDomainMeasurementFields, getDomainMeasurementGroups, getEngineeringDomainLabel, extractMeasurementsFromText, extractTextInferredMeasurements, resolveEngineeringDomain, getBldcParameterSections, getDeviceSpecificationMeasurementFields } from '../utils/scenarioDomainEngine';
 import {
   Layers,
   AlertCircle,
@@ -101,17 +101,23 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
   // 不再各写一份。renderField 只依赖 issue/setIssue，都是组件级已有的，提升作用域是安全的。
   const renderField = (field: any) => {
     const key = field.key;
+    // 面板必须与引擎共用同一张 key 别名表：器件规格自动填了 gateChargeQgNc 时，COMPONENT 主导域的
+    // Qg(qgNc) 输入框也要显示同一个数，否则看起来像"导入没生效"。
+    const display = resolveFieldDisplayKey(issue.measuredValues, key);
+    const displayValue = issue.measuredValues?.[display.valueKey];
+    const fieldProvenance = issue.measurementProvenance?.[key]
+      || (display.aliased ? issue.measurementProvenance?.[display.valueKey] : undefined);
     return (
       <div key={key}>
         <label className="block text-[10px] text-slate-500 mb-1">
           {field.label} {field.unit ? `(${field.unit})` : ''}{field.required ? ' *' : ''}
-          <span className={((issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)) === 'BENCHMARK') ? 'text-violet-400' : field.tag === 'CALCULATED' ? 'text-cyan-500' : field.tag === 'SPEC' ? 'text-amber-500' : issue.measurementProvenance?.[key]?.source === 'TEXT_INFERRED' ? 'text-orange-300' : 'text-emerald-500'}>
-            · {issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)}
+          <span className={((fieldProvenance?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)) === 'BENCHMARK') ? 'text-violet-400' : field.tag === 'CALCULATED' ? 'text-cyan-500' : field.tag === 'SPEC' ? 'text-amber-500' : issue.measurementProvenance?.[key]?.source === 'TEXT_INFERRED' ? 'text-orange-300' : 'text-emerald-500'}>
+            · {fieldProvenance?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)}
           </span>
         </label>
         {field.inputType === 'select' ? (
           <select
-            value={String(issue.measuredValues?.[key] ?? '')}
+            value={String(displayValue ?? '')}
             disabled={field.tag === 'CALCULATED'}
             onChange={(e) => setIssue({
               ...issue,
@@ -128,7 +134,7 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
           <label className="flex items-center gap-2 h-[30px] px-2 rounded border border-slate-700 bg-slate-800/70 cursor-pointer">
             <input
               type="checkbox"
-              checked={issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1'}
+              checked={displayValue === 1 || displayValue === '1'}
               onChange={(e) => setIssue({
                 ...issue,
                 measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.checked ? 1 : 0 },
@@ -143,7 +149,7 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
           <input
             type="number"
             step="any"
-            value={issue.measuredValues?.[key] ?? ''}
+            value={displayValue ?? ''}
             disabled={field.tag === 'CALCULATED'}
             onChange={(e) => setIssue({
               ...issue,
