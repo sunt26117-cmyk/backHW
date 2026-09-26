@@ -161,8 +161,13 @@ export function buildGroundingText(
   const evidenceText = [...evidenceByKey.values()]
     .map((item) => {
       const valueText = item.status === 'CALCULATED' && item.value !== undefined ? `${item.value} ${item.unit}` : 'INSUFFICIENT_INPUT';
-      const missing = item.missingInputs.length ? ` | 缺失输入: ${item.missingInputs.join(', ')}` : '';
-      return `- ${item.key} | ${item.title} = ${valueText} | source=${item.engine} | calculation=${item.calculation} | inputs=${item.inputs.join(', ')}${missing}`;
+      const missing = Array.isArray(item.missingInputs) && item.missingInputs.length ? ` | 缺失输入: ${item.missingInputs.join(', ')}` : '';
+      // 逐字段来源必须进 Prompt：器件规格派生值（DATASHEET/DERIVED）与台架实测值（USER_MEASURED）
+      // 与假设值（ASSUMPTION）对模型的含义完全不同，不能只给一个数。
+      const sources = item && typeof item === 'object' && item.inputSources
+        ? ` | 输入来源: ${Object.entries(item.inputSources).map(([k, v]) => `${k}:${v}`).join(', ')}`
+        : '';
+      return `- ${item.key} | ${item.title} = ${valueText} | source=${item.engine} | calculation=${item.calculation} | inputs=${item.inputs.join(', ')}${sources}${missing}`;
     })
     .join('\n');
 

@@ -71,6 +71,12 @@ export const DEVICE_PARAM_PROMPT = [
   '可直接自动导入的器件规格字段（datasheet 直给的单值标量，共 ' + DIRECT_MAPPABLE_TARGET_KEYS.length + ' 个）：' + DIRECT_MAPPABLE_TARGET_KEYS.join('、') + '。',
   '以下 targetKey 只能作为「需工程确认」的候选，禁止在 mapping 里标成可直接自动导入：' + CONFIRM_REQUIRED_TARGET_KEYS.join('、') + '。原因：cgsPf 当前模板没有直接 Cgs 字段，只能由 Ciss 减 Crss 派生；rdsOnMilliOhm / vthMinV 来自曲线选点（图估），不是规格书保证值；gateVoltageMinV 没有独立字段，是从 protectionAndRobustness.gateVoltageMax 的负向 variant 恢复出来的；cgdPf 若取自 capacitanceParams.cgdDirect 属直接值，若由 Crss 换算而来则属派生值，必须在 sourceType 上如实区分，不得把 Crss 冒充成 datasheet 直给 Cgd。',
   '已有明确 targetKey 的参数应优先按 extractionHints.mapping 自动对齐，不要要求工程师重复选择；无法安全投影成工程单值的多条件/曲线数据（SOA、ZthJC(t)、Crss 原始曲线、gate-charge 曲线、Tstg、bodyChannelCurrent 等）继续保留在器件库与 unmappedImportantData 中，不得为了减少提示而选取错误条件或编造 targetKey。',
+  '',
+  '【引擎取点规则（提取时必须满足，否则该字段在计算中不可用）】',
+  '1. Cgd：优先工程师实测/导入值；缺实测时按器件 **Crss 曲线在工况 Vbus 处插值**（Crss ≡ Cgd），再退到直接给出的 Cgd。所以 Crss 曲线的 VDS 点必须提取（至少 2 点），不能只给一个标量。',
+  '2. Cgs：只能由**同一个 VDS 点**的 Ciss − Crss 派生。必须提取 capacitanceParams.ciss.conditions.vds；缺测试 VDS 时 Cgs 会被判为不可用——宁可没有值，也禁止跨电压点相减。',
+  '3. Vth：判据取点是**最坏情况（结温最高 → Vth 最低）**。必须提取 Vth 随 Tj 的曲线与 maxRatings.tjMax；只留 25℃ 标量会低估米勒误导通风险。',
+  '4. Qg：gateCharge.qg 与工程侧 COMPONENT 的 Qg 是**同一个物理量**（互为别名），不要当成两个参数，也不要丢弃任一侧。',
 ].join('\n');
 
 export const MOSFET_PARAM_TEMPLATE = {

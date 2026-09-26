@@ -25,6 +25,8 @@ export interface BldcCalculationEvidence {
   inputs: string[];
   inputSources: Record<string, MeasurementSource | 'MISSING' | 'DEFAULT_FOR_NONENGINE_PARAMETER'>;
   missingInputs: string[];
+  /** 本次计算**实际取用**的模型输入（含器件规格派生值），供 Prompt/UI 与本计算同源展示，不得另算一套。 */
+  modelInputs?: Record<string, number>;
   specThreshold?: number;
   safetyMargin?: number;
   complianceVerdict?: 'PASS' | 'MARGINAL' | 'FAIL' | 'CRITICAL';
@@ -223,6 +225,16 @@ function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel, context?
     inputSources,
     missingInputs: [],
     specThreshold: values.vthMinV,
+    modelInputs: Object.fromEntries(
+      Object.entries({
+        cgdPf: values.cgdPf,
+        cgsPf,
+        vbusV: vbusForMiller,
+        vthMinV: values.vthMinV,
+        dvdtVns: values.dvdtVns,
+        rgOffOhm: values.rgOffOhm,
+      }).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)),
+    ) as Record<string, number>,
     safetyMargin: miller.safetyMarginV,
     complianceVerdict: miller.isRiskOfShootThrough ? 'CRITICAL' : miller.safetyMarginV < 0.5 ? 'MARGINAL' : 'PASS',
     directiveForAi: `BLDC Miller 感应门极峰值由本地 motorPhysicsEngine 计算为 ${miller.vGateInducedV.toFixed(2)}V（Cgd=${cgdResolved.value}pF[${cgdResolved.from}]、Cgs=${cgsPf ?? '未提供'}pF[${cgsPf !== undefined ? cgsSource : 'MISSING'}]、Rg_off=${values.rgOffOhm}Ω、dv/dt=${values.dvdtVns}V/ns、Vbus=${vbusForMiller}V）；Vth_min=${values.vthMinV}V（${vthResolved.from}），安全裕量 ${miller.safetyMarginV.toFixed(2)}V。不得自行重算出另一套当前项目数值。`,

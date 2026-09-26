@@ -1,6 +1,7 @@
 import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } from '../types';
 import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
 import { extractUnifiedEngineeringModel, readMeasuredNumber } from '../utils/unifiedStateExtractor';
+import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
 import { recalculateStandardWeightedScore } from '../utils/scoringWeights';
 
 function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): number {
@@ -21,6 +22,20 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
   const vth = n('vthMinV');
   const dvdt = n('dvdtVns');
   const cgd = n('cgdPf');
+  // 判据输入必须与本地确定性引擎**同一批数**：绑定器件后 Cgd/Cgs/Vth/Vbus 由器件规格曲线按工况取点，
+  // 不再是 measuredValues 里的手工输入。此前这里只看手工输入，于是在真实用法（绑定器件、不手填）下
+  // Prompt 会写「Cgd=UNKNOWN」，而紧挨着的锚定事实却是「Cgd=41.5pF（Crss 曲线@13.5V）」——
+  // 模型只能二选一：要么不信锚点，要么自己编一个数。来源标签一并带上，便于模型区分实测/规格派生/假设。
+  const millerInputs = miller?.modelInputs || {};
+  const millerSources = miller?.inputSources || {};
+  const cgdEffective = millerInputs.cgdPf ?? cgd;
+  const vthEffective = millerInputs.vthMinV ?? vth;
+  const dvdtEffective = millerInputs.dvdtVns ?? dvdt;
+  // 器件额定 Vds 用与 pattern 引擎同一套投影（deriveBldcEvaluationInput）：实测 > 器件规格。
+  // 不要读 state.powerStage.vdsRating —— unifiedStateExtractor 把「缺失」记成 0 哨兵，直接读会在
+  // Prompt 里冒出一个假的「VdsRating=0V」（比「UNKNOWN」更误导，0 看起来像一个真实量到 0V 的值）。
+  const evalInput = deriveBldcEvaluationInput(context, issue);
+  const vdsEffective = Number.isFinite(evalInput.vdsRating) ? evalInput.vdsRating : undefined;
   const cBus = n('cBusUf');
   const j = n('rotorInertiaKgm2');
   const vds = n('vdsRatingV');
@@ -30,8 +45,11 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
   // 动态评分：技术(T)分随确定性计算出的泵升过压/米勒直通风险严重度变化，
   // 进度(S)分随剩余工期变化；成本/质量/可靠性保留方案内在画像(保守/激进结构特性)。
   const daysRemaining = context.daysRemaining;
-  const busMarginV = bus?.status === 'CALCULATED' && bus.value !== undefined && vds !== undefined ? vds - bus.value : undefined;
-  const millerMarginV = miller?.status === 'CALCULATED' && miller.value !== undefined && vth !== undefined ? vth - miller.value : undefined;
+  // 裕量直接取引擎算出的 safetyMargin：它用的是同一颗器件的 Vds 耐压 / 同一个 Vth 取点。
+  // 此前这里用「手工输入」各减一遍：绑定器件但没手填时裕量恒为 undefined，风险评分因此永远停在基线分，
+  // 看不出一票否决级别的泵升/米勒风险。
+  const busMarginV = bus?.status === 'CALCULATED' ? bus.safetyMargin : undefined;
+  const millerMarginV = miller?.status === 'CALCULATED' ? miller.safetyMargin : undefined;
   let riskSeverity = 50;
   if (busMarginV !== undefined && busMarginV < 5) riskSeverity = Math.min(95, 60 + (5 - busMarginV) * 6);
   if (millerMarginV !== undefined && millerMarginV < 0.5) riskSeverity = Math.max(riskSeverity, 85);
@@ -65,7 +83,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
         { standard: 'CISPR 25', clause: 'Class 5 Table 7', relevance: '车载接收机保护之传导与辐射骚扰限值 (目标谐振频点 谐振抑制)' },
         { standard: 'AEC-Q101', clause: 'Rev E / SOA Limit', relevance: '车规分立功率器件脉冲电流安全工作区与单脉冲抗雪崩能量' },
       ],
-      riskBefore: `当前项目确定性计算：Bus Pumping=${dynamicBus}，Vds额定耐压=${vds ?? 'UNKNOWN'}V；Miller=${dynamicMiller}（输入完整性不足时不输出确定值）。EMC 高频振铃以实测频谱为准。`,
+      riskBefore: `当前项目确定性计算：Bus Pumping=${dynamicBus}，Vds额定耐压=${vdsEffective ?? 'UNKNOWN'}V；Miller=${dynamicMiller}（输入完整性不足时不输出确定值）。EMC 高频振铃以实测频谱为准。`,
       riskAfter: '泵升峰值被下桥绕组短接消除，米勒感应压制在安全区，高频振铃被吸收。',
       residualRisk: 'Low',
       residualRiskDetail: '急停瞬间存在短暂脉冲制动电流；峰值/脉宽、MOSFET SOA 与结温瞬态需依据当前器件数据和实测波形确认，本轮不采用历史示例数字。',
@@ -170,7 +188,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       calculatedOutputEvidence: deterministic,
     },
     coreConclusion: {
-      problemSummary: `BLDC 电机急停工况的确定性物理边界应以结构化输入和本地计算为准。当前结构化输入：rpm=${rpm ?? 'UNKNOWN'}，busVoltagePeakV=${busPeakMeasured ?? 'UNKNOWN'}V，Cbus=${cBus ?? 'UNKNOWN'}μF，J=${j ?? 'UNKNOWN'}kg·m²，VdsRating=${vds ?? 'UNKNOWN'}V；Bus Pumping 计算结果=${dynamicBus}；Miller 输入 dv/dt=${dvdt ?? 'UNKNOWN'}V/ns、Cgd=${cgd ?? 'UNKNOWN'}pF、Vth=${vth ?? 'UNKNOWN'}V，计算结果=${dynamicMiller}。任何缺失项不得用模板数字替代。`,
+      problemSummary: `BLDC 电机急停工况的确定性物理边界应以结构化输入和本地计算为准。当前结构化输入：rpm=${rpm ?? 'UNKNOWN'}，busVoltagePeakV=${busPeakMeasured ?? 'UNKNOWN'}V，Cbus=${cBus ?? 'UNKNOWN'}μF，J=${j ?? 'UNKNOWN'}kg·m²，VdsRating=${vdsEffective ?? 'UNKNOWN'}V；Bus Pumping 计算结果=${dynamicBus}；Miller 输入 dv/dt=${dvdtEffective ?? 'UNKNOWN'}V/ns[${millerSources.dvdtVns ?? 'MISSING'}]、Cgd=${cgdEffective ?? 'UNKNOWN'}pF[${millerSources.cgdPf ?? 'MISSING'}]、Vth=${vthEffective ?? 'UNKNOWN'}V[${millerSources.vthMinV ?? 'MISSING'}]，计算结果=${dynamicMiller}。任何缺失项不得用模板数字替代。`,
       recommendedMeasure: '优先采用已验证的能量消纳与门极瞬态抑制方案；具体器件值、目标值和整改后效果必须经过项目实测/本地确定性计算后再固化，不把历史模板数字当成当前项目事实。',
       reasonSummary: `本地确定性计算是当前 BLDC 数值锚点：${bus?.status === 'CALCULATED' ? `Bus Pumping=${dynamicBus}，耐压裕量=${bus.safetyMargin?.toFixed(2) ?? 'UNKNOWN'}V。` : `Bus Pumping=${bus?.directiveForAi || 'INSUFFICIENT_INPUT'} `}${miller?.status === 'CALCULATED' ? `Miller=${dynamicMiller}，阈值裕量=${miller.safetyMargin?.toFixed(2) ?? 'UNKNOWN'}V。` : `Miller=${miller?.directiveForAi || 'INSUFFICIENT_INPUT'}`}整改后的绝对数值必须由验证数据确认。`,
     },
@@ -185,9 +203,9 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       functionalSafetyRisk: 'High',
     },
     knownFacts: [
-      `结构化输入：rpm=${rpm ?? 'UNKNOWN'}，busVoltagePeakV=${busPeakMeasured ?? 'UNKNOWN'}V，Cbus=${cBus ?? 'UNKNOWN'}μF，J=${j ?? 'UNKNOWN'}kg·m²，VdsRating=${vds ?? 'UNKNOWN'}V。`,
+      `结构化输入：rpm=${rpm ?? 'UNKNOWN'}，busVoltagePeakV=${busPeakMeasured ?? 'UNKNOWN'}V，Cbus=${cBus ?? 'UNKNOWN'}μF，J=${j ?? 'UNKNOWN'}kg·m²，VdsRating=${vdsEffective ?? 'UNKNOWN'}V。`,
       `本地 Bus Pumping：${bus?.status === 'CALCULATED' ? `${dynamicBus}，耐压裕量 ${bus.safetyMargin?.toFixed(2) ?? 'UNKNOWN'}V` : 'INSUFFICIENT_INPUT，禁止用历史/默认数字替代。'}`,
-      `结构化 Miller 输入：dv/dt=${dvdt ?? 'UNKNOWN'}V/ns，Cgd=${cgd ?? 'UNKNOWN'}pF，Rg_off=${n('rgOffOhm') ?? 'UNKNOWN'}Ω，Vth_min=${vth ?? 'UNKNOWN'}V。`,
+      `结构化 Miller 输入：dv/dt=${dvdtEffective ?? 'UNKNOWN'}V/ns[${millerSources.dvdtVns ?? 'MISSING'}]，Cgd=${cgdEffective ?? 'UNKNOWN'}pF[${millerSources.cgdPf ?? 'MISSING'}]，Rg_off=${n('rgOffOhm') ?? 'UNKNOWN'}Ω，Vth_min=${vthEffective ?? 'UNKNOWN'}V[${millerSources.vthMinV ?? 'MISSING'}]。`,
       `本地 Miller：${miller?.status === 'CALCULATED' ? `${dynamicMiller}，阈值裕量 ${miller.safetyMargin?.toFixed(2) ?? 'UNKNOWN'}V` : 'INSUFFICIENT_INPUT，禁止用历史/默认数字替代。'}`,
       '整改后峰值、振铃频点、衰减量、BOM 与工期均属于方案/验证变量，必须通过实际项目证据确认。',
     ],
@@ -204,7 +222,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       rootCauseAnalysis: '急停瞬间转子机械动能 Ek=0.5*J*w^2 经三相逆变器续流二极管向母线电容倒灌产生能量泵升；同时开关节点反向管高速开通引起的极高 dv/dt 激发位移电流 Im=Cgd*(dv/dt) 涌入关断管门极阻抗，产生假导通尖峰。',
       keyPhysicalFactors: [
         { factor: '机械动能回馈与母线电容能量平衡', description: `当前项目应使用结构化 J=${j ?? 'UNKNOWN'}kg·m²、rpm=${rpm ?? 'UNKNOWN'}、Cbus=${cBus ?? 'UNKNOWN'}μF 进行本地 Bus Pumping 计算；结果=${dynamicBus}。` },
-        { factor: '米勒电容位移感应效应', description: `当前项目应使用结构化 Cgd=${cgd ?? 'UNKNOWN'}pF、dv/dt=${dvdt ?? 'UNKNOWN'}V/ns、Rg=${n('rgOffOhm') ?? 'UNKNOWN'}Ω、Vth=${vth ?? 'UNKNOWN'}V 进行本地 Miller 计算；结果=${dynamicMiller}。` },
+        { factor: '米勒电容位移感应效应', description: `当前项目应使用结构化 Cgd=${cgdEffective ?? 'UNKNOWN'}pF[${millerSources.cgdPf ?? 'MISSING'}]、dv/dt=${dvdtEffective ?? 'UNKNOWN'}V/ns[${millerSources.dvdtVns ?? 'MISSING'}]、Rg=${n('rgOffOhm') ?? 'UNKNOWN'}Ω、Vth=${vthEffective ?? 'UNKNOWN'}V[${millerSources.vthMinV ?? 'MISSING'}] 进行本地 Miller 计算；结果=${dynamicMiller}。` },
         { factor: '功率回路杂散电感高频谐振', description: '高频振铃需要以项目实际频谱/示波器波形和寄生参数实测结果为准；模板中的历史频点与寄生值不得视为当前项目事实。' },
         { factor: '瞬态热应力', description: '本轮不把 transientThermal/Foster 计算结果写成当前项目确定性事实；所需输入未齐全时必须保持 UNKNOWN。' },
       ],
@@ -371,7 +389,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
     engineeringDocs: {
       pmDecisionEmail: {
         subject: `[Emergency Action Proposal] ${context.projectName} BLDC 急停母线泵升与米勒直通闭环治理方案`,
-        technicalFact: `结构化输入与本地确定性计算：rpm=${rpm ?? 'UNKNOWN'}；Bus Pumping=${dynamicBus}；Vds额定耐压=${vds ?? 'UNKNOWN'}V；dv/dt=${dvdt ?? 'UNKNOWN'}V/ns；Miller=${dynamicMiller}。以上数值均不得由历史模板数字替代。`,
+        technicalFact: `结构化输入与本地确定性计算：rpm=${rpm ?? 'UNKNOWN'}；Bus Pumping=${dynamicBus}；Vds额定耐压=${vdsEffective ?? 'UNKNOWN'}V；dv/dt=${dvdtEffective ?? 'UNKNOWN'}V/ns[${millerSources.dvdtVns ?? 'MISSING'}]；Miller=${dynamicMiller}。以上数值均不得由历史模板数字替代。`,
         currentSituation: `距离正式 DV 准入仅剩 ${daysRemaining} 天，传统重新投板改走大尺寸电解电容与大功率 TVS 周期需约三周且单板超支，将直接导致节点违约。`,
         risk: '若不做处理硬推测试，高温急停时必发生母线电容爆浆或同桥臂直通炸管严重事故。',
         options: '方案 A：三相下桥能耗制动 + 有源米勒钳位 + RC Snubber (推荐)；方案 B：大改硬件并联 3 颗 TVS 及 1500uF 电容；方案 C：自由滑行停机 (ASIL B违约)。',
