@@ -3,19 +3,10 @@ import { generateBldcMotorAnalysis } from './bldcMotorExpert';
 import { generateRobotJointAnalysis, getRobotJointPillars } from './robotJointExpert';
 import { applyScenarioDynamicLayer } from '../utils/scenarioDynamic';
 import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, getEngineeringDomainLabel, resolveEngineeringDomain, resolveEngineeringDomains } from '../utils/scenarioDomainEngine';
-import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 import { getCrossDomainCouplings } from '../utils/crossDomainCouplingMatrix';
 import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
 import { extractUnifiedEngineeringModel } from '../utils/unifiedStateExtractor';
 import { runDeterministicPrecomputations } from '../utils/deterministicPrecomputation';
-import {
-  getEmcPillars,
-  getComponentPillars,
-  getWccaPillars,
-  getThermalPillars,
-  getBldcPillars,
-  getGeneralPillars,
-} from './decisionPillars';
 
 export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue?: Partial<IssueInput>): CopilotAnalysisResult {
   // 缺省上下文不得编造具体项目事实（客户/ECU型号/SOP日期/样品阶段等），
@@ -82,49 +73,10 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     result = buildMinimalOfflineResult();
   }
 
-  // 统一补全 P0 级五大支柱：信息分类、多维去黑箱风险、为什么不、24小时计划、EDR记录、红队盲区挑战
-  if (!result.classifiedInfo || !result.multiRiskBreakdown || !result.whyNotComparison || !result.next24HourPlan || !result.edrRecord || !result.redTeamChallenge) {
-    let pillars;
-    if (isBldc) {
-      pillars = getBldcPillars(context, issue);
-    } else if (isRobotJoint) {
-      pillars = getRobotJointPillars(context, issue);
-    } else if (isEmc) {
-      pillars = getEmcPillars(context, issue);
-    } else if (isComponent) {
-      pillars = getComponentPillars(context, issue);
-    } else if (isWcca) {
-      pillars = getWccaPillars(context, issue);
-    } else if (isThermal) {
-      pillars = getThermalPillars(context, issue);
-    } else {
-      pillars = getGeneralPillars(context, issue);
-    }
-    result.classifiedInfo = result.classifiedInfo || pillars.classifiedInfo;
-    result.multiRiskBreakdown = result.multiRiskBreakdown || pillars.multiRiskBreakdown;
-    result.whyNotComparison = result.whyNotComparison || pillars.whyNotComparison;
-    result.next24HourPlan = result.next24HourPlan || pillars.next24HourPlan;
-    result.edrRecord = result.edrRecord || pillars.edrRecord;
-    result.redTeamChallenge = result.redTeamChallenge || pillars.redTeamChallenge;
-    // 这 5 大块（+classifiedInfo 第3条起）来自工程域通用模板，不是 case 专属分析。
-    const templateBlocks = ['multiRiskBreakdown', 'whyNotComparison', 'next24HourPlan', 'edrRecord', 'redTeamChallenge', 'classifiedInfo(第3条起)'];
-    // BLDC / 机器人关节域的主报告内容（DFMEA 条目、候选方案、最终推荐、RACI、受控文档等）
-    // 同样由该域的通用模板生成器产出，可能带着历史示例数字，
-    // 必须与上面 5 大块一并提示，否则用户会以为这些是当前 case 的分析结果。
-    if (isBldc || isRobotJoint) {
-      templateBlocks.push('dfmeaItems', 'candidateActions', 'finalRecommendation', 'raciMatrix', 'engineeringDocs', 'containment', 'capa');
-    }
-    result.templateContentNotice = {
-      blocks: templateBlocks,
-      message: '本页含内置通用模板内容：多维度风险分解、方案“为什么不选”、24小时验证计划、EDR 记录、红队挑战这几大块由工程域模板生成；BLDC / 机器人关节域还会用同一套模板产出 DFMEA 条目、候选方案、最终推荐、RACI 与受控文档。其中的具体数值/工期/样本数/器件参数是模板示例，不是当前 case 的实测或计算结果——禁止直接引用到 EDR、设计评审或客户文档。请以「本地确定性预核算事实」与实测数据为准。',
-    };
-    if (result.engineeringDocs && !result.engineeringDocs.edrRecord) {
-      result.engineeringDocs.edrRecord = result.edrRecord;
-    }
-  }
+  // 当前案例的 P0 支柱统一由 scenarioDynamic 基于当前 issue/context 重建。
+  // 不再调用 decisionPillars.ts，避免历史模板数字/方案成为运行时事实来源。
 
   // 补全升级2：双层工程时间轴 (T+24h 应急临时遏制 vs 下一阶段永久纠正)
-  result.dualTimeline = result.dualTimeline || buildDualTimelinePlan(result, context, issue);
 
   // 多域基线：保留原有“主导域”规则，同时为所有涉及领域生成独立证据就绪度、计算结果与域级结论，供后续页面和 AI 决策消费。
   const domainList = resolveEngineeringDomains(issue);

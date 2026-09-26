@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ProjectContext, IssueInput, IssueCategory, ProjectPhase, AsilLevel, HwLeadStyle, IssueAttachment } from '../types';
-import { getDomainDataQuality, getDomainMeasurementFields, getDomainMeasurementGroups, getEngineeringDomainLabel, extractMeasurementsFromText, extractTextInferredMeasurements, resolveEngineeringDomain, getBldcParameterSections } from '../utils/scenarioDomainEngine';
+import { getDomainDataQuality, getDomainMeasurementFields, getDomainMeasurementGroups, getEngineeringDomainLabel, extractMeasurementsFromText, extractTextInferredMeasurements, resolveEngineeringDomain, getBldcParameterSections, getDeviceSpecificationMeasurementFields } from '../utils/scenarioDomainEngine';
 import {
   Layers,
   AlertCircle,
@@ -94,6 +94,92 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [expandedBldcGroups, setExpandedBldcGroups] = useState<Record<string, boolean>>({ BASE: true });
   const [selectedBldcModes, setSelectedBldcModes] = useState<string[]>([]);
+
+  // [Phase 5 修复] renderField 原来定义在下面"可量化参数"那个大 IIFE 内部，只有该 IIFE
+  // 内的 JSX 能用到它；新增的"器件规格·Datasheet参数"区块在 IIFE 外部也要渲染字段，
+  // 原来的作用域够不到，导致 renderField is not defined。提到组件顶层，两处共用同一份实现，
+  // 不再各写一份。renderField 只依赖 issue/setIssue，都是组件级已有的，提升作用域是安全的。
+  const renderField = (field: any) => {
+    const key = field.key;
+    return (
+      <div key={key}>
+        <label className="block text-[10px] text-slate-500 mb-1">
+          {field.label} {field.unit ? `(${field.unit})` : ''}{field.required ? ' *' : ''}
+          <span className={((issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)) === 'BENCHMARK') ? 'text-violet-400' : field.tag === 'CALCULATED' ? 'text-cyan-500' : field.tag === 'SPEC' ? 'text-amber-500' : issue.measurementProvenance?.[key]?.source === 'TEXT_INFERRED' ? 'text-orange-300' : 'text-emerald-500'}>
+            · {issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)}
+          </span>
+        </label>
+        {field.inputType === 'select' ? (
+          <select
+            value={String(issue.measuredValues?.[key] ?? '')}
+            disabled={field.tag === 'CALCULATED'}
+            onChange={(e) => setIssue({
+              ...issue,
+              measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value },
+              measuredValueSource: 'USER_MEASURED',
+              measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+            })}
+            className="w-full bg-slate-800 border border-slate-700 text-white rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+          >
+            <option value="">请选择</option>
+            {(field.options || []).map((option: any) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        ) : field.inputType === 'checkbox' ? (
+          <label className="flex items-center gap-2 h-[30px] px-2 rounded border border-slate-700 bg-slate-800/70 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1'}
+              onChange={(e) => setIssue({
+                ...issue,
+                measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.checked ? 1 : 0 },
+                measuredValueSource: 'USER_MEASURED',
+                measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+              })}
+              className="accent-blue-500"
+            />
+            <span className="text-[10px] text-slate-300">{issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1' ? '已确认' : '未确认'}</span>
+          </label>
+        ) : (
+          <input
+            type="number"
+            step="any"
+            value={issue.measuredValues?.[key] ?? ''}
+            disabled={field.tag === 'CALCULATED'}
+            onChange={(e) => setIssue({
+              ...issue,
+              measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value === '' ? '' : Number(e.target.value) },
+              measuredValueSource: 'USER_MEASURED',
+              measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
+            })}
+            className={`w-full border rounded px-2 py-1.5 font-mono text-xs focus:outline-none ${field.tag === 'CALCULATED' ? 'bg-slate-900/50 border-cyan-900/40 text-cyan-300 cursor-not-allowed' : 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'}`}
+          />
+        )}
+        {issue.measurementProvenance?.[key]?.source === 'TEXT_INFERRED' && (
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <div className="text-[9px] text-orange-300">文本推断 · 请核实</div>
+            <button
+              type="button"
+              onClick={() => setIssue({
+                ...issue,
+                measurementProvenance: {
+                  ...(issue.measurementProvenance || {}),
+                  [key]: {
+                    ...(issue.measurementProvenance?.[key] || {}),
+                    source: 'USER_MEASURED',
+                    sourceLabel: '工程师确认（原值来自文本推断）',
+                    enteredAt: new Date().toISOString(),
+                    confidencePct: 95,
+                    note: '工程师已核实文本推断值。',
+                  },
+                },
+              })}
+              className="text-[9px] text-cyan-300 hover:text-white cursor-pointer"
+            >确认此值</button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const inferMeasurementsFromIssueText = (extraText = '') => {
     setIssue((prev) => {
@@ -837,89 +923,7 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
           {(() => {
             const quality = getDomainDataQuality(issue);
             const pct = quality.requiredCount ? Math.round((quality.requiredDone / quality.requiredCount) * 100) : 100;
-            const isBldc = resolveEngineeringDomain(issue) === 'BLDC';
             const uniqueFields = getDomainMeasurementFields(issue);
-            const renderField = (field: any) => {
-              const key = field.key;
-              return (
-                <div key={key}>
-                  <label className="block text-[10px] text-slate-500 mb-1">
-                    {field.label} {field.unit ? `(${field.unit})` : ''}{field.required ? ' *' : ''}
-                    <span className={((issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)) === 'BENCHMARK') ? 'text-violet-400' : field.tag === 'CALCULATED' ? 'text-cyan-500' : field.tag === 'SPEC' ? 'text-amber-500' : issue.measurementProvenance?.[key]?.source === 'TEXT_INFERRED' ? 'text-orange-300' : 'text-emerald-500'}>
-                      · {issue.measurementProvenance?.[key]?.source || (issue.measuredValueSource === 'BENCHMARK' && field.tag !== 'CALCULATED' ? 'BENCHMARK' : field.tag)}
-                    </span>
-                  </label>
-                  {field.inputType === 'select' ? (
-                    <select
-                      value={String(issue.measuredValues?.[key] ?? '')}
-                      disabled={field.tag === 'CALCULATED'}
-                      onChange={(e) => setIssue({
-                        ...issue,
-                        measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value },
-                        measuredValueSource: 'USER_MEASURED',
-                        measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
-                      })}
-                      className="w-full bg-slate-800 border border-slate-700 text-white rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
-                    >
-                      <option value="">请选择</option>
-                      {(field.options || []).map((option: any) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </select>
-                  ) : field.inputType === 'checkbox' ? (
-                    <label className="flex items-center gap-2 h-[30px] px-2 rounded border border-slate-700 bg-slate-800/70 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1'}
-                        onChange={(e) => setIssue({
-                          ...issue,
-                          measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.checked ? 1 : 0 },
-                          measuredValueSource: 'USER_MEASURED',
-                          measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
-                        })}
-                        className="accent-blue-500"
-                      />
-                      <span className="text-[10px] text-slate-300">{issue.measuredValues?.[key] === 1 || issue.measuredValues?.[key] === '1' ? '已确认' : '未确认'}</span>
-                    </label>
-                  ) : (
-                    <input
-                      type="number"
-                      step="any"
-                      value={issue.measuredValues?.[key] ?? ''}
-                      disabled={field.tag === 'CALCULATED'}
-                      onChange={(e) => setIssue({
-                        ...issue,
-                        measuredValues: { ...(issue.measuredValues || {}), [key]: e.target.value === '' ? '' : Number(e.target.value) },
-                        measuredValueSource: 'USER_MEASURED',
-                        measurementProvenance: { ...(issue.measurementProvenance || {}), [key]: { source: 'USER_MEASURED', sourceLabel: '工程师手工回填', enteredAt: new Date().toISOString(), confidencePct: 95 } },
-                      })}
-                      className={`w-full border rounded px-2 py-1.5 font-mono text-xs focus:outline-none ${field.tag === 'CALCULATED' ? 'bg-slate-900/50 border-cyan-900/40 text-cyan-300 cursor-not-allowed' : 'bg-slate-800 border-slate-700 text-white focus:border-blue-500'}`}
-                    />
-                  )}
-                  {issue.measurementProvenance?.[key]?.source === 'TEXT_INFERRED' && (
-                    <div className="mt-1 flex items-center justify-between gap-2">
-                      <div className="text-[9px] text-orange-300">文本推断 · 请核实</div>
-                      <button
-                        type="button"
-                        onClick={() => setIssue({
-                          ...issue,
-                          measurementProvenance: {
-                            ...(issue.measurementProvenance || {}),
-                            [key]: {
-                              ...(issue.measurementProvenance?.[key] || {}),
-                              source: 'USER_MEASURED',
-                              sourceLabel: '工程师确认（原值来自文本推断）',
-                              enteredAt: new Date().toISOString(),
-                              confidencePct: 95,
-                              note: '工程师已核实文本推断值。',
-                            },
-                          },
-                        })}
-                        className="text-[9px] text-cyan-300 hover:text-white cursor-pointer"
-                      >确认此值</button>
-                    </div>
-                  )}
-                </div>
-              );
-            };
             return (
               <div className="mb-3 bg-slate-950/70 border border-slate-800 rounded-lg p-3">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
@@ -931,48 +935,88 @@ export const ProjectContextView: React.FC<ProjectContextViewProps> = ({
                 </div>
                 <div className="mt-2 h-1.5 rounded bg-slate-800 overflow-hidden"><div className="h-full bg-cyan-500" style={{width:`${pct}%`}} /></div>
                 {quality.missingRequired.length > 0 && <div className="mt-2 text-[10px] text-amber-300">尚缺：{quality.missingRequired.join('、')}</div>}
-                {isBldc ? (
-                  <>
-                    <div className="mt-3 flex flex-wrap gap-1.5 items-center">
-                      <span className="text-[10px] text-slate-500 mr-1">这次重点看：</span>
-                      {getBldcParameterSections(uniqueFields).filter(s => s.id !== 'BASE').map((section) => {
-                        const active = selectedBldcModes.includes(section.id);
-                        return <button key={section.id} type="button" onClick={() => setSelectedBldcModes(prev => active ? prev.filter(x => x !== section.id) : [...prev, section.id])} className={`px-2 py-1 rounded-md border text-[10px] cursor-pointer ${active ? 'bg-blue-600/30 border-blue-500/50 text-blue-200' : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'}`}>{section.pattern || section.id}</button>;
-                      })}
-                      <button type="button" onClick={() => setSelectedBldcModes(getBldcParameterSections(uniqueFields).filter(s => s.id !== 'BASE').map(s => s.id))} className="px-2 py-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">全选</button>
-                      <button type="button" onClick={() => setSelectedBldcModes([])} className="px-2 py-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">清空</button>
-                    </div>
-                    <div className="mt-3 rounded-lg border border-cyan-900/40 bg-cyan-950/10 p-2.5 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                      <div><div className="text-[11px] font-semibold text-cyan-200">文本自动识别</div><div className="text-[10px] text-slate-500">从问题现象、实测描述、工程困境里提取可识别字段，只填空白项，不覆盖手工输入。</div></div>
-                      <button type="button" onClick={() => inferMeasurementsFromIssueText()} className="inline-flex items-center justify-center gap-1.5 rounded-md border border-cyan-500/30 bg-cyan-600/10 px-2.5 py-1.5 text-[10px] text-cyan-200 hover:bg-cyan-600/20 cursor-pointer"><Sparkles className="w-3.5 h-3.5" />重新识别并回填</button>
-                    </div>
-                    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 p-2.5">
-                      {(() => {
-                        const sections = getBldcParameterSections(uniqueFields);
-                        return sections.map((section) => {
-                          const isBase = section.id === 'BASE';
-                          const modeSelected = selectedBldcModes.includes(section.id);
-                          const expanded = isBase || modeSelected || Boolean(expandedBldcGroups[section.id]);
-                          const valuesPresent = section.fields.filter((f: any) => issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '').length;
-                          if (!isBase && !modeSelected && !expandedBldcGroups[section.id]) {
-                            return <button key={section.id} type="button" onClick={() => setExpandedBldcGroups(prev => ({...prev, [section.id]: true}))} className="w-full flex items-center justify-between px-2.5 py-2 border-b border-slate-800/70 text-left hover:bg-slate-900/60 cursor-pointer"><span className="flex items-center gap-2 text-xs text-slate-300"><ChevronRight className="w-3.5 h-3.5 text-slate-600" />{section.label}</span><span className="text-[10px] text-slate-600">{section.fields.length} 项 · 已填 {valuesPresent}</span></button>;
-                          }
-                          return <div key={section.id} className="border-b border-slate-800/70 last:border-b-0 py-2">
-                            <button type="button" onClick={() => !isBase && setExpandedBldcGroups(prev => ({...prev, [section.id]: !prev[section.id]}))} className="w-full flex items-center justify-between text-left cursor-pointer px-2 py-1"><span className="flex items-center gap-2 text-xs font-semibold text-slate-200">{expanded ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-600" />}{section.label}{isBase && <span className="text-[9px] text-emerald-400">核心输入</span>}</span><span className="text-[10px] text-slate-600">{section.fields.length} 项 · 已填 {valuesPresent}</span></button>
-                            {expanded && <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mt-1.5">{section.fields.map(renderField)}</div>}
-                          </div>;
-                        });
-                      })()}
-                    </div>
-                  </>
-                ) : (
-                  <div className="mt-3 space-y-4">
-                    {(() => { const renderedKeys = new Set<string>(); return getDomainMeasurementGroups(issue).map((group, groupIndex) => { const visibleFields = group.fields.filter((field) => { if (renderedKeys.has(field.key)) return false; renderedKeys.add(field.key); return true; }); return <div key={group.domain} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3"><div className="flex flex-wrap items-center justify-between gap-2 mb-3"><div className="flex items-center gap-2"><span className={`px-2 py-1 rounded-md text-[10px] font-semibold border ${groupIndex === 0 ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>{groupIndex === 0 ? '主导域' : '涉及域'}</span><span className="text-xs font-semibold text-slate-200">{getEngineeringDomainLabel(group.domain)}</span></div><span className="text-[10px] text-slate-500">{visibleFields.length} 个显示参数</span></div><div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">{visibleFields.map(renderField)}</div></div>; }); })()}
-                  </div>
-                )}
+                <div className="mt-3 space-y-4">
+                  {(() => {
+                    const renderedKeys = new Set<string>();
+                    const deviceSpecKeys = new Set(getDeviceSpecificationMeasurementFields().map((field) => field.key));
+                    const groups = getDomainMeasurementGroups(issue);
+                    return groups.map((group) => {
+                      const visibleFields = group.fields.filter((field) => {
+                        if (group.domain === 'BLDC' && deviceSpecKeys.has(field.key)) return false;
+                        if (renderedKeys.has(field.key)) return false;
+                        renderedKeys.add(field.key);
+                        return true;
+                      });
+                      if (visibleFields.length === 0) return null;
+                      const isGroupBldc = group.domain === 'BLDC';
+                      const sections = isGroupBldc ? getBldcParameterSections(visibleFields) : [];
+                      return (
+                        <div key={group.domain} className={`rounded-lg border p-3 ${isGroupBldc ? 'border-cyan-900/50 bg-cyan-950/5' : 'border-slate-800 bg-slate-950/40'}`}>
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-1 rounded-md text-[10px] font-semibold border ${group.role === 'PRIMARY' ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>
+                                {group.role === 'PRIMARY' ? '主导域' : '涉及域'}
+                              </span>
+                              <span className="text-xs font-semibold text-slate-200">{getEngineeringDomainLabel(group.domain)}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500">{visibleFields.length} 个显示参数</span>
+                          </div>
+
+                          {isGroupBldc ? (
+                            <>
+                              <div className="flex flex-wrap gap-1.5 items-center mb-2">
+                                <span className="text-[10px] text-slate-500 mr-1">BLDC 重点模式：</span>
+                                {sections.filter((section) => section.id !== 'BASE' && section.id !== 'DEVICE_SPEC').map((section) => {
+                                  const active = selectedBldcModes.includes(section.id);
+                                  return <button key={section.id} type="button" onClick={() => setSelectedBldcModes(prev => active ? prev.filter(x => x !== section.id) : [...prev, section.id])} className={`px-2 py-1 rounded-md border text-[10px] cursor-pointer ${active ? 'bg-blue-600/30 border-blue-500/50 text-blue-200' : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'}`}>{section.pattern || section.id}</button>;
+                                })}
+                                <button type="button" onClick={() => setSelectedBldcModes(sections.filter(s => s.id !== 'BASE' && s.id !== 'DEVICE_SPEC').map(s => s.id))} className="px-2 py-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">全选</button>
+                                <button type="button" onClick={() => setSelectedBldcModes([])} className="px-2 py-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">清空</button>
+                              </div>
+                              <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2">
+                                {sections.filter(section => section.id !== 'DEVICE_SPEC').map((section) => {
+                                  const isBase = section.id === 'BASE';
+                                  const modeSelected = selectedBldcModes.includes(section.id);
+                                  const expanded = isBase || modeSelected || Boolean(expandedBldcGroups[section.id]);
+                                  const valuesPresent = section.fields.filter((f: any) => issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '').length;
+                                  if (!isBase && !modeSelected && !expandedBldcGroups[section.id]) {
+                                    return <button key={section.id} type="button" onClick={() => setExpandedBldcGroups(prev => ({...prev, [section.id]: true}))} className="w-full flex items-center justify-between px-2.5 py-2 border-b border-slate-800/70 text-left hover:bg-slate-900/60 cursor-pointer"><span className="flex items-center gap-2 text-xs text-slate-300"><ChevronRight className="w-3.5 h-3.5 text-slate-600" />{section.label}</span><span className="text-[10px] text-slate-600">{section.fields.length} 项 · 已填 {valuesPresent}</span></button>;
+                                  }
+                                  return <div key={section.id} className="border-b border-slate-800/70 last:border-b-0 py-2">
+                                    <button type="button" onClick={() => !isBase && setExpandedBldcGroups(prev => ({...prev, [section.id]: !prev[section.id]}))} className="w-full flex items-center justify-between text-left cursor-pointer px-2 py-1"><span className="flex items-center gap-2 text-xs font-semibold text-slate-200">{expanded ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-600" />}{section.label}{isBase && <span className="text-[9px] text-emerald-400">核心输入</span>}</span><span className="text-[10px] text-slate-600">{section.fields.length} 项 · 已填 {valuesPresent}</span></button>
+                                    {expanded && <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mt-1.5">{section.fields.map(renderField)}</div>}
+                                  </div>;
+                                })}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                              {visibleFields.map(renderField)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+
               </div>
             );
           })()}
+          {context.selectedDeviceId && (issue.issueCategories || []).some((category) => ['BLDC Motor Drive','Component Alternative','Thermal','Power','EMC','Reliability'].includes(category)) && (
+            <div className="mb-3 bg-amber-950/10 border border-amber-500/20 rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <div className="text-xs font-semibold text-amber-200">器件规格 · Datasheet 参数</div>
+                  <div className="text-[9px] text-slate-500 mt-0.5">来自当前绑定器件库；与当前工况实测值分开管理，导入来源会保留为 DATASHEET。</div>
+                </div>
+                <span className="text-[9px] text-amber-400">{getDeviceSpecificationMeasurementFields().length} 项</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                {getDeviceSpecificationMeasurementFields().map((field) => renderField(field))}
+              </div>
+            </div>
+          )}
           <p className="text-[10px] text-slate-500">不适用的参数留空。来源为 TEXT_INFERRED 的字段只是候选，不会覆盖已经手填或导入的工程数据。</p>
           {/* Test condition & Environment */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -1,5 +1,5 @@
 import { CopilotAnalysisResult, IssueInput, ProjectContext, RaciItem, DFMEAView, DualTimelineActionPlan } from '../types';
-import { evaluateAllBldcPatterns } from '../data/bldcPatternEngine';
+import { evaluateAllBldcPatterns } from '../domains/bldc';
 import { deriveBldcEvaluationInput } from './scenarioDerived';
 import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput } from '../data/robotJointPatternEngine';
 import { buildScenarioPassFailCriteria, getDomainPhysics, resolveEngineeringDomain, resolveEngineeringDomains } from './scenarioDomainEngine';

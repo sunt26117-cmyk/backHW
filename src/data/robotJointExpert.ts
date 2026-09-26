@@ -1,5 +1,5 @@
 import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } from '../types';
-import type { ScenarioPillars } from './decisionPillars';
+import type { ScenarioPillars } from '../types';
 import { recalculateStandardWeightedScore } from '../utils/scoringWeights';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 

@@ -259,24 +259,28 @@ check('bldcMotorExpert.n() 已委托该原语：n(\'\') / n(null) 不再造出 0
   assert.equal(readMeasuredNumber({ vdsRatingV: 60 }, 'vdsRatingV'), 60);
 });
 
-check('path A 读数：实测字段为空串时回落文本推断，而不是被当成 0', () => {
+check('path A 读数：实测字段为空串时必须视为「缺失」(NaN)，绝不能被当成 0', () => {
   const mk = (v: unknown) => ({
     issueCategories: ['BLDC Motor Drive'], failurePhenomenon: '', requirement: '',
     testCondition: '', actualMeasurement: '48V 母线供电', engineeringConcern: '', notes: '',
     measuredValues: { busVoltageNominalV: v },
   } as unknown as IssueInput);
   const blank = deriveBldcEvaluationInput(CONTEXT, mk(''));
-  assert.equal(blank.vbusNominal, 48, '空串实测值不得把文本推断的 48V 顶成 0，实际=' + blank.vbusNominal);
+  // 新契约（比旧版更严）：空串 = 缺失 -> NaN。旧实现 Number('') === 0 会把它当成 0；
+  // 同时本模式已不再从自由文本猜数值（文本推断改为显式带 TEXT_INFERRED 标注的回填步骤），
+  // 所以这里即便文本里写着 48V，也不允许补成 48。
+  assert.equal(Number.isNaN(blank.vbusNominal), true, '空串必须视为缺失(NaN)，实际=' + blank.vbusNominal);
+  assert.notEqual(blank.vbusNominal, 0, '空串绝不能变成 0');
 });
 
-check('path A 读数：真的填了 0 时实测优先（0 是合法值，仍然压过文本推断）', () => {
+check('path A 读数：真的填了 0 时必须保留为 0（0 是合法值，不得当成缺失）', () => {
   const zeroIssue = {
     issueCategories: ['BLDC Motor Drive'], failurePhenomenon: '', requirement: '',
     testCondition: '', actualMeasurement: '48V 母线供电', engineeringConcern: '', notes: '',
     measuredValues: { busVoltageNominalV: 0 },
   } as unknown as IssueInput;
   const zero = deriveBldcEvaluationInput(CONTEXT, zeroIssue);
-  assert.equal(zero.vbusNominal, 0, '实测 0 必须压过文本推断，实际=' + zero.vbusNominal);
+  assert.equal(zero.vbusNominal, 0, '实测 0 必须保留为 0，实际=' + zero.vbusNominal);
 });
 
 console.log('\n=== 缺字段不得凭空造出「一票否决」（同时确认真值仍能触发） ===');

@@ -4,7 +4,7 @@
  */
 
 import { GoldStandardCase, IssueInput, ProjectContext } from '../types';
-import { evaluateAllBldcPatterns } from './bldcPatternEngine';
+import { evaluateAllBldcPatterns } from '../domains/bldc';
 import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput } from './robotJointPatternEngine';
 import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
 
@@ -40,7 +40,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     category: 'BLDC Motor Drive',
     input: {
       context: { projectName: '座椅大扭矩 BLDC 调节控制器', projectPhase: 'DVT' },
-      issue: { failurePhenomenon: '3800rpm BLDC 急停时 VBUS 泵升至 37.8V，MOSFET 是 40V 耐压，目前只有 15 天', measuredValues: { rotorInertiaKgm2: 5.33e-6, busVoltageNominalV: 13.5 } },
+      issue: { failurePhenomenon: '3800rpm BLDC 急停时 VBUS 泵升至 37.8V，MOSFET 是 40V 耐压，目前只有 15 天', measuredValues: { rotorInertiaKgm2: 5.33e-6, busVoltageNominalV: 13.5, rpm: 3800, cBusUf: 470, vdsRatingV: 40, busVoltagePeakV: 37.8 } },
     },
     expectedPattern: 'P001',
     expectedCalculation: { '理论泵升峰值 Vbus_theo (V)': 39.1, '实测峰值 (V)': 37.8, '耐压裕量 (V)': 2.2 },
@@ -54,7 +54,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '高 dv/dt 门极米勒效应瞬态误导通',
     category: 'Power & Switching',
     input: {
-      issue: { failurePhenomenon: '对管开通瞬间开关节点 dv/dt 达到 8.5V/ns，下管门极感应 2.15V 尖峰' },
+      issue: { failurePhenomenon: '对管开通瞬间开关节点 dv/dt 达到 8.5V/ns，下管门极感应 2.15V 尖峰', measuredValues: { dvdtVns: 8.5, cgdPf: 115, cgsPf: 800, rgOffOhm: 2.2, vthMinV: 2.0, sourceInductanceNh: 2, diDtANs: 5 } },
     },
     expectedPattern: 'P003',
     expectedCalculation: { '门极感应瞬态抬升 Vgs_induced (V)': 2.15, '门极安全裕量 Margin (V)': -0.15 },
@@ -96,7 +96,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '短路保护响应时序 vs MOSFET SOA 窗口 (P016 重点)',
     category: 'Power & Protection Timing',
     input: {
-      issue: { failurePhenomenon: '相间短路发生时，从电流上升到门极完全关断总耗时 2.8μs，MOSFET 短路耐受仅 2.5μs', measuredValues: { senseDelayNs: 500, compDelayNs: 500, digitalFilterDelayNs: 500, driverPropDelayNs: 300, gateTurnOffDelayNs: 300, currentFallDelayNs: 400, soaShortCircuitTimeUs: 2.0 } },
+      issue: { failurePhenomenon: '相间短路发生时，从电流上升到门极完全关断总耗时 2.8μs，MOSFET 短路耐受仅 2.5μs', measuredValues: { senseDelayNs: 500, compDelayNs: 500, digitalFilterDelayNs: 500, driverPropDelayNs: 300, gateTurnOffDelayNs: 300, currentFallDelayNs: 400, soaShortCircuitTimeUs: 2.0, easEnergyMj: 200 } },
     },
     expectedPattern: 'P016',
     expectedCalculation: { '全关闭时间 Fault-to-Off (μs)': 0.85, 'SOA耐受时间 (μs)': 2.5, '时序裕量 (μs)': 1.65 },
@@ -110,7 +110,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '死区过长导致低转速换相畸变与转矩脉动',
     category: 'Motor Control & NVH',
     input: {
-      issue: { failurePhenomenon: '将死区加大至 800ns 后，低速 200rpm 运转出现明显电磁嗡鸣与转矩纹波' },
+      issue: { failurePhenomenon: '将死区加大至 800ns 后，低速 200rpm 运转出现明显电磁嗡鸣与转矩纹波', measuredValues: { deadTimeNs: 800, pwmSwitchingFreqHz: 20000 } },
     },
     expectedPattern: 'P005',
     expectedCalculation: { '死区占PWM周期比例 (%)': 1.6, '转矩脉动增加 (%)': 8.5 },
@@ -138,7 +138,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '堵转保护四级复合判据 (P018 重点)',
     category: 'Motor Protection Rule Engine',
     input: {
-      issue: { failurePhenomenon: '机械卡死堵转时仅依赖热敏电阻，在温度传感器滞后 3 秒期间电机炸机' },
+      issue: { failurePhenomenon: '机械卡死堵转时仅依赖热敏电阻，在温度传感器滞后 3 秒期间电机炸机', measuredValues: { currentPeakA: 22, rpm: 50, stallCurrentThresholdA: 18, stallRpmThreshold: 200, stallLevel1TimeMs: 300, stallLevel2TimeMs: 800, stallLevel3TimeMs: 1500, stallLockoutCountN: 3, stallRiskIndicated: 1 } },
     },
     expectedPattern: 'P018',
     expectedCalculation: { '判据逻辑': '电流>18A AND 转速<200rpm AND 持续300ms', '保护层级': 'L1软限幅 -> L2降额 -> L3停机 -> L4锁存' },
@@ -152,7 +152,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: 'ESD 静电放电回路与敏感引脚防护',
     category: 'EMC / ESD Immunity',
     input: {
-      issue: { failurePhenomenon: '连接器引脚接受 ISO 10605 ±15kV 空气放电时，预驱芯片死锁' },
+      issue: { failurePhenomenon: '连接器引脚接受 ISO 10605 ±15kV 空气放电时，预驱芯片死锁', measuredValues: { hasSupplyBoostRegulation: 0 } },
     },
     expectedPattern: 'P011',
     expectedCalculation: { 'TVS钳位残压 (V)': 38.9, '敏感引脚耐受': '2kV HBM' },
@@ -180,7 +180,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '母线电解电容 Arrhenius 寿命加速模型估算',
     category: 'Reliability & Aging',
     input: {
-      issue: { failurePhenomenon: '母线电解电容在 85℃ 环温与 3.5A 纹波下工作，需评估 15 年车规寿命', measuredValues: { cBusUf: 470, currentPeakA: 15, ambientTempC: 85 } },
+      issue: { failurePhenomenon: '母线电解电容在 85℃ 环温与 3.5A 纹波下工作，需评估 15 年车规寿命', measuredValues: { cBusUf: 470, currentPeakA: 15, ambientTempC: 85, capRatedRippleCurrentA: 4.5, capRatedLifeHours: 5000, capRatedTempC: 105 } },
     },
     expectedPattern: 'P013',
     expectedCalculation: { '估算寿命 (h)': 20000, '目标寿命 (h)': 15000, '寿命裕量 (h)': 5000 },
@@ -194,7 +194,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '急停动态尖峰 MOSFET VDS 耐压多层级裕量核查 (P014 重点)',
     category: 'Power & Switching',
     input: {
-      issue: { failurePhenomenon: '急停后母线实测峰值 48V，而功率 MOSFET 额定耐压仅 40V，动态尖峰逼近击穿', measuredValues: { busVoltagePeakV: 48, vdsRatingV: 40 } },
+      issue: { failurePhenomenon: '急停后母线实测峰值 48V，而功率 MOSFET 额定耐压仅 40V，动态尖峰逼近击穿', measuredValues: { busVoltagePeakV: 48, vdsRatingV: 40, loopInductanceNh: 5, diDtANs: 2.88 } },
     },
     expectedPattern: 'P014',
     expectedCalculation: { '动态浪涌过冲估算 Vds_peak (V)': 62.4, '器件额定耐压 Vds_rating (V)': 40, '耐压裕量 (V)': -22.4 },

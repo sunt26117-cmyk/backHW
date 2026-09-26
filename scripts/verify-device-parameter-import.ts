@@ -39,6 +39,19 @@ const device: DeviceEntry = {
 };
 
 const candidates = buildDeviceParameterCandidates(device);
+
+const thermalMapping = candidates.find(c => c.rawPath === 'thermalParams.rthJc');
+if (!thermalMapping || thermalMapping.targetKey !== 'rthJcCPerW' || thermalMapping.mappingStatus !== 'mapped') {
+  throw new Error('RθJC 未按新的器件规格层自动映射到 rthJcCPerW');
+}
+const qgdMapping = candidates.find(c => c.rawPath === 'gateCharge.qgd');
+if (!qgdMapping || qgdMapping.targetKey !== 'qgdNc' || qgdMapping.mappingStatus !== 'mapped') {
+  throw new Error('Qgd → qgdNc 自动映射失败');
+}
+const qgsMapping = candidates.find(c => c.rawPath === 'gateCharge.qgs');
+if (!qgsMapping || qgsMapping.targetKey !== 'qgsNc' || qgsMapping.mappingStatus !== 'mapped') {
+  throw new Error('Qgs → qgsNc 自动映射失败');
+}
 const keys = new Set(candidates.map(c => c.targetKey));
 for (const required of ['vdsRatingV','rdsOnMilliOhm','vthMinV','cgdPf','cgsPf','gateChargeQgNc','turnOffDelayNs','fallTimeNs','qrrNc','easEnergyMj']) {
   if (!keys.has(required)) throw new Error(`缺候选映射: ${required}`);
@@ -89,7 +102,7 @@ const unknown = unknownCandidates.find(c => c.rawPath === 'gateCharge.qgs');
 if (!unknown || unknown.targetKey !== null || unknown.mappingStatus !== 'unmapped') {
   throw new Error('未开放工程字段没有正确进入 unmapped 状态');
 }
-const trr = candidates.find(c => c.rawPath === 'bodyDiode.trr');
+const trr = unknownCandidates.find(c => c.rawPath === 'bodyDiode.trr');
 if (!trr || trr.targetKey !== null || trr.mappingStatus !== 'unmapped') throw new Error('工程 schema 无 trrNs 时不能伪造映射');
 const badUnitOptions = getMosfetMappingOptions(trr, [
   { key: 'qrrNc', label: 'Qrr', unit: 'nC', description: '', tag: 'MEASURED' },

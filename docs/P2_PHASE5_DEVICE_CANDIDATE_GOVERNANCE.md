@@ -159,3 +159,18 @@ verify-bldc-input-governance: PASS
 本轮只治理 MOSFET 候选链路，不新增动态工程 schema 字段，不让 AI 自动扩展 68 个工程输入，也不改变 P001~P018 的确定性物理公式。
 
 下一阶段如要扩展电容、传感器、连接器等器件类型，可以复用同一“Field Table → Candidate → MappingStatus → Import Gate → Decision Persistence”模式，而无需重新设计一套逻辑。
+
+### v3 自动映射修正
+
+器件 JSON 的 `extractionHints.mapping` 现在作为显式映射提示参与候选生成：只要 `targetKey` 在整个工程 schema 中真实存在、单位兼容，且来源路径存在，就自动转为 `mapped`，不再要求工程师重复选择映射目标；工程师仍需要显式确认是否写入工程输入。
+
+候选匹配使用整个工程 schema，而不是仅使用当前展开域。这样 `qgdNc`、`soaShortCircuitTimeUs` 等虽然当前页面未展开，但下游确定性引擎已有字段的参数，不会被误报成“未映射”。界面会标记“schema 已有·当前域未展开”。
+
+`Crss → Cgd` 仍保持独立 DERIVED 路径，不会因为 AI 在 `extractionHints.mapping` 中给出 `cgdPf` 就把 Crss 冒充 datasheet 直接 Cgd。
+
+
+### v4 为什么仍有少数参数不自动映射
+
+“自动匹配”和“自动导入”是两个不同门槛。当前实现会自动采用 JSON `extractionHints.mapping`、字段表映射以及全工程 schema 中的唯一同单位字段；只有语义一致且工程字段真实存在时才进入 `mapped`。
+
+因此 `ID` / `ID pulse` / `PD` / `Tjmax` / `Ciss` / `Coss` / `Qgs` / `Qsw` / `tr` / `td(on)` / `trr` / `IrrM` / Gate 电压上限 / ESD / SOA 曲线等，在当前 schema 没有同语义目标时仍保持 `unmapped`，这是防止把“器件能力/内部参数/曲线”误写成当前工况输入，而不是漏接。

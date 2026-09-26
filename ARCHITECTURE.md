@@ -37,15 +37,17 @@
 └──────────────────────────────▲────────────────────────────────────────┘
                                │
 ┌──────────────────────────────┴────────────────────────────────────────┐
-│ L2 判据层（确定性 · 去伪存真）                                         │
-│   bldcPatternEngine      P001–P018 (18)  逆变桥电气物理                │
-│   robotJointPatternEngine J001–J007 (7)  关节机电/安全/总线            │
+│ L2 判据层（确定性 · 模块化域）                                         │
+│   domains/bldc/bldcEngine.ts       编排 + 稳定 Registry                │
+│   domains/bldc/patterns/P001~P018   单 Pattern 单职责                │
+│   domains/bldc/calculations/*       共享物理计算，不互相偷变量        │
+│   robotJointPatternEngine            J001–J007 关节机电/安全/总线     │
 │   nanGuard 清洗 NaN · verify-engines 断言覆盖全部 25 模式              │
 └──────────────────────────────▲────────────────────────────────────────┘
                                │ BldcEvaluationInput / RobotJointEvaluationInput
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │ L1 物理计算 / 输入派生                                                 │
-│   共享物理核心 motorPhysicsEngine                                      │
+│   src/physics/motorPhysicsEngine.ts   物理唯一真源                     │
 │     calculateBusPumping · checkMillerRisk · calculateSnubber…          │
 │   确定性引擎 bldcDeterministic / robotJointDeterministic / thermalCascade│
 │     （纪律：缺输入 → INSUFFICIENT_INPUT，禁止默认值顶替）              │
@@ -73,12 +75,12 @@ flowchart TD
   DYN --> RES["CopilotAnalysisResult"]
   RES --> Views["13 个 tab 渲染"]
 
-  DYN -. 取触发模式 .-> PAT["bldcPatternEngine P001-P018\nrobotJointPatternEngine J001-J007"]
-  PAT -. 输入 .-> DER["路径A scenarioDerived\n(文本推断, 缺输入=NaN)"]
+  DYN -. 取触发模式 .-> PAT["domains/bldc/bldcEngine\nP001-P018 Registry"]
+  PAT -. 输入 .-> DER["scenarioDerived\nBldcEvaluationInput"]
   PAT --> NG["nanGuard 清洗"]
   DYN -. 确定性事实 .-> DET["bldcDeterministicEngine\nrobotJointDeterministic\nthermalCascade"]
   DET -. 输入 .-> EXT["路径B unifiedStateExtractor\n(只读 measuredValues, 缺输入=0)"]
-  DET --> MP["共享物理核心 motorPhysicsEngine\ncalculateBusPumping / checkMillerRisk"]
+  DET --> MP["src/physics/motorPhysicsEngine\ncalculateBusPumping / checkMillerRisk"]
 
   RES --> AI["离线AI闭环 aiProtocol\n生成提示词→外部AI→导回JSON→审计"]
   AI --> RES
@@ -151,31 +153,47 @@ V4 的选择是**让两条路径并存、各司其职**（A 管"给一段文本�
 ## 5. 共享物理核心（唯一真源，防公式分叉）
 
 ```
-                 motorPhysicsEngine.ts  (409 行)
+                 src/physics/ 物理模块（按物理关注点拆分，单文件均 < 110 行）
    ┌────────────────────┬────────────────────┬─────────────────────┐
    │ calculateBusPumping│ checkMillerRisk    │ calculateSnubber…   │
    └─────────┬──────────┴─────────┬──────────┴──────────┬──────────┘
              │                    │                     │
-   bldcDeterministicEngine   bldcPatternEngine      MotorDriveToolbox(UI)
+   bldcDeterministicEngine   BLDC Pattern Registry   MotorDriveToolbox(UI)
     （主报告确定性计算）        P001 / P003 判据        （物理工具箱）
              │
    scenarioDomainEngine（域指标）
 ```
 
-- `calculateBusPumping`：P001 与确定性引擎共用（含线束电感储能项 0.5·L·I²）
-- `checkMillerRisk`：已提升为 P003 的先进模型 —— 阻性界 + **容性分压界（两界取小）** + **源极电感过冲** + **实测尖峰优先**；**向后兼容**（只传旧参数时行为不变）
+- `calculateBusPumping`：位于 `src/physics/busPumping.ts`，P001 与确定性引擎共用（含线束电感储能项 0.5·L·I²）
+- `checkMillerRisk`：位于 `src/physics/miller.ts`，已提升为 P003 的先进模型 —— 阻性界 + **容性分压界（两界取小）** + **源极电感过冲** + **实测尖峰优先**；**向后兼容**（只传旧参数时行为不变）
 - 回归锁：`verify-engines` 有断言强制 P001 必须走共享核心
 
-## 6. 判据层：25 个模式
+## 6. 判据层：模块化 25 个模式
 
-| 组 | 文件 | 数量 | 关注点 |
-|---|---|---|---|
-| P001–P018 | `data/bldcPatternEngine.ts` (1240行) | 18 | 母线泵升·反电势·米勒·死区(短/长)·热失控·EMI·霍尔·电流采样·UVLO·自举·母线电容·VDS裕量·保护独立性·SOA时序·采样架构·堵转 |
-| J001–J007 | `data/robotJointPatternEngine.ts` (722行) | 7 | 背隙+柔性·编码器电池·二质量谐振·泄放电阻热·力矩闭环·STO通道独立·总线耦合 |
+| 组 | Canonical implementation | 数量 | 维护边界 |
+|---|---|---:|---|
+| P001–P018 | `src/domains/bldc/patterns/P001.ts` … `P018.ts` | 18 | 一个 Pattern 只负责自己的工程判据，不依赖 UI/AI/Scenario，也不直接调用另一个 Pattern |
+| BLDC 共享计算 | `src/domains/bldc/calculations/*` | — | 共享物理计算集中放置；P001/P014 共用母线计算，P006/P007 共用热模型 |
+| BLDC 编排 | `src/domains/bldc/bldcEngine.ts` | 1 | 统一建立 context、按 Registry 顺序执行、统一 sanitize；新增 Pattern 只改 Registry |
+| J001–J007 | `src/data/robotJointPatternEngine.ts` | 7 | 与 BLDC 域隔离，暂保持原公共接口 |
 
-语义区分（重要）：
-- **P**：`patternKind: 'DETECTED_RISK' | 'CHECKLIST'`（P015/P017 是设计评审清单，允许恒 true）
-- **J**：`triggered`（该分析是否适用）+ `vetoTriggered`（真告警 / 一票否决）
+### 模块依赖规则
+
+```text
+UI / scenario / expert
+        ↓
+BLDC domain facade (`domains/bldc/index.ts`)
+        ↓
+bldcEngine → Pattern(P001~P018)
+        ↓
+BLDC calculations / src/physics
+        ↓
+shared types / utils
+```
+
+规则：Pattern 不互相 import；UI 不直接 import Pattern 实现；Physics 不知道 UI/Scenario；旧路径 `data/bldcPatternEngine.ts` 与 `utils/motorPhysicsEngine.ts` 只保留兼容转发，不再承载业务实现。
+
+语义区分保持不变：P015/P017 是设计评审清单；其它 Pattern 根据当前输入决定 `triggered`，`vetoTriggered` 只表示确定性规则触发的一票否决。
 
 ## 7. 离线 AI 闭环（4 步）
 

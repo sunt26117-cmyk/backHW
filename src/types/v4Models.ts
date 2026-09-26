@@ -22,6 +22,16 @@ export type EvidenceType =
 
 export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW';
 
+
+export interface ScenarioPillars {
+  classifiedInfo: import('../types').ClassifiedInfoItem[];
+  multiRiskBreakdown: import('../types').MultiDimensionalRiskBreakdown;
+  whyNotComparison: import('../types').WhyNotComparisonItem[];
+  next24HourPlan: import('../types').Next24HourPlan;
+  edrRecord: import('../types').EngineeringDecisionRecord;
+  redTeamChallenge: import('../types').RedTeamAuditChallenge;
+}
+
 export interface EvidenceItem {
   id: string;
   claim: string;
@@ -209,6 +219,10 @@ export interface PatternOutputItem {
   verificationItems: string[];
   unknownsToTest: string[];
   trace?: TraceNode[]; // Phase 5：确定性输出的输入→公式→阈值→Verdict 追溯链
+  /** 当前 Pattern 是否具备形成确定性结论的证据闭环。 */
+  analysisStatus?: 'READY' | 'ASSUMPTION_BASED' | 'INSUFFICIENT_INPUT';
+  /** 形成确定性结论前仍缺失的输入字段。 */
+  missingInputs?: string[];
 }
 
 // ==========================================

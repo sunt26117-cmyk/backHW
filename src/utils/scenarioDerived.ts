@@ -1,10 +1,10 @@
 import { ProjectContext, IssueInput, CopilotAnalysisResult, ComponentChangeImpactItem } from '../types';
-import { BldcEvaluationInput } from '../data/bldcPatternEngine';
+import { BldcEvaluationInput } from '../domains/bldc';
 import { FmedaRow, FtaNode, SafetyTraceabilityNode, PhaseCheckItem, WorstCaseCombination } from '../types';
 import { SAMPLE_FMEDA_ROWS, SAMPLE_FTA_TREE, SAMPLE_SAFETY_TRACEABILITY_CHAIN } from '../data/safetyReliabilityEngine';
 import { getPhaseReviewChecklist } from '../data/designReviewEngine';
 import { resolveEngineeringDomain, getDomainPhysics } from './scenarioDomainEngine';
-import { loadDevices, getDeviceCurve } from './deviceLibrary';
+import { loadDevices, getDeviceCurve, linearInterp } from './deviceLibrary';
 import { readMeasuredNumber } from './unifiedStateExtractor';
 import { mapMeasurementSourceToTraceSource } from './trace';
 import { TraceInputSource } from '../types';
@@ -32,11 +32,10 @@ function firstNumber(text: string, patterns: RegExp[], fallback: number) {
 }
 
 // ── 这一层是「第二套判断」，和确定性引擎的 isMeasuredValuePresent() 不是一回事，别互相假设 ──
-// 分工：确定性引擎只认结构化实测输入（缺 -> INSUFFICIENT_INPUT）；pattern 引擎这一层做的是
-// 「实测优先、没填才回落自由文本推断」，所以这里用 NaN（而不是 undefined / 0 哨兵）表示「缺」。
-// 但「读到什么值」统一走 readMeasuredNumber()：以前自己 Number(raw)，会把 ''/null 读成 0
-// （Number('') === 0），于是 preferMeasured 认为「实测填了 0」，把文本推断出来的 48V 顶掉 ——
-// 这与 preferMeasured 自身的语义（没填才回落）相矛盾。
+// BLDC 确定性计算只认结构化 measuredValues；自由文本若需要转成候选数据，必须先经过
+// extractMeasurementsFromText / extractTextInferredMeasurements 写回结构化输入，并保留 TEXT_INFERRED 来源。
+// 这里用 NaN（而不是 undefined / 0 哨兵）表达缺失，避免 Number('') === 0 误把空值当成有效测量。
+// BENCHMARK 是唯一允许的演示场景默认值，正式项目不会自动从 issue 文本猜数。
 function measuredNumber(issue: IssueInput, key: string): number {
   const value = readMeasuredNumber(issue.measuredValues, key);
   return value === undefined ? NaN : value;
@@ -57,6 +56,73 @@ function rawMeas(issue: IssueInput, key: string): number | string | undefined {
   return v === '' || v === null || v === undefined ? undefined : v;
 }
 
+type DeviceSpecKey =
+  | 'vdsRatingV' | 'rdsOnMilliOhm' | 'cissPf' | 'cgsPf' | 'cossPf' | 'qgsNc' | 'qswNc' | 'gatePlateauV'
+  | 'turnOnDelayNs' | 'riseTimeNs' | 'turnOffDelayNs' | 'fallTimeNs' | 'trrNs' | 'irrPeakA'
+  | 'rthJcCPerW' | 'rthJaCPerW' | 'tjMaxC' | 'easEnergyMj'
+  | 'gateVoltageMaxV' | 'gateVoltageMinV' | 'esdRatingKv' | 'gateResistanceOhm' | 'idssUa' | 'igssNa'
+  | 'idRatingA' | 'idPulseRatingA' | 'pdMaxW' | 'vbrDssMinV' | 'easCurrentA'
+  | 'diodeForwardVoltageV' | 'qrrNc' | 'gateChargeQgNc' | 'cgdDirectPf';
+
+function readDeviceSpecNumber(device: ReturnType<typeof loadDevices>[number] | undefined, key: DeviceSpecKey): number | undefined {
+  if (!device) return undefined;
+  const raw = device.raw as any;
+  const paths: Record<DeviceSpecKey, string[]> = {
+    vdsRatingV: ['maxRatings.vds.value'],
+    rdsOnMilliOhm: ['staticParams.rdsOn.value'],
+    cissPf: ['capacitanceParams.ciss.value'],
+    cgsPf: ['capacitanceParams.cgsDirect.value'],
+    cossPf: ['capacitanceParams.coss.value'],
+    qgsNc: ['gateCharge.qgs.value'],
+    qswNc: ['gateCharge.qsw.value'],
+    gatePlateauV: ['gateCharge.gatePlateauV.value'],
+    turnOnDelayNs: ['switchingParams.tdOn.value'],
+    riseTimeNs: ['switchingParams.tr.value'],
+    turnOffDelayNs: ['switchingParams.tdOff.value'],
+    fallTimeNs: ['switchingParams.tf.value'],
+    trrNs: ['bodyDiode.trr.value'],
+    irrPeakA: ['bodyDiode.irrM.value'],
+    rthJcCPerW: ['thermalParams.rthJc.value'],
+    rthJaCPerW: ['thermalParams.rthJa.value'],
+    tjMaxC: ['maxRatings.tjMax.value'],
+    easEnergyMj: ['maxRatings.easPulse.value'],
+    gateVoltageMaxV: ['protectionAndRobustness.gateVoltageMax.value'],
+    gateVoltageMinV: [],
+    esdRatingKv: ['protectionAndRobustness.esdRating.value'],
+    gateResistanceOhm: ['staticParams.gateResistance.value'],
+    idssUa: ['staticParams.idss.value'],
+    igssNa: ['staticParams.igss.value'],
+    idRatingA: ['maxRatings.id.value'],
+    idPulseRatingA: ['maxRatings.idPulse.value'],
+    pdMaxW: ['maxRatings.powerDissipation.value'],
+    vbrDssMinV: ['staticParams.vbrDss.value'],
+    easCurrentA: ['maxRatings.easCurrent.value'],
+    diodeForwardVoltageV: ['bodyDiode.vf.value'],
+    qrrNc: ['bodyDiode.qrr.value'],
+    gateChargeQgNc: ['gateCharge.qg.value'],
+    cgdDirectPf: ['capacitanceParams.cgdDirect.value'],
+  };
+  const readPath = (path: string): number | undefined => {
+    const value = path.split('.').reduce((node: any, part) => node == null ? undefined : node[part], raw);
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  for (const path of paths[key]) {
+    const value = readPath(path);
+    if (value !== undefined) return value;
+  }
+  if (key === 'gateVoltageMinV') {
+    const variants = raw?.protectionAndRobustness?.gateVoltageMax?.variants;
+    if (Array.isArray(variants)) {
+      const mins = variants
+        .map((v: any) => Number(v?.value))
+        .filter((v: number) => Number.isFinite(v) && v < 0);
+      if (mins.length) return Math.min(...mins);
+    }
+  }
+  return undefined;
+}
+
 export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueInput): BldcEvaluationInput {
   const text = allText(issue);
   const isEmc = issue.issueCategories?.includes('EMC');
@@ -65,101 +131,42 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   const isThermal = issue.issueCategories?.includes('Thermal') || issue.issueCategories?.includes('Power');
   const isBenchmark = issue.measuredValueSource === 'BENCHMARK';
 
-  let vbusMeasuredPeak = firstNumber(text, [
-    /(?:实测|测量|measured)[^0-9]{0,32}(?:瞬态|泵升)?[^0-9]{0,20}(\d+(?:\.\d+)?)\s*V/i,
-    /(?:母线|bus)[^0-9]{0,24}(?:瞬态|泵升)[^0-9]{0,20}(\d+(?:\.\d+)?)\s*V/i,
-    /(?:峰值电压|peak voltage)[^0-9]{0,12}(\d+(?:\.\d+)?)\s*V/i,
-  ], NaN);
-  vbusMeasuredPeak = preferMeasured(issue, 'busVoltagePeakV', vbusMeasuredPeak);
+  let vbusMeasuredPeak = optMeas(issue, 'busVoltagePeakV') ?? NaN;
 
-  let vbusNominal = firstNumber(text, [
-    /(\d+(?:\.\d+)?)\s*V\s*(?:输入|供电|input|supply)/i,
-    /(?:标称|nominal)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*V/i,
-    /(?:供电|电源设置|supply)[^0-9]{0,16}(\d+(?:\.\d+)?)\s*V/i,
-    /(400|800)\s*V/i,
-    /(48|24|13\.5|12)\s*V/i,
-  ], isBenchmark ? (context.productType.toLowerCase().includes('400v') ? 400 : 13.5) : NaN);
-  vbusNominal = preferMeasured(issue, 'busVoltageNominalV', vbusNominal);
-  vbusNominal = preferMeasured(issue, 'inputVoltageV', vbusNominal);
+  let vbusNominal = optMeas(issue, 'busVoltageNominalV') ?? optMeas(issue, 'inputVoltageV') ?? (isBenchmark ? (context.productType.toLowerCase().includes('400v') ? 400 : 13.5) : NaN);
 
-  let rpm = firstNumber(text, [
-    /(\d+(?:\.\d+)?)\s*rpm/i,
-    /转速[^0-9]{0,12}(\d+(?:\.\d+)?)/i,
-  ], isBenchmark ? (isEmc ? 3000 : isComponent ? 1500 : isWcca ? 800 : isThermal ? 2200 : 3800) : NaN);
-  rpm = preferMeasured(issue, 'rpm', rpm);
+  let rpm = optMeas(issue, 'rpm') ?? (isBenchmark ? (isEmc ? 3000 : isComponent ? 1500 : isWcca ? 800 : isThermal ? 2200 : 3800) : NaN);
 
-  let vdsRating = firstNumber(text, [
-    /(?:MOSFET|功率管)[^。\n]{0,90}?(\d+(?:\.\d+)?)\s*V\s*(?:耐压|rating)/i,
-    /(?:耐压上限|额定耐压|击穿电压)[^0-9]{0,20}(\d+(?:\.\d+)?)\s*V/i,
-    /(?:Vds(?:_rating)?)[^0-9]{0,20}(\d+(?:\.\d+)?)\s*V/i,
-    /(?:MOSFET|功率管)[^。\n]{0,25}?(\d+(?:\.\d+)?)\s*V(?:[,，\s]|$)/i,
-  ], isBenchmark ? ((/(?:400V)/i.test(text)) ? 650 : 40) : NaN);
-  vdsRating = preferMeasured(issue, 'vdsRatingV', vdsRating);
+  // Vds 额定耐压是器件规格，不允许从自由文本猜测；优先读取结构化输入，之后由绑定器件 Datasheet 投影补全。
+  let vdsRating = optMeas(issue, 'vdsRatingV') ?? (isBenchmark ? (context.productType.toLowerCase().includes('400v') ? 650 : 40) : NaN);
 
-  let cbusUf = firstNumber(text, [
-    /(?:Cbus|母线(?:去耦|电容|储能)[^0-9]{0,15})(\d+(?:\.\d+)?)\s*(?:μF|uF)/i,
-    /(\d+(?:\.\d+)?)\s*(?:μF|uF)/i,
-  ], isBenchmark ? 470 : NaN);
-  cbusUf = preferMeasured(issue, 'cBusUf', cbusUf);
+  let cbusUf = optMeas(issue, 'cBusUf') ?? (isBenchmark ? 470 : NaN);
 
-  let tAmbientC = firstNumber(text, [
-    /(?:环温|环境温度|ambient|温箱)[^0-9+-]{0,20}(\+?-?\d+(?:\.\d+)?)\s*(?:℃|°C)/i,
-    /(\+?\d+(?:\.\d+)?)\s*℃[^\n]{0,20}(?:高温|温升|堵转)/i,
-  ], isBenchmark ? (context.projectPhase === 'DVT' || context.projectPhase === 'DV' ? 85 : 25) : NaN);
-  tAmbientC = preferMeasured(issue, 'ambientTempC', tAmbientC);
+  let tAmbientC = optMeas(issue, 'ambientTempC') ?? (isBenchmark ? (context.projectPhase === 'DVT' || context.projectPhase === 'DV' ? 85 : 25) : NaN);
 
-  let currentPeakA = firstNumber(text, [
-    /(?:峰值电流|peak current|current)[^0-9]{0,20}(\d+(?:\.\d+)?)\s*A/i,
-    /(\d+(?:\.\d+)?)\s*A[^\n]{0,20}(?:峰值|堵转|满载)/i,
-  ], isBenchmark ? 25 : NaN);
-  currentPeakA = preferMeasured(issue, 'currentPeakA', currentPeakA);
-  currentPeakA = preferMeasured(issue, 'loadCurrentA', currentPeakA);
+  let currentPeakA = optMeas(issue, 'currentPeakA') ?? optMeas(issue, 'loadCurrentA') ?? (isBenchmark ? 25 : NaN);
 
-  let harnessLengthM = firstNumber(text, [
-    /(?:线束|harness)[^0-9]{0,20}(\d+(?:\.\d+)?)\s*m/i,
-  ], isBenchmark ? 1.8 : NaN);
-  harnessLengthM = preferMeasured(issue, 'harnessLengthM', harnessLengthM);
+  let harnessLengthM = optMeas(issue, 'harnessLengthM') ?? (isBenchmark ? 1.8 : NaN);
 
-  let deadTimeNs = firstNumber(text, [
-    /(?:DeadTime|死区(?:时间)?)[^0-9]{0,12}(\d+(?:\.\d+)?)\s*ns/i,
-  ], isBenchmark ? 120 : NaN);
-  deadTimeNs = preferMeasured(issue, 'deadTimeNs', deadTimeNs);
+  let deadTimeNs = optMeas(issue, 'deadTimeNs') ?? (isBenchmark ? 120 : NaN);
 
-  let rgOffOhm = firstNumber(text, [
-    /(?:Rg_off|关断电阻)[^0-9]{0,12}(\d+(?:\.\d+)?)\s*Ω?/i,
-  ], isBenchmark ? 4.7 : NaN);
-  rgOffOhm = preferMeasured(issue, 'rgOffOhm', rgOffOhm);
+  let rgOffOhm = optMeas(issue, 'rgOffOhm') ?? (isBenchmark ? 4.7 : NaN);
 
-  let cgdPf = firstNumber(text, [
-    /(?:Cgd|米勒电容)[^0-9]{0,12}(\d+(?:\.\d+)?)\s*pF/i,
-  ], isBenchmark ? 45 : NaN);
-  cgdPf = preferMeasured(issue, 'cgdPf', cgdPf);
+  let cgdPf = optMeas(issue, 'cgdPf') ?? (isBenchmark ? 45 : NaN);
 
-  let dvDtVns = firstNumber(text, [
-    /(?:dv\/?dt|dv\/dt)[^0-9]{0,12}(\d+(?:\.\d+)?)\s*V\/ns/i,
-  ], isBenchmark ? 8.0 : NaN);
-  dvDtVns = preferMeasured(issue, 'dvdtVns', dvDtVns);
+  // dv/dt 同样只接受结构化输入；EMC / RE_CE 的字段键统一为 dvdtVns。
+  let dvDtVns = optMeas(issue, 'dvdtVns') ?? (isBenchmark ? 8.0 : NaN);
 
-  let vthMinV = firstNumber(text, [
-    /(?:Vth|min.*?阈值|开启阈值)[^0-9]{0,15}(\d+(?:\.\d+)?)\s*V/i,
-  ], isBenchmark ? 2.0 : NaN);
-  vthMinV = preferMeasured(issue, 'vthMinV', vthMinV);
+  let vthMinV = optMeas(issue, 'vthMinV') ?? (isBenchmark ? 2.0 : NaN);
 
-  let keVkrpm = firstNumber(text, [
-    /(?:Ke|反电动势常数)[^0-9]{0,15}(\d+(?:\.\d+)?)\s*V\/?krpm/i,
-  ], isBenchmark ? 4.2 : NaN);
-  keVkrpm = preferMeasured(issue, 'keVkrpm', keVkrpm);
+  let keVkrpm = optMeas(issue, 'keVkrpm') ?? (isBenchmark ? 4.2 : NaN);
 
-  let rthJc = firstNumber(text, [
-    /(?:Rth(?:\(jc\))?|热阻)[^0-9]{0,15}(\d+(?:\.\d+)?)\s*(?:℃\/W|K\/W)/i,
-  ], isBenchmark ? 1.8 : NaN);
-  rthJc = preferMeasured(issue, 'thermalResistanceCPerW', rthJc);
+  let rthJc = isBenchmark ? 1.8 : NaN;
+  const rthJcSpec = optMeas(issue, 'rthJcCPerW');
+  const rthJcLegacy = optMeas(issue, 'thermalResistanceCPerW');
+  rthJc = rthJcSpec ?? rthJcLegacy ?? rthJc;
 
-  let rdsOnMilliOhm = firstNumber(text, [
-    /(?:Rds\(?on\)?|RDS\(on\)|导通电阻)[^0-9]{0,15}(\d+(?:\.\d+)?)\s*mΩ/i,
-    /(\d+(?:\.\d+)?)\s*mΩ[^\n]{0,25}(?:Rds|导通)/i,
-  ], isBenchmark ? 3.5 : NaN);
-  rdsOnMilliOhm = preferMeasured(issue, 'rdsOnMilliOhm', rdsOnMilliOhm);
+  let rdsOnMilliOhm = optMeas(issue, 'rdsOnMilliOhm') ?? (isBenchmark ? 3.5 : NaN);
 
   // [输入驱动] 不再用转速反推惯量（0.00015·(rpm/3800)^0.15 是无出处的自造公式）；
   // 缺 rotorInertiaKgm2 时保持 NaN，交由引擎按“缺输入”处理，而不是伪造一个惯量值。
@@ -167,20 +174,49 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
 
   // 从器件库读取当前选中器件，提取曲线用于按工况插值（无选中器件时退回写死默认值）
   const selectedDeviceId = (context as any).selectedDeviceId;
+  const selectedDevice = selectedDeviceId ? loadDevices().find((d) => d.id === selectedDeviceId) : undefined;
   let rdsOnCurve: Array<{ x: number; y: number }> | undefined;
   let crssCurve: Array<{ x: number; y: number }> | undefined;
   let vthCurve: Array<{ x: number; y: number }> | undefined;
+  if (selectedDevice) {
+    rdsOnCurve = getDeviceCurve(selectedDevice, 'rdsOn');
+    crssCurve = getDeviceCurve(selectedDevice, 'crss');
+    vthCurve = getDeviceCurve(selectedDevice, 'vth');
+  }
+
+  // 器件规格层是第二数据源：工程师已有结构化输入优先；空白时直接从当前绑定器件库
+  // 继承可安全投影的 datasheet 单值。这样“设为当前器件”不再要求手工逐项映射。
+  const deviceSpec = <K extends DeviceSpecKey>(key: K): number | undefined => readDeviceSpecNumber(selectedDevice, key);
+  const effectiveSpec = (issueKey: string, deviceKey: DeviceSpecKey): number | undefined =>
+    optMeas(issue, issueKey) ?? deviceSpec(deviceKey);
   let easEnergyMj: number | undefined;
-  if (selectedDeviceId) {
-    const dev = loadDevices().find((d) => d.id === selectedDeviceId);
-    if (dev) {
-      rdsOnCurve = getDeviceCurve(dev, 'rdsOn');
-      crssCurve = getDeviceCurve(dev, 'crss');
-      vthCurve = getDeviceCurve(dev, 'vth');
-      const easPulse = (dev.raw as any)?.maxRatings?.easPulse;
-      easEnergyMj = easPulse && easPulse.value != null ? Number(easPulse.value) : undefined;
+
+  vdsRating = effectiveSpec('vdsRatingV', 'vdsRatingV') ?? vdsRating;
+  if (!Number.isFinite(optMeas(issue, 'vthMinV')) && vthCurve?.length) {
+    const vth25 = vthCurve.find((point) => point.x === 25) || vthCurve[0];
+    if (Number.isFinite(vth25?.y)) vthMinV = vth25.y;
+  }
+  const cgdDirect = deviceSpec('cgdDirectPf');
+  if (!Number.isFinite(optMeas(issue, 'cgdPf')) && cgdDirect !== undefined) cgdPf = cgdDirect;
+
+  // Device Specification 层自动提供 Cgs：优先直接值；没有直接 Cgs 时，使用同一 VDS 点的 Ciss-Crss 派生。
+  // 该值只进入确定性计算，不回写为“用户实测输入”，并在 Trace 中明确标成 DERIVED。
+  let deviceCgsDerived: number | undefined;
+  const deviceCgsDirect = deviceSpec('cgsPf');
+  if (deviceCgsDirect !== undefined) {
+    deviceCgsDerived = deviceCgsDirect;
+  } else {
+    const ciss = deviceSpec('cissPf');
+    if (ciss !== undefined && crssCurve && crssCurve.length >= 1) {
+      const crssAtVbus = linearInterp(crssCurve, vbusNominal).value;
+      const derived = ciss - crssAtVbus;
+      if (Number.isFinite(derived) && derived > 0) deviceCgsDerived = derived;
     }
   }
+  const effectiveCgsPf = optMeas(issue, 'cgsPf') ?? deviceCgsDerived;
+  rthJc = effectiveSpec('rthJcCPerW', 'rthJcCPerW') ?? rthJc;
+  rdsOnMilliOhm = effectiveSpec('rdsOnMilliOhm', 'rdsOnMilliOhm') ?? rdsOnMilliOhm;
+  easEnergyMj = effectiveSpec('easEnergyMj', 'easEnergyMj');
 
   // ----------------------------------------------------------------
   // Trace provenance：把统一工程输入中的逐字段来源一路带到 Pattern Engine。
@@ -227,6 +263,7 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
   registerTraceSource('dvdtVns', ['dvdtVns'], dvDtVns);
   registerTraceSource('vthMinV', ['vthMinV'], vthMinV);
   registerTraceSource('keVkrpm', ['keVkrpm'], keVkrpm);
+  registerTraceSource('rthJcCPerW', ['rthJcCPerW', 'thermalResistanceCPerW'], rthJc);
   registerTraceSource('thermalResistanceCPerW', ['thermalResistanceCPerW'], rthJc);
   registerTraceSource('rdsOnMilliOhm', ['rdsOnMilliOhm', 'rdsOn'], rdsOnMilliOhm);
   ['senseDelayNs','compDelayNs','digitalFilterDelayNs','driverPropDelayNs','gateTurnOffDelayNs','currentFallDelayNs','soaShortCircuitTimeUs'].forEach((key) => {
@@ -239,10 +276,32 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     if (v !== undefined) registerTraceSource(key, [key], v);
   });
 
+  const markDeviceSpecTrace = (targetKey: string, issueKey: string, deviceKey: DeviceSpecKey) => {
+    if (optMeas(issue, issueKey) === undefined && deviceSpec(deviceKey) !== undefined) {
+      traceSources[targetKey] = 'DATASHEET';
+    }
+  };
+  markDeviceSpecTrace('vdsRating', 'vdsRatingV', 'vdsRatingV');
+  markDeviceSpecTrace('rthJcCPerW', 'rthJcCPerW', 'rthJcCPerW');
+  markDeviceSpecTrace('rdsOnMilliOhm', 'rdsOnMilliOhm', 'rdsOnMilliOhm');
+  markDeviceSpecTrace('turnOffDelayNs', 'turnOffDelayNs', 'turnOffDelayNs');
+  markDeviceSpecTrace('fallTimeNs', 'fallTimeNs', 'fallTimeNs');
+  markDeviceSpecTrace('diodeForwardVoltageV', 'diodeForwardVoltageV', 'diodeForwardVoltageV');
+  markDeviceSpecTrace('qrrNc', 'qrrNc', 'qrrNc');
+  markDeviceSpecTrace('gateChargeQgNc', 'gateChargeQgNc', 'gateChargeQgNc');
+  markDeviceSpecTrace('rthJaCPerW', 'rthJaCPerW', 'rthJaCPerW');
+  markDeviceSpecTrace('tjMaxC', 'tjMaxC', 'tjMaxC');
+  if (optMeas(issue, 'cgsPf') === undefined && effectiveCgsPf !== undefined) {
+    traceSources.cgsPf = deviceCgsDirect !== undefined ? 'DATASHEET' : 'DERIVED';
+  }
+  markDeviceSpecTrace('easEnergyMj', 'easEnergyMj', 'easEnergyMj');
+  if (optMeas(issue, 'vthMinV') === undefined && vthCurve?.length) traceSources.vthMinV = 'DATASHEET';
+  if (optMeas(issue, 'cgdPf') === undefined && cgdDirect !== undefined) traceSources.cgdPf = 'DATASHEET';
+
   // ----------------------------------------------------------------
-  // [本次修复新增] P009/P010/P011/P018 此前在引擎里是无条件 triggered:true 的硬编码，
-  // 现在改为依据下面这些从自由文本/结构化实测值中抽取出的证据字段来判断是否适用于
-  // 当前case。抽取不到证据时保持 undefined——引擎侧会据此不触发，而不是继续拍脑袋硬编码。
+  // P009/P010/P011/P018 的“是否适用当前 case”属于故障症状/架构证据层。
+  // 自由文本可以在这里识别“是否存在某类症状”，但数值型物理量（V/A/rpm/nH/V/ns…）
+  // 仍必须来自结构化 measuredValues；文本数字不会直接进入 BLDC 确定性公式。
   // ----------------------------------------------------------------
 
   // P009: 电机位置传感器类型 + 霍尔信号故障的具体症状描述
@@ -316,18 +375,20 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     rthJc: Number.isFinite(rthJc) ? rthJc : undefined,
     rdsOnMilliOhm: Number.isFinite(rdsOnMilliOhm) ? rdsOnMilliOhm : undefined,
     gateSpikeMeasuredV: optMeas(issue, 'gateSpikeV'),
-    turnOffDelayNs: optMeas(issue, 'turnOffDelayNs'),
+    turnOffDelayNs: effectiveSpec('turnOffDelayNs', 'turnOffDelayNs'),
     turnOffDelayMaxNs: optMeas(issue, 'turnOffDelayMaxNs'),
-    fallTimeNs: optMeas(issue, 'fallTimeNs'),
+    fallTimeNs: effectiveSpec('fallTimeNs', 'fallTimeNs'),
     fallTimeMaxNs: optMeas(issue, 'fallTimeMaxNs'),
     driverPropMismatchNs: optMeas(issue, 'driverPropMismatchNs'),
     driverPropMismatchMaxNs: optMeas(issue, 'driverPropMismatchMaxNs'),
     pwmSwitchingFreqHz: optMeas(issue, 'pwmSwitchingFreqHz'),
-    diodeForwardVoltageV: optMeas(issue, 'diodeForwardVoltageV'),
+    diodeForwardVoltageV: effectiveSpec('diodeForwardVoltageV', 'diodeForwardVoltageV'),
     modulationIndex: optMeas(issue, 'modulationIndex'),
     rthCaOrJa: optMeas(issue, 'rthCaOrJa'),
+    rthJaTotal: effectiveSpec('rthJaCPerW', 'rthJaCPerW'),
+    tjMaxC: effectiveSpec('tjMaxC', 'tjMaxC'),
     switchingTimeNs: optMeas(issue, 'switchingTimeNs'),
-    qrrNc: optMeas(issue, 'qrrNc'),
+    qrrNc: effectiveSpec('qrrNc', 'qrrNc'),
     powerFactorCosPhi: optMeas(issue, 'powerFactorCosPhi'),
     pulseDurationS: optMeas(issue, 'pulseDurationS'),
     thermalTauS: optMeas(issue, 'thermalTauS'),
@@ -343,14 +404,17 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
     sourceInductanceNh: optMeas(issue, 'sourceInductanceNh'),
     diDtANs: optMeas(issue, 'diDtANs'),
     loopInductanceNh: optMeas(issue, 'loopInductanceNh'),
-    cgsPf: optMeas(issue, 'cgsPf'),
+    cgsPf: effectiveCgsPf,
     magnetLowTempFluxUpliftPct: optMeas(issue, 'magnetLowTempFluxUpliftPct'),
-    gateChargeQgNc: optMeas(issue, 'gateChargeQgNc'),
+    gateChargeQgNc: effectiveSpec('gateChargeQgNc', 'gateChargeQgNc'),
     bootRefreshWindowUs: optMeas(issue, 'bootRefreshWindowUs'),
     bootChargeLoopOhm: optMeas(issue, 'bootChargeLoopOhm'),
     capInitialTolerancePct: optMeas(issue, 'capInitialTolerancePct'),
     capEolDeratingPct: optMeas(issue, 'capEolDeratingPct'),
     capLowTempDeratingPct: optMeas(issue, 'capLowTempDeratingPct'),
+    capRatedRippleCurrentA: optMeas(issue, 'capRatedRippleCurrentA'),
+    capRatedLifeHours: optMeas(issue, 'capRatedLifeHours'),
+    capRatedTempC: optMeas(issue, 'capRatedTempC'),
     vbusMinExpectedV,
     uvloTypicalV: optMeas(issue, 'uvloTypicalV'),
     uvloMinV: optMeas(issue, 'uvloMinV'),

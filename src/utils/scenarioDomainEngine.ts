@@ -18,6 +18,7 @@ import { IssueInput, IssueCategory, ProjectContext, MeasurementSource } from '..
 import { calculateBldcDeterministicCalculations } from './bldcDeterministicEngine';
 import { calculateTwoMassResonance } from './robotJointResonance';
 import { extractUnifiedEngineeringModel } from './unifiedStateExtractor';
+import { DEVICE_SPEC_FIELDS, DEVICE_SPEC_FIELD_KEYS } from './deviceSpecificationSchema';
 
 export type EngineeringDomain =
   | 'BLDC'
@@ -84,6 +85,7 @@ export const BLDC_PARAMETER_GROUPS: MeasurementGroupDescriptor[] = [
   { id: 'P016', label: 'P016 · 短路保护 / SOA', pattern: 'P016', keys: ['senseDelayNs','compDelayNs','digitalFilterDelayNs','driverPropDelayNs','gateTurnOffDelayNs','currentFallDelayNs','soaShortCircuitTimeUs','easEnergyMj'] },
   { id: 'P017', label: 'P017 · 采样/反馈（补充）', pattern: 'P017', keys: ['currentSenseArchitecture','currentSenseFaultRiskIndicated','currentPeakA'] },
   { id: 'P018', label: 'P018 · 堵转', pattern: 'P018', keys: ['stallRiskIndicated','stallCurrentThresholdA','stallRpmThreshold','stallLevel1TimeMs','stallLevel2TimeMs','stallLevel3TimeMs','stallLockoutCountN'] },
+  { id: 'DEVICE_SPEC', label: '器件规格 · Datasheet 参数', pattern: 'DEVICE_SPEC', keys: [...DEVICE_SPEC_FIELD_KEYS] },
 ];
 
 export function getBldcParameterSections(fields: DomainMeasurementField[]) {
@@ -206,6 +208,9 @@ const P: Record<EngineeringDomain, DomainProfile> = {
       {key:'capInitialTolerancePct',label:'电容初始公差',unit:'%',description:'Cbus 初始容量负偏差',tag:'SPEC'},
       {key:'capEolDeratingPct',label:'EOL容量衰减',unit:'%',description:'寿命末期容量衰减',tag:'SPEC'},
       {key:'capLowTempDeratingPct',label:'低温容量衰减',unit:'%',description:'低温条件下有效容量衰减',tag:'SPEC'},
+      {key:'capRatedRippleCurrentA',label:'电容允许纹波电流',unit:'A RMS',description:'当前母线电容 datasheet 允许的纹波电流能力',tag:'SPEC'},
+      {key:'capRatedLifeHours',label:'电容额定寿命',unit:'h',description:'datasheet 额定寿命，必须带对应额定温度条件',tag:'SPEC'},
+      {key:'capRatedTempC',label:'寿命额定温度',unit:'℃',description:'上述额定寿命对应的额定温度',tag:'SPEC'},
 
       // P014：急停 Vds 尖峰
       {key:'loopInductanceNh',label:'功率回路寄生电感',unit:'nH',description:'功率回路/线束寄生电感，直接进入 L·di/dt 与泵升能量边界',tag:'MEASURED'},
@@ -228,6 +233,7 @@ const P: Record<EngineeringDomain, DomainProfile> = {
       {key:'stallLevel2TimeMs',label:'Level 2 时间窗',unit:'ms',description:'持续堵转后进入 PWM 降额/DTC 预警的时间',tag:'SPEC'},
       {key:'stallLevel3TimeMs',label:'Level 3 时间窗',unit:'ms',description:'持续堵转后执行安全停机的时间',tag:'SPEC'},
       {key:'stallLockoutCountN',label:'Level 3 锁存次数 N',unit:'次',description:'单次点火循环内 Level 3 累计达到 N 次后锁存故障',tag:'SPEC'},
+      ...DEVICE_SPEC_FIELDS.map((field) => ({ ...field, inputType: 'number' as const, required: false })),
     ],
     knownPitfalls: ['不能用计算泵升峰值替代示波器实测峰值作为放行证据', 'RDS(on)/Qg/Qgd 不能只看室温 datasheet typ 值', 'Cbus/J/dvdt/Cgd/Rg/Vth 任一确定性计算关键输入缺失时，必须明确标记 INSUFFICIENT_INPUT，不得从自由文本或默认工程参数补齐'],
   },
@@ -597,9 +603,10 @@ export function getDomainRoleMap(issue: IssueInput): Array<{ domain: Engineering
   }));
 }
 
-export function getDomainMeasurementGroups(issue: IssueInput): Array<{ domain: EngineeringDomain; title: string; fields: DomainMeasurementField[] }> {
-  return getDomainRoleMap(issue).map(({ domain }) => ({
+export function getDomainMeasurementGroups(issue: IssueInput): Array<{ domain: EngineeringDomain; title: string; role: 'PRIMARY' | 'RELATED'; fields: DomainMeasurementField[] }> {
+  return getDomainRoleMap(issue).map(({ domain, role }) => ({
     domain,
+    role,
     title: P[domain].title,
     fields: P[domain].measurements,
   }));
@@ -607,6 +614,10 @@ export function getDomainMeasurementGroups(issue: IssueInput): Array<{ domain: E
 
 export function getDomainPhysics(issue: IssueInput): DomainProfile {
   return P[resolveEngineeringDomain(issue)];
+}
+
+export function getDeviceSpecificationMeasurementFields(): DomainMeasurementField[] {
+  return DEVICE_SPEC_FIELDS.map((field) => ({ ...field, inputType: 'number' as const }));
 }
 
 export function getDomainMeasurementFields(issue: IssueInput): DomainMeasurementField[] {
@@ -639,6 +650,15 @@ export function getAllEngineeringMeasurementFields(): DomainMeasurementField[] {
         description: existing.description || field.description,
       } : { ...field });
     }
+  }
+  for (const field of getDeviceSpecificationMeasurementFields()) {
+    const existing = merged.get(field.key);
+    merged.set(field.key, existing ? {
+      ...existing,
+      tag: 'SPEC',
+      unit: existing.unit || field.unit,
+      description: existing.description || field.description,
+    } : field);
   }
   return [...merged.values()];
 }

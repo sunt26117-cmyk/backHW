@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileSearch, Filter, GitBranch, ShieldAlert } from 'lucide-react';
 import { CopilotAnalysisResult, IssueInput, ProjectContext, TraceNode } from '../types';
-import { evaluateAllBldcPatterns } from '../data/bldcPatternEngine';
+import { evaluateAllBldcPatterns } from '../domains/bldc';
 import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';

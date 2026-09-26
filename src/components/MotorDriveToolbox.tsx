@@ -16,7 +16,7 @@ import {
   calculateCommutationRisk,
   evaluatePositionSensorDegradation,
   evaluateSafetyChainTiming,
-} from '../utils/motorPhysicsEngine';
+} from '../physics/motorPhysicsEngine';
 import {
   calculateStallTransientThermal,
   FOSTER_PRESETS,

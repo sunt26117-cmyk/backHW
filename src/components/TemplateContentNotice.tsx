@@ -10,10 +10,8 @@ interface TemplateContentNoticeProps {
 /**
  * 通用模板内容显式提示。
  *
- * 用途：把 decisionPillars / getRobotJointPillars 生成的“通用模板”内容（多维度风险分解、
- * 方案为什么不选、24小时计划、EDR 记录、红队挑战）在界面上明确标注出来，避免工程师在
- * 不知情的情况下，把模板里的示例数字（如 22.16J / 307V / 1360pF / 37.8V）当成当前 case
- * 的真实分析结论引用到评审、EDR 或客户文档里。
+ * 用途：对历史/通用模板或参考内容做显式标注，避免工程师把模板示例数字当成当前 case 的
+ * 确定性工程结论。运行时当前 case 不再从 decisionPillars 取数值/方案。
  */
 export const TemplateContentNotice: React.FC<TemplateContentNoticeProps> = ({ blocks, message, compact }) => {
   return (

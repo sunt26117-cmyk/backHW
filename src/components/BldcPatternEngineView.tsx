@@ -27,7 +27,7 @@ import {
 import {
   evaluateAllBldcPatterns,
   BldcEvaluationInput,
-} from '../data/bldcPatternEngine';
+} from '../domains/bldc';
 import {
   evaluateAllRobotJointPatterns,
   deriveRobotJointEvaluationInput,
@@ -55,7 +55,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
   // 由当前典型工况自动映射初始物理参数；用户仍可手工微调。
   const scenarioDomainKey = resolveEngineeringDomain(issue);
   const isBldcScenario = scenarioDomainKey === 'BLDC';
-  const hasUsableBldcInputs = issue.measuredValueSource === 'BENCHMARK' || ['rpm','busVoltagePeakV','vdsRatingV','currentPeakA'].every((key) => readMeasuredNumber(issue.measuredValues, key) !== undefined) || /\b\d+(?:\.\d+)?\s*rpm/i.test(`${issue.testCondition} ${issue.actualMeasurement}`);
+  const hasUsableBldcInputs = issue.measuredValueSource === 'BENCHMARK' || ['rpm','busVoltagePeakV','vdsRatingV','currentPeakA'].every((key) => readMeasuredNumber(issue.measuredValues, key) !== undefined);
   const derivedParams = useMemo(() => deriveBldcEvaluationInput(context, issue), [context, issue]);
   const [params, setParams] = useState<BldcEvaluationInput>(derivedParams);
 
@@ -69,14 +69,14 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
 
   const patternResults = useMemo(() => {
     if (!isBldcScenario) return [];
-    if (!hasUsableBldcInputs) return [];
+    // 不再因为核心输入不完整而隐藏 P001~P018；Pattern Engine 会统一返回
+    // READY / ASSUMPTION_BASED / INSUFFICIENT_INPUT，工程师可以直接看到缺口。
     return evaluateAllBldcPatterns(params);
-  }, [params, isBldcScenario, hasUsableBldcInputs]);
+  }, [params, isBldcScenario]);
 
-  // [本次修复] "已触发风险"此前把 P015/P017 这类恒定展示的设计检查清单/架构权衡矩阵
-  // 也算进去了，跟P009等真实测出来的故障模式混在同一条列表/计数里，工程师没法区分
-  // "这是本次case测出来的问题"还是"这是通用参考清单"。现在用 patternKind 区分开：
-  // 已触发风险只统计 DETECTED_RISK，CHECKLIST 单独一个筛选项。
+  // [口径] patternKind 区分当前 Case 风险模式与通用检查清单；
+  // analysisStatus 再区分 READY / ASSUMPTION_BASED / INSUFFICIENT_INPUT，
+  // 因此 ASSUMPTION_BASED 可以进入 "识别模式"，但不能伪装成 "已确认风险"。
   const detectedRiskPatterns = useMemo(
     () => patternResults.filter((p) => p.patternKind !== 'CHECKLIST'),
     [patternResults]
@@ -264,8 +264,11 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
                   : 'bg-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              已触发风险 ({detectedRiskPatterns.filter((p) => p.triggered).length})
+              已识别模式 ({detectedRiskPatterns.filter((p) => p.triggered).length})
             </button>
+            <span className="px-3 py-1 rounded text-xs font-medium bg-slate-900 border border-emerald-700/30 text-emerald-300" title="仅统计证据状态为 READY 且当前 Pattern 触发的模式；ASSUMPTION_BASED 不计入已确认风险。">
+              已确认风险 ({detectedRiskPatterns.filter((p) => p.triggered && p.analysisStatus === 'READY').length})
+            </span>
             <button
               onClick={() => setFilterMode('VETO')}
               className={`px-3 py-1 rounded text-xs font-medium cursor-pointer transition ${
@@ -422,7 +425,11 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
                   </button>
 
                   <div className="shrink-0 flex flex-col items-end justify-center gap-1 pr-2 py-2">
-                    {pattern.patternKind === 'CHECKLIST' ? (
+                    {pattern.analysisStatus === 'INSUFFICIENT_INPUT' ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30">待补证据</span>
+                    ) : pattern.analysisStatus === 'ASSUMPTION_BASED' ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-500/10 text-orange-300 border border-orange-500/30">假设计算</span>
+                    ) : pattern.patternKind === 'CHECKLIST' ? (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                         检查清单
                       </span>
@@ -475,6 +482,8 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
                 <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">
                   置信度: {activePattern.confidence}
                 </span>
+                {activePattern.analysisStatus === 'INSUFFICIENT_INPUT' && <span className="text-xs px-2 py-0.5 rounded bg-amber-950/50 text-amber-300 border border-amber-700/50">待补证据</span>}
+                {activePattern.analysisStatus === 'ASSUMPTION_BASED' && <span className="text-xs px-2 py-0.5 rounded bg-orange-950/40 text-orange-300 border border-orange-700/50">假设计算 · 不形成VETO</span>}
                 {activePattern.trace?.length ? (
                   <button type="button" onClick={() => setTracePatternId(activePattern.id)} className="inline-flex items-center gap-1.5 rounded border border-cyan-700/50 bg-cyan-950/30 px-2 py-1 text-[10px] font-semibold text-cyan-300 hover:bg-cyan-900/40 cursor-pointer">
                     <FileSearch className="h-3 w-3" /> 查看 Trace
@@ -501,6 +510,17 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
             </div>
           )}
 
+          {activePattern.analysisStatus === 'INSUFFICIENT_INPUT' && (
+            <div className="rounded-lg border border-amber-700/60 bg-amber-950/20 p-3 text-xs text-amber-200">
+              <b className="text-amber-300">本模式暂不形成确定性结论。</b> 缺少：{activePattern.missingInputs?.join('、') || '关键输入'}。当前不会把缺参结果计为 TRIGGERED，也不会触发 VETO。
+            </div>
+          )}
+          {activePattern.analysisStatus === 'ASSUMPTION_BASED' && (
+            <div className="rounded-lg border border-orange-700/60 bg-orange-950/20 p-3 text-xs text-orange-200">
+              <b className="text-orange-300">本模式为假设计算。</b> 当前存在默认/文本推断输入，结果仅用于方案筛选与验证优先级，不作为已确认故障或 VETO。
+            </div>
+          )}
+
           {/* 核心物理链条 */}
           <div>
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -516,7 +536,7 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
           <div>
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>确定性物理计算输出 (Deterministic Engine Computed)</span>
+              <span>{activePattern.analysisStatus === 'READY' ? '确定性物理计算输出 (Deterministic Engine Computed)' : '物理计算参考输出 (非确定性)'}</span>
             </h3>
             <div className="bg-slate-950 rounded-lg border border-slate-800 overflow-hidden text-xs">
               <table className="w-full text-left">

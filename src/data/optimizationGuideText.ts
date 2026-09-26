@@ -36,7 +36,7 @@ export const AI_OPTIMIZATION_GUIDE_TEXT = `# 车规级 ECU 硬件/电机/机器�
 │   │   ├── deterministicPrecomputation.ts  # 【核心调度】确定性前置计算总控 DAG
 │   │   ├── thermalCascadeEngine.ts         # 【物理级联】多物理场热-电-内阻-阈值温漂级联计算
 │   │   ├── bldcDeterministicEngine.ts      # 【BLDC 判定】母线泵升与高温米勒感应门极直通
-│   │   ├── motorPhysicsEngine.ts           # 【底层力学】动能转化、微积分滤波、RC Snubber 物理推导
+│   │   ├── src/physics/motorPhysicsEngine.ts           # 【底层力学】动能转化、微积分滤波、RC Snubber 物理推导
 │   │   ├── robotJointDeterministicEngine.ts # 【机器人关节】谐波减速器机械背隙、传动柔度判定
 │   │   ├── robotJointResonance.ts          # 【机器人力学】双质量共振频率与控制截止频率方程
 │   │   ├── scenarioDomainEngine.ts         # 【领域解析】将工况分类分流至 BLDC/EMC/Thermal/Robot 等主域
@@ -49,7 +49,7 @@ export const AI_OPTIMIZATION_GUIDE_TEXT = `# 车规级 ECU 硬件/电机/机器�
 │   │   ├── expertEngine.ts                 # 【专家系统总中枢】综合决策生成、一票否决(VETO)与装配
 │   │   ├── bldcMotorExpert.ts              # BLDC 领域专家支柱、失效模式与根因假设树
 │   │   ├── robotJointExpert.ts             # 机器人关节领域专家知识库与减速器工况机理
-│   │   ├── decisionPillars.ts              # 质量与功能安全基石 (降额规范、EMC BCI 注入等)
+│   │   ├── decisionPillars.ts              # LEGACY：历史模板，仅供兼容/文档，不参与运行时案例分析
 │   │   └── presetScenarios.ts              # 15+ 车规与机器人标杆工况库 (含急停直通、机械谐振等)
 │   └── components/
 │       ├── DecisionCockpitView.tsx         # 决策驾驶舱 (核心判定、VETO审查、CTSQL雷达图、双时间轴)
@@ -82,7 +82,7 @@ export const AI_OPTIMIZATION_GUIDE_TEXT = `# 车规级 ECU 硬件/电机/机器�
   - 0 <= Delta_V < 0.5V：MARGINAL (濒危预警)
   - Delta_V < 0：CRITICAL (击穿直通炸管，触发 VETO)
 
-### (2) 电机急停母线泵升能量倒灌模型 (motorPhysicsEngine.ts)
+### (2) 电机急停母线泵升能量倒灌模型 (src/physics/motorPhysicsEngine.ts)
 - 系统旋转动能：E_regen = 0.5 * J * omega^2
 - 动能向母线吸收电容转移后的泵升电压峰值：
   V_peak = sqrt(V_bus_nominal^2 + (2 * E_regen * eta) / C_bus)
@@ -100,7 +100,7 @@ export const AI_OPTIMIZATION_GUIDE_TEXT = `# 车规级 ECU 硬件/电机/机器�
 若您把源码包发送给其他先进大语言模型（如 Claude 3.7 Sonnet、GPT-4o、DeepSeek-R1），推荐输入以下具体优化课题：
 
 0. **【最高优先级】模式引擎"触发条件与工况脱钩"排查**（2026-09 审查新增）：
-   - 历史教训：bldcPatternEngine.ts 里 P009/P010/P011/P018 曾经长期是 triggered:true 硬编码，
+   - 历史教训：src/domains/bldc/patterns/ 中 P009/P010/P011/P018 曾经长期是 triggered:true 硬编码，
      不管工况是什么、case内容是什么都会无条件命中，导致"工况变了、分析结论基本不变"——这是
      比下面几条数学模型精度问题严重得多的根因级缺陷，且不容易从表面代码走查发现(硬编码的
      triggered:true 看起来跟其它正常写法没有区别，必须结合 verify-engines.ts 跑真实工况对比
@@ -127,7 +127,7 @@ export const AI_OPTIMIZATION_GUIDE_TEXT = `# 车规级 ECU 硬件/电机/机器�
    - 优化方向：进一步丰富 ISO 26262 硬件指标定量分配算法（如自动依据 FMEDA 格式计算单点失效度量 SPFM 和潜伏失效度量 LFM）。
 4. **状态提取健壮性与 TypeScript 类型精简**：
    - 对 src/types.ts 和 v4Models.ts 结构进行更优雅的泛型解耦与运行时校验（如 Zod Schema 接入）。
-   - 已知遗留问题：bldcPatternEngine.ts 顶部 import 的 UnifiedEngineeringModel 类型未被实际使用，
+   - 已知遗留问题：BLDC domain facade 中的历史类型依赖 类型未被实际使用，
      真实输入来自 scenarioDerived.ts 单独的一套提取逻辑，跟 unifiedStateExtractor.ts 是两条平行、
      没有交叉验证的路径，属于本轮修复范围之外的架构级问题，建议单独立项处理，不要在小修小补中
      顺带动它。

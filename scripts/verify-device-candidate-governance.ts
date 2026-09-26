@@ -5,7 +5,8 @@ import {
   getMosfetMappingOptions,
 } from '../src/utils/deviceParameterCandidates';
 import { MOSFET_PARAM_TEMPLATE } from '../src/data/deviceTemplate';
-import { getAllEngineeringMeasurementFields } from '../src/utils/scenarioDomainEngine';
+import { buildDeviceCandidateImportPayload, getAutoImportCandidateIds } from '../src/utils/deviceCandidateImport';
+import { getAllEngineeringMeasurementFields, getDeviceSpecificationMeasurementFields } from '../src/utils/scenarioDomainEngine';
 import {
   importDeviceFromJson,
   saveDevice,
@@ -21,6 +22,10 @@ if (duplicateRaw.length) throw new Error('MOSFET_FIELD_TABLE rawPath 重复: ' +
 const missingRaw = MOSFET_FIELD_TABLE.filter(spec => !spec.rawPath.includes('→') && getPath(MOSFET_PARAM_TEMPLATE, spec.rawPath) === undefined);
 if (missingRaw.length) throw new Error('字段表路径不在 MOSFET 模板: ' + missingRaw.map(spec => spec.rawPath).join(', '));
 const schemaKeys = new Set(getAllEngineeringMeasurementFields().map(field => field.key));
+const deviceSpecKeys = new Set(getDeviceSpecificationMeasurementFields().map(field => field.key));
+for (const key of ['vdsRatingV','rdsOnMilliOhm','vthMinV','cgdPf','cgsPf','gateChargeQgNc','qgdNc','turnOffDelayNs','fallTimeNs','diodeForwardVoltageV','qrrNc','soaShortCircuitTimeUs','easEnergyMj','idRatingA','idPulseRatingA','tjMaxC','vbrDssMinV','pdMaxW','cissPf','cossPf','qgsNc','qswNc','gatePlateauV','turnOnDelayNs','riseTimeNs','trrNs','irrPeakA','rthJcCPerW','rthJaCPerW','dvdtCapabilityVns','didtCapabilityANs','gateVoltageMaxV','gateVoltageMinV','esdRatingKv','gateResistanceOhm','idssUa','igssNa','easCurrentA']) {
+  if (!deviceSpecKeys.has(key)) throw new Error(`缺失器件规格字段: ${key}`);
+}
 for (const spec of MOSFET_FIELD_TABLE) {
   if (spec.targetKey && !schemaKeys.has(spec.targetKey)) throw new Error(`targetKey 不存在于工程 schema: ${spec.targetKey}`);
   if (spec.targetKey && !MOSFET_TARGET_CATEGORY_BY_KEY[spec.targetKey]) throw new Error(`target category registry 缺少: ${spec.targetKey}`);
@@ -45,6 +50,29 @@ const imported = importDeviceFromJson(JSON.stringify({
 if (!imported.device) throw new Error(imported.error || 'import device failed');
 saveDevice(imported.device);
 const device = loadDevices()[0];
+const expandedDevice = importDeviceFromJson(JSON.stringify({
+  deviceType: 'MOSFET', partNumber: 'GOV-EXPANDED', manufacturer: 'T', package: 'QFN', aecqGrade: 'AEC-Q101', channelType: 'N-CH',
+  maxRatings: { id: { value: 50, unit: 'A', stat: 'MAX' }, idPulse: { value: 200, unit: 'A', stat: 'MAX' }, tjMax: { value: 175, unit: '℃', stat: 'MAX' }, powerDissipation: { value: 70, unit: 'W', stat: 'MAX' }, easCurrent: { value: 30, unit: 'A', stat: 'MAX' } },
+  staticParams: { vbrDss: { value: 40, unit: 'V', stat: 'MIN' }, idss: { value: 5, unit: 'μA', stat: 'MAX' }, igss: { value: 100, unit: 'nA', stat: 'MAX' }, gateResistance: { value: 0.8, unit: 'Ω', stat: 'TYP' } },
+  capacitanceParams: { ciss: { value: 1764, unit: 'pF', stat: 'TYP' }, coss: { value: 452, unit: 'pF', stat: 'TYP' } },
+  gateCharge: { qgs: { value: 4.8, unit: 'nC', stat: 'TYP' }, qsw: { value: 8, unit: 'nC', stat: 'TYP' }, gatePlateauV: { value: 3, unit: 'V', stat: 'TYP' } },
+  switchingParams: { tr: { value: 25, unit: 'ns', stat: 'TYP' }, tdOn: { value: 18, unit: 'ns', stat: 'TYP' }, tdOff: { value: 15, unit: 'ns', stat: 'TYP' }, tf: { value: 12, unit: 'ns', stat: 'TYP' }, dvdtCapability: { value: 5, unit: 'V/ns', stat: 'MAX' }, didtCapability: { value: 2, unit: 'A/ns', stat: 'MAX' } },
+  thermalParams: { rthJc: { value: 2.14, unit: '℃/W', stat: 'MAX' }, rthJa: { value: 30, unit: '℃/W', stat: 'TYP' } },
+  bodyDiode: { trr: { value: 23, unit: 'ns', stat: 'TYP' }, irrM: { value: 10, unit: 'A', stat: 'TYP' } },
+  protectionAndRobustness: { gateVoltageMax: { value: 20, unit: 'V', stat: 'MAX' }, esdRating: { value: 2, unit: 'kV', stat: 'MAX' } },
+}));
+if (!expandedDevice.device) throw new Error(expandedDevice.error || 'expanded device import failed');
+const expanded = buildDeviceParameterCandidates(expandedDevice.device, schemaKeys);
+for (const [path,key] of [['maxRatings.id','idRatingA'],['maxRatings.idPulse','idPulseRatingA'],['maxRatings.tjMax','tjMaxC'],['maxRatings.powerDissipation','pdMaxW'],['capacitanceParams.ciss','cissPf'],['capacitanceParams.coss','cossPf'],['gateCharge.qgs','qgsNc'],['gateCharge.qsw','qswNc'],['gateCharge.gatePlateauV','gatePlateauV'],['switchingParams.tr','riseTimeNs'],['switchingParams.tdOn','turnOnDelayNs'],['thermalParams.rthJc','rthJcCPerW'],['thermalParams.rthJa','rthJaCPerW'],['bodyDiode.trr','trrNs'],['bodyDiode.irrM','irrPeakA'],['protectionAndRobustness.gateVoltageMax','gateVoltageMaxV'],['protectionAndRobustness.esdRating','esdRatingKv']] as const) {
+  const hit = expanded.find(candidate => candidate.rawPath === path);
+  if (!hit || hit.targetKey !== key || hit.mappingStatus !== 'mapped' || !hit.importable) throw new Error(`自动映射失败: ${path} -> ${key}`);
+}
+const autoIds = getAutoImportCandidateIds(expanded, {});
+const autoPayload = buildDeviceCandidateImportPayload(expanded, autoIds, {}, expandedDevice.device!.partNumber);
+if (autoPayload.invalidCandidates.length || autoPayload.importedIds.length < 10) throw new Error(`高置信度自动导入数量异常: ${autoPayload.importedIds.length}`);
+if (autoPayload.values['junctionTempC'] !== undefined) throw new Error('Tjmax 错误投影为 junctionTempC');
+if (autoPayload.values['tjMaxC'] !== 175 || autoPayload.values['qgsNc'] !== 4.8) throw new Error('器件规格直接值未自动写入对应 schema');
+
 const candidates = buildDeviceParameterCandidates(device, new Set(['qgdNc']));
 const variant = candidates.find(candidate => candidate.rawPath === 'maxRatings.vds.variants');
 const extra = candidates.find(candidate => candidate.rawPath === 'extractionHints.unmappedImportantData.uis');

@@ -684,8 +684,8 @@ export interface CopilotAnalysisResult {
   next24HourPlan?: Next24HourPlan; // 未来24小时行动计划与量化标准 (P0-4)
   edrRecord?: EngineeringDecisionRecord; // 工程决策单 EDR 标准记录 (P0-5)
   redTeamChallenge?: RedTeamAuditChallenge; // 逆向质疑与盲区挑战 (P1)
-  // [模板内容显式标注] 下面 5 大块由内置通用模板（decisionPillars / getRobotJointPillars）填充，
-  // 并非针对当前 case 的专属分析。UI 必须据此显式提示用户，避免引用模板示例数字。
+  // [模板/参考内容显式标注] 历史通用模板仅保留在 data/legacy，运行时当前 case 由 scenarioDynamic 基于 issue/context 动态生成。
+  // 这些字段不是当前 case 的确定性结论；UI 仍应保持模板/参考性质标识，禁止把历史示例数字当作当前事实。
   templateContentNotice?: { blocks: string[]; message: string };
   context?: ProjectContext;
   source?: 'deterministic-expert' | 'custom-llm' | string;

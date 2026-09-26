@@ -11,17 +11,46 @@ export interface DeviceCandidateImportPayload {
 }
 
 /** 唯一工程写入口：再次校验映射、数值、重复目标和已有值，阻止 null/错 key/覆盖。 */
+
+/**
+ * 返回“设为当前器件”时可以无人工选择直接带入的候选：
+ * 仅允许高置信度、datasheet直接值、已有明确工程映射的数值参数；
+ * 曲线估读/DERIVED/未映射参数继续要求人工确认；datasheet 直接标量即使来自曲线对象的明确表格点，也可自动带入，完整曲线仍保留。
+ */
+export function getAutoImportCandidateIds(
+  candidates: DeviceParameterCandidate[],
+  existingValues?: Record<string, number | string>,
+): Set<string> {
+  return new Set(
+    candidates
+      .filter((candidate) =>
+        candidate.mappingStatus === 'mapped' &&
+        candidate.importable &&
+        candidate.sourceType === 'DATASHEET_DIRECT' &&
+        candidate.valueType !== 'ESTIMATE' &&
+        candidate.confidence >= 0.9 &&
+        typeof candidate.targetKey === 'string' &&
+        candidate.targetKey.length > 0 &&
+        typeof candidate.value === 'number' &&
+        Number.isFinite(candidate.value) &&
+        existingValues?.[candidate.targetKey] == null,
+      )
+      .map((candidate) => candidate.id),
+  );
+}
+
 export function buildDeviceCandidateImportPayload(
   candidates: DeviceParameterCandidate[],
   selectedIds: ReadonlySet<string>,
   existingValues: Record<string, number | string> | undefined,
   deviceLabel: string,
   enteredAt = new Date().toISOString(),
+  confirmedReviewIds: ReadonlySet<string> = new Set(),
 ): DeviceCandidateImportPayload {
   const selected = candidates.filter(candidate => selectedIds.has(candidate.id));
   const invalidCandidates: string[] = [];
   const valid = selected.filter(candidate => {
-    const ok = candidate.mappingStatus === 'mapped' && candidate.importable &&
+    const ok = candidate.mappingStatus === 'mapped' && (candidate.importable || confirmedReviewIds.has(candidate.id)) &&
       typeof candidate.targetKey === 'string' && candidate.targetKey.length > 0 &&
       typeof candidate.value === 'number' && Number.isFinite(candidate.value);
     if (!ok) invalidCandidates.push(candidate.id);

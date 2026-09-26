@@ -1,6 +1,6 @@
 import { IssueInput, MeasurementSource, ProjectContext } from '../types';
 import { UnifiedEngineeringModel } from '../types/v4Models';
-import { calculateBusPumping, checkMillerRisk } from './motorPhysicsEngine';
+import { calculateBusPumping, checkMillerRisk } from '../physics/motorPhysicsEngine';
 import { extractUnifiedEngineeringModel, isDecisionReadyValuePresent } from './unifiedStateExtractor';
 
 export type DeterministicCalculationStatus = 'CALCULATED' | 'INSUFFICIENT_INPUT';
