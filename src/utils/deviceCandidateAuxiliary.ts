@@ -1,6 +1,15 @@
 import type { DeviceEntry } from './deviceLibrary';
 import type { CandidateSourceType, CandidateValueType, DeviceParameterCandidate, DeviceParameterCategory, FieldSpec, MappingStatus } from './deviceParameterCandidates';
 import { MOSFET_FIELD_TABLE } from './mosfetFieldTable';
+import { readCurvePoint } from './deviceLibrary';
+import { getAllEngineeringMeasurementFields } from './scenarioDomainEngine';
+
+/** 工程字段 key -> 字段定义（用于校验 AI 自己声明的 targetKey 是否存在、单位是否一致）。 */
+const ENGINEERING_FIELD_BY_KEY = new Map(getAllEngineeringMeasurementFields().map((field) => [field.key, field]));
+
+function normalizeUnit(unit?: string): string {
+  return String(unit || '').replace(/μ/g, 'u').replace(/Ω/g, 'ohm').replace(/℃/g, 'C').replace(/\s+/g, '').toLowerCase();
+}
 
 const finiteNumber = (value: unknown): number | undefined => {
   if (value === null || value === undefined || value === '') return undefined;
@@ -44,7 +53,10 @@ export function buildVariantSummaryCandidates(device: DeviceEntry, fieldTable: F
   });
 }
 
-export function buildGenericUnmappedCandidates(device: DeviceEntry): DeviceParameterCandidate[] {
+export function buildGenericUnmappedCandidates(
+  device: DeviceEntry,
+  currentEngineeringFieldKeys?: ReadonlySet<string>,
+): DeviceParameterCandidate[] {
   const items = (device.raw as any)?.extractionHints?.unmappedImportantData;
   if (!Array.isArray(items)) return [];
   const used = new Set<string>();
@@ -57,16 +69,32 @@ export function buildGenericUnmappedCandidates(device: DeviceEntry): DeviceParam
     if (used.has(rawKey)) rawKey = `${rawKey}_${index + 1}`;
     used.add(rawKey);
     const categoryNames: DeviceParameterCategory[] = ['功率级','静态','电容','栅极驱动','动态','热','二极管','保护/可靠性','SOA','其它'];
+    // AI 可以在 unmappedImportantData 里声明 targetKey，但它**只用于把该条放进"已匹配需工程确认"**：
+    // 必须存在于工程 schema、单位一致、（若给了当前字段集）确实在集合内；
+    // 并且 importable 恒为 false —— 未映射区的东西绝不允许因为 AI 自己声明了一个 key 就自动写进工程。
+    const declaredTarget = typeof item.targetKey === 'string' ? item.targetKey.trim() : '';
+    const targetField = declaredTarget ? ENGINEERING_FIELD_BY_KEY.get(declaredTarget) : undefined;
+    const unitCompatible = !targetField?.unit || !item.unit || normalizeUnit(targetField.unit) === normalizeUnit(String(item.unit));
+    const allowedTarget = declaredTarget
+      && targetField
+      && unitCompatible
+      && (!currentEngineeringFieldKeys || currentEngineeringFieldKeys.has(declaredTarget))
+      ? declaredTarget
+      : null;
     return [{
       id: `${device.id}:extractionHints.unmappedImportantData.${rawKey}:${item.source || 'value'}:${String(displayValue)}`,
-      rawPath: `extractionHints.unmappedImportantData.${rawKey}`, targetKey: null,
+      rawPath: `extractionHints.unmappedImportantData.${rawKey}`, targetKey: allowedTarget,
       label: String(item.label || item.name || item.key || '未映射资料参数'), unit: typeof item.unit === 'string' ? item.unit : undefined, value: displayValue,
       sourceType: asSourceType(item.sourceType, 'DATASHEET_DIRECT'), valueType: asValueType(item.stat, 'TYP'),
       confidence: Math.max(0, Math.min(1, finiteNumber(item.confidence) ?? 0.8)),
       sourceRef: typeof item.source === 'string' ? item.source : undefined,
       conditions: item.conditions && typeof item.conditions === 'object' ? item.conditions : undefined, evidence: 'extractionHints.unmappedImportantData',
       note: typeof item.note === 'string' ? item.note : 'AI 明确提取但当前模板/工程 schema 未提供安全映射。',
-      importable: false, mappingStatus: 'unmapped', category: categoryNames.includes(item.category) ? item.category : '其它',
+      // 恒为 false：AI 声明的映射只降低人工成本，不降低确认门槛。
+      importable: false,
+      mappingStatus: allowedTarget ? 'mapped' : 'unmapped',
+      candidateKind: allowedTarget ? 'DERIVED_OR_ESTIMATE' : 'NO_MAPPING',
+      category: categoryNames.includes(item.category) ? item.category : '其它',
     } as DeviceParameterCandidate];
   });
 }
@@ -80,8 +108,9 @@ export function deriveCgdFromCrss(device: DeviceEntry, currentFieldKeys?: Readon
 
   const crss = rawPath(device.raw, 'capacitanceParams.crss') as any;
   const points = Array.isArray(crss?.points) ? crss.points : [];
-  const point = points.find((p: any) => Number(p?.x) === 25) || points[0];
-  const value = finiteNumber(point?.y);
+  const entries = points.map((p: any) => ({ xy: readCurvePoint('capacitanceParams.crss', p) }));
+  const chosen = entries.find((entry: { xy: { x?: number; y?: number } }) => entry.xy.x === 25) || entries[0];
+  const value = chosen?.xy.y === undefined ? undefined : finiteNumber(chosen.xy.y);
   if (value === undefined) return null;
 
   const mappingStatus: MappingStatus = currentFieldKeys?.has('cgdPf') ? 'mapped' : currentFieldKeys ? 'unmapped' : 'mapped';
@@ -96,7 +125,7 @@ export function deriveCgdFromCrss(device: DeviceEntry, currentFieldKeys?: Readon
     valueType: 'ESTIMATE',
     confidence: 0.72,
     sourceRef: typeof crss?.source === 'string' ? crss.source : undefined,
-    conditions: { ...(crss?.conditions || {}), vds: point?.x },
+    conditions: { ...(crss?.conditions || {}), vds: chosen?.xy.x },
     evidence: 'Crss 曲线选点 → Cgd 工程近似候选',
     note: '这是工程近似，不是 datasheet 直接 Cgd；必须由工程师确认后再进入工程输入。',
     // DERIVED 只能进入“需确认”区，不能静默写入工程。
@@ -112,8 +141,9 @@ export function deriveCgs(device: DeviceEntry, currentFieldKeys?: ReadonlySet<st
   const crss = rawPath(device.raw, 'capacitanceParams.crss') as any;
   const cissValue = finiteNumber(ciss?.value);
   const points = Array.isArray(crss?.points) ? crss.points : [];
-  const point = points.find((p: any) => Number(p?.x) === 25) || points[0];
-  const crssValue = finiteNumber(point?.y);
+  const cgsEntries = points.map((p: any) => ({ xy: readCurvePoint('capacitanceParams.crss', p) }));
+  const cgsChosen = cgsEntries.find((entry: { xy: { x?: number; y?: number } }) => entry.xy.x === 25) || cgsEntries[0];
+  const crssValue = cgsChosen?.xy.y === undefined ? undefined : finiteNumber(cgsChosen.xy.y);
   if (cissValue === undefined || crssValue === undefined || cissValue <= crssValue) return null;
 
   const mappingStatus: MappingStatus = currentFieldKeys?.has('cgsPf') ? 'mapped' : currentFieldKeys ? 'unmapped' : 'mapped';
@@ -128,7 +158,7 @@ export function deriveCgs(device: DeviceEntry, currentFieldKeys?: ReadonlySet<st
     valueType: 'ESTIMATE',
     confidence: 0.70,
     sourceRef: ciss?.source || crss?.source,
-    conditions: { ...(ciss?.conditions || {}), vds: point?.x },
+    conditions: { ...(ciss?.conditions || {}), vds: cgsChosen?.xy.x },
     evidence: 'Ciss - Crss 派生候选',
     note: '仅作为工程近似候选，不是 datasheet 直接 Cgs。',
     // DERIVED 只能进入“需确认”区，不能静默写入工程。

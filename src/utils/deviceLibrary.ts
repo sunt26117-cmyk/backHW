@@ -202,15 +202,47 @@ export function applyCandidateDecisions<T extends {
   });
 }
 
+/**
+ * 曲线点坐标的**唯一**解析入口。
+ * 真实提取结果的点字段名并不统一：有的给 x/y，有的给 tj/rdsOn、vds/crss。
+ * 此前各处只认 x/y，遇到别名形态整条曲线读不出来，最终被下游判成"器件未提供该参数"。
+ */
+export const CURVE_POINT_ALIASES: Record<string, { x: string[]; y: string[] }> = {
+  'staticParams.rdsOn': { x: ['x', 'tj'], y: ['y', 'rdsOn'] },
+  'staticParams.vth': { x: ['x', 'tj'], y: ['y', 'vth'] },
+  'capacitanceParams.crss': { x: ['x', 'vds'], y: ['y', 'crss'] },
+};
+
+export function readCurvePoint(rawPath: string, point: unknown): { x?: number; y?: number } {
+  if (!point || typeof point !== 'object') return {};
+  const map = CURVE_POINT_ALIASES[rawPath] ?? { x: ['x'], y: ['y'] };
+  const pick = (keys: string[]): number | undefined => {
+    for (const key of keys) {
+      const raw = (point as Record<string, unknown>)[key];
+      // 注意 null/'' 必须跳过：Number(null) === 0 会把"没这个坐标"伪装成真实的 0。
+      if (raw === null || raw === undefined || raw === '') continue;
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
+  };
+  return { x: pick(map.x), y: pick(map.y) };
+}
+
 /** 完整性体检：关键曲线参数是否录够了随工况变化的点。 */
 export function validateDeviceCompleteness(device: DeviceEntry): string[] {
   const warnings: string[] = [];
   const r = device.raw as any;
 
-  const curvePoints = (obj: any): Array<{ x: number; y: number | null }> =>
-    Array.isArray(obj && obj.points) ? obj.points.filter((p: any) => p && p.y !== null && p.y !== undefined && Number.isFinite(Number(p.y))) : [];
+  const curvePoints = (obj: any, rawPath: string): Array<{ x: number; y: number | null }> =>
+    Array.isArray(obj && obj.points)
+      ? obj.points
+          .map((p: any) => readCurvePoint(rawPath, p))
+          .filter((p: { x?: number; y?: number }) => p.y !== undefined && p.y !== null && Number.isFinite(Number(p.y)))
+          .map((p: { x?: number; y?: number }) => ({ x: p.x as number, y: p.y as number }))
+      : [];
 
-  const rdsPoints = curvePoints(r && r.staticParams && r.staticParams.rdsOn);
+  const rdsPoints = curvePoints(r && r.staticParams && r.staticParams.rdsOn, 'staticParams.rdsOn');
   const rdsHasHighTemp = rdsPoints.some((p) => Number(p.x) >= 125);
   if (rdsPoints.length < 2) {
     warnings.push('rdsOn 曲线点数不足（<2 个 Tj 点），结温迭代无法插值，会退回保守假设。');
@@ -218,12 +250,12 @@ export function validateDeviceCompleteness(device: DeviceEntry): string[] {
     warnings.push('rdsOn 缺少 >=125℃ 的点，高温降额/结温上限判定不可靠。');
   }
 
-  const crssPoints = curvePoints(r && r.capacitanceParams && r.capacitanceParams.crss);
+  const crssPoints = curvePoints(r && r.capacitanceParams && r.capacitanceParams.crss, 'capacitanceParams.crss');
   if (crssPoints.length < 2) {
     warnings.push('crss(Cgd) 曲线点数不足（<2 个 Vds 点），米勒位移电流计算不准。');
   }
 
-  const vthPoints = curvePoints(r && r.staticParams && r.staticParams.vth);
+  const vthPoints = curvePoints(r && r.staticParams && r.staticParams.vth, 'staticParams.vth');
   if (vthPoints.length < 2) {
     warnings.push('vth 曲线点数不足（<2 个 Tj 点），米勒直通裕量未计入温漂。');
   }
@@ -270,9 +302,11 @@ export function getDeviceCurve(device: DeviceEntry, key: 'rdsOn' | 'crss' | 'vth
       ? r && r.capacitanceParams && r.capacitanceParams.crss
       : r && r.staticParams && r.staticParams.vth;
   if (!obj || !Array.isArray(obj.points)) return [];
+  const rawPath = key === 'rdsOn' ? 'staticParams.rdsOn' : key === 'crss' ? 'capacitanceParams.crss' : 'staticParams.vth';
   return obj.points
-    .filter((p: any) => p && p.x !== null && p.x !== undefined && p.y !== null && p.y !== undefined && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
-    .map((p: any) => ({ x: Number(p.x), y: Number(p.y) }));
+    .map((p: any) => readCurvePoint(rawPath, p))
+    .filter((p: { x?: number; y?: number }) => p.x !== undefined && p.y !== undefined && Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p: { x?: number; y?: number }) => ({ x: p.x as number, y: p.y as number }));
 }
 
 

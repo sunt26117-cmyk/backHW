@@ -111,4 +111,26 @@ const badPayload = buildDeviceCandidateImportPayload(badCands, new Set([partCand
 eq('字符串不得写入数值字段', badPayload.values.vdsRatingV, undefined);
 ok_(badPayload.invalidCandidates.includes(partCand.id), '类型不匹配必须记为 invalid（不能静默丢弃）');
 
+// ----------------------------------------------------- 4) AI 在 unmappedImportantData 里声明 targetKey
+// 只允许进入"已匹配需工程确认"，绝不允许自动导入（现场曾出现"AI 自己指定 key 就自动写工程"的风险）
+const aiDeclared = importDeviceFromJson(JSON.stringify({
+  deviceType: 'MOSFET', partNumber: 'AI-DECLARED-TARGET', manufacturer: 'T', package: 'QFN',
+  maxRatings: { vds: { value: 40 } },
+  extractionHints: { unmappedImportantData: [
+    { key: 'someCap', label: '某电容', unit: 'pF', value: '1.2k multicondition', targetKey: 'cgsPf', sourceType: 'DATASHEET_DIRECT', confidence: 0.95 },
+  ] },
+}));
+if (!aiDeclared.device) throw new Error(aiDeclared.error || 'ai-declared import failed');
+saveDevice(aiDeclared.device);
+const aiCands = buildDeviceParameterCandidates(aiDeclared.device, new Set(fieldKeys));
+const aiCand = aiCands.find((c) => /someCap/.test(c.rawPath));
+if (!aiCand) throw new Error('未生成 AI 声明 targetKey 的候选');
+eq('AI 声明 targetKey -> 进入已匹配区', aiCand.mappingStatus, 'mapped');
+eq('AI 声明 targetKey -> 仍需人工确认（不得自动导入）', aiCand.importable, false);
+eq('AI 声明 targetKey -> 分类为需确认候选', aiCand.candidateKind, 'DERIVED_OR_ESTIMATE');
+eq('AI 声明 targetKey -> 不在自动导入集', getAutoImportCandidateIds(aiCands, {}).has(aiCand.id), false);
+// 声明的是数值字段但 value 是字符串 -> 确认也应如实报 invalid（字符串不能写进数值字段）
+const aiConfirm = buildDeviceCandidateImportPayload(aiCands, new Set([aiCand.id]), {}, 'X', undefined, new Set([aiCand.id]), {}, 'USER_MEASURED');
+ok_(aiConfirm.invalidCandidates.includes(aiCand.id), '字符串不得写进数值字段（即使 AI 声明了 targetKey）');
+
 console.log('device-import-auto-apply: PASS');

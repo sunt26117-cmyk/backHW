@@ -44,14 +44,18 @@ for (const spec of MOSFET_FIELD_TABLE) {
   if (!DEVICE_PARAM_PROMPT.includes(spec.targetKey)) throw new Error(`Prompt 文本未包含该 targetKey: ${spec.targetKey}`);
 }
 // 派生-only / variants 恢复的字段必须出现在需确认清单（模板里没有直源）
-for (const key of ['cgsPf', 'gateVoltageMinV']) {
+for (const key of ['cgsPf']) {
   if (!CONFIRM_REQUIRED_TARGET_KEYS.includes(key)) throw new Error(`派生字段必须列入需确认清单: ${key}`);
   if (DIRECT_MAPPABLE_TARGET_KEYS.includes(key)) throw new Error(`派生字段不得列入可直接导入清单: ${key}`);
 }
 // Prompt 必须把 cgdPf 的双来源讲清楚（CgdDirect 直给 vs Crss 换算派生）
 if (!/cgdDirect/.test(DEVICE_PARAM_PROMPT) || !/Crss/.test(DEVICE_PARAM_PROMPT)) throw new Error('Prompt 未区分 cgdPf 的直给来源与 Crss 派生来源');
-// Prompt 必须写明 gateVoltageMinV 是从 gateVoltageMax 的负向 variant 恢复的
+// gateVoltageMinV 不是"物理推导"出来的，而是 datasheet 负向 VGS 额定的原样恢复：
+// Prompt 必须如实说明它的数值来源（避免把它当作工程推导值而误判为可自动导入的风险）。
 if (!/gateVoltageMinV/.test(DEVICE_PARAM_PROMPT) || !/variant/.test(DEVICE_PARAM_PROMPT)) throw new Error('Prompt 未说明 gateVoltageMinV 由 variants 恢复');
+if (/gateVoltageMinV/.test(DEVICE_PARAM_PROMPT) && !/直接来自 datasheet.*负向/.test(DEVICE_PARAM_PROMPT)) {
+  throw new Error('Prompt 未明确 Gate 最小额定的数值来自 datasheet 负向额定，而不是物理推导');
+}
 // 只写 note 不写 variants 会让"双向额定/Gate 负向额定"在工程侧不可用（真实器件曾如此），必须明确要求
 if (!/gateVoltageMax\.variants/.test(DEVICE_PARAM_PROMPT) || !/负向额定/.test(DEVICE_PARAM_PROMPT)) {
   throw new Error('Prompt 未要求把 Gate 负向额定写入 gateVoltageMax.variants（只写 note 会导致 gateVoltageMinV 无候选）');

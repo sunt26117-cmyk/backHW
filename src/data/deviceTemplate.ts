@@ -24,7 +24,9 @@ export const CURVE_ESTIMATE_TARGET_KEYS: readonly string[] = MOSFET_FIELD_TABLE
   .map((spec) => spec.targetKey as string);
 
 /** ③ 只能作为「需工程确认」候选：由其它量派生或由 variants 恢复，字段表里没有直源。 */
-export const DERIVED_TARGET_KEYS: readonly string[] = ['cgsPf', 'gateVoltageMinV'];
+// gateVoltageMinV 的数值**直接来自 datasheet 的负向 VGS 额定**（从 gateVoltageMax.variants 恢复），
+// 不是由其它量推导出来，因此不列入"派生"清单；它仍是需人工确认的候选（deriveGateVoltageMin 里硬置 importable:false）。
+export const DERIVED_TARGET_KEYS: readonly string[] = ['cgsPf'];
 
 export const CONFIRM_REQUIRED_TARGET_KEYS: readonly string[] = [...CURVE_ESTIMATE_TARGET_KEYS, ...DERIVED_TARGET_KEYS];
 
@@ -46,13 +48,17 @@ export const DEVICE_PARAM_PROMPT = [
   '10. 同一参数存在多个温度/电压条件时全部保留，不要覆盖；单值字段无法容纳多个口径时，在该对象的 variants 数组中逐条保留。',
   '11. 如果同一参数同时出现 typ/min/max，value 只放一个主值，其他口径必须写入 variants[{value,unit,stat,conditions,source,sourceType,confidence,note}]，不得丢掉。',
   '12. 如果无法从原文确定参数名称、数值、单位、测试条件或来源位置，宁可留空并记录 documentAmbiguities，也不要猜测。',
+  '12A. 必须做“表格优先 + 全文交叉核对”：在把参数置为 null 前，必须同时检查 Quick reference data、Limiting values、Characteristics、Thermal characteristics、脚注/注释以及相关 Figure；同一物理量只要在任一表格中存在明确数值，就不得因为对应曲线无法读数而置 null。',
+  '12B. 必须识别行业符号别名：例如 EAS / UIS / E_DS(AL)S / drain-source avalanche energy / avalanche energy 视为同一雪崩能量物理量；不要因为厂商符号不同而漏提。',
+  '12C. 表格条件可能跨行或由同一组表头继承：若表格布局明确表明后续行继承前面的 VGS/VDS/ID 等条件，可以继承并填入 conditions；同时在 note 中说明“条件由表格组上下文继承”。只有确实无法判断时才降低 confidence 或置空。',
+  '12D. 必须区分“测试条件”与“能力额定”：例如 dI/dt=-100 A/μs 是 Qrr 的测试条件，不得自动写成 didtCapability；只有规格书明确给出 capability/rating 时才填能力字段。',
   '13. 数值不得只写在 note 里。若该数值在模板中有对应字段（或该字段的 variants），必须同时落到那个字段，note 仅作补充说明。**特别是 Gate 电压额定为双向范围时（例如 -20 V ~ +20 V）**：必须把负向额定作为 protectionAndRobustness.gateVoltageMax.variants 中的一条负值记录（value 为负数，stat / conditions / source / sourceType 与正向一致），不能只写 note —— 工程侧要从 variants 恢复 gateVoltageMinV，只写 note 会让这个值在工程侧完全不可用。同理，任何“范围/双向/多条件”额定值都必须进 variants 而不是进 note。',
   '',
   '【重点提取范围】',
-  'A. 最大额定：VDS、ID、ID pulse、TJmax、Tstg、PD、EAS/UIS、雪崩电流等；',
+  'A. 最大额定：VDS、ID、ID pulse、TJmax、Tstg、PD、EAS/UIS/EDS(AL)S、雪崩电流等；优先读取 Limiting values/Quick reference 中的直接额定值，再参考 Avalanche Figure。',
   'B. 静态：RDS(on) 及其 Tj/VGS/ID 条件、VGS(th) 及温度变化、V(BR)DSS、IDSS、IGSS、内部 Gate 电阻 RG(int)；',
   'C. 电容：Ciss/Coss/Crss，尤其提取随 VDS 变化的曲线；Crss 可作为工程 Cgd 近似候选，但必须保留原始名称 Crss；',
-  'D. Gate charge：Qg、Qgs、Qgd、Qsw、平台电压及 gate-charge 曲线；',
+  'D. Gate charge：Qg、Qgs、Qgd、Qsw、平台电压及 gate-charge 曲线；如果规格书没有直接给 Qsw，但 Fig.13/Fig.14 有清晰的 Miller plateau 区，则可提取 gatePlateauV 作为 DATASHEET_GRAPH_ESTIMATE；否则留 null。',
   'E. 开关：td(on)、tr、td(off)、tf，连同 VDD/ID/RG/VGS 等测试条件；',
   'F. 二极管：Vf、Qrr、trr、Irrm、di/dt、Tj 等条件；',
   'G. 热：RthJC、RthJA、ZthJC(t)、功耗、封装/安装限制；',
@@ -62,14 +68,14 @@ export const DEVICE_PARAM_PROMPT = [
   '【数据完整性】',
   '每个可提取对象建议包含：value / unit / stat / conditions / source / sourceType / confidence / note。',
   '若一个参数是一条曲线，使用 points 数组，并保留 xAxis、xUnit、yUnit、conditions、source。',
-  'extractionHints.unmappedImportantData 用于承载模板之外但对工程判断有价值的数据；每项建议包含 key、label、value、unit、stat、conditions、source、sourceType、confidence、note。key 必须稳定且唯一，禁止把未映射数据丢掉。',
+  'extractionHints.unmappedImportantData 用于承载模板之外但对工程判断有价值的数据；每项建议包含 key、label、value、unit、stat、conditions、source、sourceType、confidence、note。若确有安全的现有工程字段，可为该项提供 targetKey（会使其进入“已匹配需工程确认”，仍需工程师确认，不会自动写入工程）；但绝不能为了能自动导入而随意指定 targetKey。key 必须稳定且唯一，禁止把未映射数据丢掉。',
   '若规格书仅给典型值，不要把 typ 自动写成 max；反之亦然。',
   '若文档出现不同版本/脚注，优先保留原始脚注并放入 note。',
   '',
   '【工程映射】',
   '请同时在 extractionHints.mapping 中给出该数据最可能支持的工程字段 targetKey（仅从模板列出的 targetKey 中选择），但不要强行映射不能确定的字段。无法安全映射的参数必须进入 unmappedImportantData，而不是丢弃。',
   '可直接自动导入的器件规格字段（datasheet 直给的单值标量，共 ' + DIRECT_MAPPABLE_TARGET_KEYS.length + ' 个）：' + DIRECT_MAPPABLE_TARGET_KEYS.join('、') + '。',
-  '以下 targetKey 只能作为「需工程确认」的候选，禁止在 mapping 里标成可直接自动导入：' + CONFIRM_REQUIRED_TARGET_KEYS.join('、') + '。原因：cgsPf 当前模板没有直接 Cgs 字段，只能由 Ciss 减 Crss 派生；rdsOnMilliOhm / vthMinV 来自曲线选点（图估），不是规格书保证值；gateVoltageMinV 没有独立字段，是从 protectionAndRobustness.gateVoltageMax 的负向 variant 恢复出来的；cgdPf 若取自 capacitanceParams.cgdDirect 属直接值，若由 Crss 换算而来则属派生值，必须在 sourceType 上如实区分，不得把 Crss 冒充成 datasheet 直给 Cgd。',
+  '以下 targetKey 只能作为「需工程确认」的候选，禁止在 mapping 里标成可直接自动导入：' + CONFIRM_REQUIRED_TARGET_KEYS.join('、') + '。原因：cgsPf 当前模板没有直接 Cgs 字段，只能由 Ciss 减 Crss 派生；rdsOnMilliOhm / vthMinV 来自曲线选点（图估），不是规格书保证值；cgdPf 若取自 capacitanceParams.cgdDirect 属直接值，若由 Crss 换算而来则属派生值，必须在 sourceType 上如实区分，不得把 Crss 冒充成 datasheet 直给 Cgd。gateVoltageMinV 虽由 variants 恢复，但其数值本身直接来自 datasheet 的负向 VGS 额定，不属于物理推导，须在 prompt 里如实说明。',
   '已有明确 targetKey 的参数应优先按 extractionHints.mapping 自动对齐，不要要求工程师重复选择；无法安全投影成工程单值的多条件/曲线数据（SOA、ZthJC(t)、Crss 原始曲线、gate-charge 曲线、Tstg、bodyChannelCurrent 等）继续保留在器件库与 unmappedImportantData 中，不得为了减少提示而选取错误条件或编造 targetKey。',
   '',
   '【引擎取点规则（提取时必须满足，否则该字段在计算中不可用）】',

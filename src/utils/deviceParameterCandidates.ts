@@ -1,4 +1,5 @@
 import type { DeviceEntry } from './deviceLibrary';
+import { readCurvePoint } from './deviceLibrary';
 import { buildVariantSummaryCandidates, buildGenericUnmappedCandidates, deriveCgdFromCrss, deriveCgs, deriveGateVoltageMin, deriveLegacyUnmappedCandidates, deriveVthMax } from './deviceCandidateAuxiliary';
 import { getAllEngineeringMeasurementFields } from './scenarioDomainEngine';
 import type { DomainMeasurementField } from './scenarioDomainEngine';
@@ -180,9 +181,10 @@ function valueForSpec(raw: unknown, spec: FieldSpec): { value?: number | string;
       return scalar === undefined ? {} : { value: scalar, meta, evidence: spec.evidence };
     }
     if (spec.rawPath === 'staticParams.rdsOn' || spec.rawPath === 'staticParams.vth') {
-      const point = points.find((p: any) => Number(p?.x) === 25) || points[0];
-      const y = finiteNumber(point?.y);
-      return y === undefined ? {} : { value: y, meta: { ...meta, conditions: { ...(meta.conditions || {}), tj: point?.x } }, evidence: spec.evidence };
+      const entries = points.map((p: any) => ({ xy: readCurvePoint(spec.rawPath, p) }));
+      const chosen = entries.find((entry: { xy: { x?: number; y?: number } }) => entry.xy.x === 25) || entries[0];
+      const y = chosen?.xy.y;
+      return y === undefined ? {} : { value: y, meta: { ...meta, conditions: { ...(meta.conditions || {}), tj: chosen.xy.x } }, evidence: spec.evidence };
     }
     return {
       value: `曲线已提取 · ${points.length} 点`,
@@ -288,10 +290,17 @@ export function buildDeviceParameterCandidates(
   const legacyCandidates = deriveLegacyUnmappedCandidates(device, currentFieldKeys);
   candidates.push(...legacyCandidates);
   candidates.push(...buildVariantSummaryCandidates(device, MOSFET_FIELD_TABLE));
-  const genericCandidates = buildGenericUnmappedCandidates(device);
+  const genericCandidates = buildGenericUnmappedCandidates(device, currentFieldKeys);
   const recoveredLabels = legacyCandidates.map(c => c.label);
   const duplicatePatterns = recoveredLabels.length ? [/V\(BR\)DSS/i, /IDSS/i, /IGSS/i, /gate\s+resistance|\bRG\b/i] : [];
-  candidates.push(...genericCandidates.filter(c => !duplicatePatterns.some(pattern => pattern.test(c.label))));
+  // 同一目标键 + 同一取值的候选只保留一条：否则会凭空多出"重复目标"，
+  // 而唯一写入口遇到重复目标只能整组丢弃（现场 RDS(on) 映射不进去的成因之一）。
+  const existingCandidateKeys = new Set(candidates.map(c => `${c.targetKey ?? ''}|${typeof c.value === 'number' ? c.value : String(c.value)}`));
+  candidates.push(...genericCandidates.filter(c => {
+    if (duplicatePatterns.some(pattern => pattern.test(c.label))) return false;
+    const key = `${c.targetKey ?? ''}|${typeof c.value === 'number' ? c.value : String(c.value)}`;
+    return !existingCandidateKeys.has(key);
+  }));
   return candidates;
 }
 
