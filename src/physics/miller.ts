@@ -24,6 +24,14 @@ export function checkMillerRisk(params: {
   L_source_nH?: number;          // 源极寄生电感 (nH)
   di_dt_A_per_ns?: number;       // 开关电流变化率 (A/ns)，配合 L_source_nH 估算门极感应过冲
   V_gs_measured_V?: number;      // 示波器实测门极尖峰 (V)：有实测时优先于理论估算，因为实测涵盖模型未覆盖的寄生路径
+  /**
+   * V_bus_V 是否为假设/推断值（并非实测或规格给定）。默认 false（视为可信）。
+   * 为 true 时，容性分压界不参与"判据取用值"的 min() 比较——真实感应电压取两界较小值
+   * 这条经验法则，前提是两个界都可信；如果压低估计值的那一项（容性界）其实是被一个不确定
+   * 的母线电压撑出来的，就不能让它把不依赖任何假设的阻性上界"拉低"，否则等于让一个不确定
+   * 输入把结论悄悄推向更安全的方向。此时容性界仍会计算并返回供参考，只是不参与判据取用值。
+   */
+  V_bus_is_assumed?: boolean;
 }): MillerRiskResult {
   const {
     V_th_min,
@@ -36,6 +44,7 @@ export function checkMillerRisk(params: {
     L_source_nH,
     di_dt_A_per_ns,
     V_gs_measured_V,
+    V_bus_is_assumed = false,
   } = params;
 
   // dv/dt: 1 V/ns = 1e9 V/s
@@ -58,9 +67,13 @@ export function checkMillerRisk(params: {
     : undefined;
 
   // 真实感应电压是两个界的较小值：开关沿很短时容性分压界更紧，阻性上界会显著高估。
-  const vGateInducedV = vGateInducedCapacitiveV !== undefined
-    ? Math.min(vGateInducedResistiveV, vGateInducedCapacitiveV)
+  // 但这条法则要求容性界本身可信；若它依赖的母线电压是假设值，就不用它去压低结论，
+  // 退化为只用阻性上界（与原先"未提供 Cgs/Vbus"时的向后兼容行为一致）。
+  const capacitiveBoundUsable = vGateInducedCapacitiveV !== undefined && !V_bus_is_assumed;
+  const vGateInducedV = capacitiveBoundUsable
+    ? Math.min(vGateInducedResistiveV, vGateInducedCapacitiveV as number)
     : vGateInducedResistiveV;
+  const capacitiveBoundSuppressedByAssumedVbus = vGateInducedCapacitiveV !== undefined && V_bus_is_assumed;
 
   // 源极寄生电感 di/dt 过冲：V_L = L_source(nH) · di/dt(A/ns) = V（量纲正好，无需换算）
   const inductiveOvershootV =
@@ -74,6 +87,8 @@ export function checkMillerRisk(params: {
 
   const safetyMarginV = V_th_min - vGateInducedTotalV;
   const isRiskOfShootThrough = vGateInducedTotalV >= V_th_min;
+
+
 
   let riskLevel: 'SAFE' | 'WARNING' | 'CRITICAL_SHOOT_THROUGH' = 'SAFE';
   let recommendation = '门极米勒感应电压低于器件阈值，处于安全裕量范围内。';
@@ -100,5 +115,6 @@ export function checkMillerRisk(params: {
     theoreticalVGateV: Number(theoreticalVGateV.toFixed(2)),
     modelUsed: hasMeasured ? 'MEASURED' : 'THEORETICAL',
     hasCapacitiveBound,
+    capacitiveBoundSuppressedByAssumedVbus,
   };
 }

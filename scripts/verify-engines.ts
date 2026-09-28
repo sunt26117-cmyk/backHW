@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { runDeterministicPrecomputations } from '../src/utils/deterministicPrecomputation';
 import { recalculateStandardWeightedScore } from '../src/utils/scoringWeights';
 import { assessDomainClassificationAmbiguity } from '../src/utils/scenarioDomainEngine';
-import { GOLD_STANDARD_CASES, runGoldStandardCaseRegression } from '../src/data/goldStandardCases';
+import { ENGINEERING_GOLD_CASES, runEngineeringGoldCaseRegression } from '../src/data/engineeringGoldCases';
 import { evaluateAllBldcPatterns } from '../src/data/bldcPatternEngine';
 import { calculateBusPumping } from '../src/utils/motorPhysicsEngine';
 import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput, type RobotJointEvaluationInput } from '../src/data/robotJointPatternEngine';
@@ -168,13 +168,13 @@ check('有显式分类 -> 永远不判定为歧义（显式分类是权威判定
 
 console.log('\n=== 金标准案例回归（真实调用模式引擎，不是照抄 expectedPattern） ===');
 let goldPass = 0;
-for (const c of GOLD_STANDARD_CASES) {
-  const r = runGoldStandardCaseRegression(c.caseId);
+for (const c of ENGINEERING_GOLD_CASES) {
+  const r = runEngineeringGoldCaseRegression(c.caseId);
   const mark = r.status === 'PASS' ? '✓' : '✗';
   console.log(`  ${mark} ${c.caseId} [预期 ${c.expectedPattern}] 实际触发: ${r.matchedPattern}`);
   if (r.status === 'PASS') goldPass++; else failures++;
 }
-console.log('  金标准案例：' + goldPass + '/' + GOLD_STANDARD_CASES.length + ' 通过');
+console.log('  金标准案例：' + goldPass + '/' + ENGINEERING_GOLD_CASES.length + ' 通过');
 
 console.log('\n=== 负例断言：检测型模式必须在输入不具备时不触发，防止总是触发回潮 ===');
 const quietBldcInput = { vbusNominal: 12, vdsRating: 40, rpm: 500, jInertia: 0.00015, cbusUf: 1000, tAmbientC: 25, currentPeakA: 5, harnessLengthM: 0.5, deadTimeNs: 400, rgOffOhm: 1.0, cgdPf: 45, dvDtVns: 2.0, vthMinV: 2.0 };

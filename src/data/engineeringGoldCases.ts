@@ -3,7 +3,7 @@
  * 严格遵照 V4 升级任务书第 13 节规范，形成自动化基准测试与验证集
  */
 
-import { GoldStandardCase, IssueInput, ProjectContext } from '../types';
+import { EngineeringGoldCase, IssueInput, ProjectContext } from '../types';
 import { evaluateAllBldcPatterns } from '../domains/bldc';
 import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput } from './robotJointPatternEngine';
 import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
@@ -18,7 +18,7 @@ const STUB_ISSUE: IssueInput = {
   actualMeasurement: '', engineeringConcern: '', notes: '', measuredValues: {},
 } as unknown as IssueInput;
 
-export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
+export const ENGINEERING_GOLD_CASES: EngineeringGoldCase[] = [
   {
     caseId: 'Case01',
     title: 'DC/DC 满载热风险与结温超限',
@@ -28,7 +28,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '满载 120A 持续输出 15 分钟后，MOSFET 焊盘温度达 138℃', measuredValues: { ambientTempC: 105, currentPeakA: 120, rdsOnMilliOhm: 4 } },
     },
     expectedPattern: 'P006',
-    expectedCalculation: { '稳态结温 Tj (℃)': 145.2, '车规降额裕量 (℃)': -20.2 },
+    goldenOracle: { '稳态结温 Tj (℃)': 145.2, '车规降额裕量 (℃)': -20.2 },
     expectedRisk: 'High',
     expectedVeto: false,
     expectedNextBestAction: '加装 2.5mm 导热硅胶垫并改用 2oz 厚铜 PCB 分流',
@@ -43,7 +43,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '3800rpm BLDC 急停时 VBUS 泵升至 37.8V，MOSFET 是 40V 耐压，目前只有 15 天', measuredValues: { rotorInertiaKgm2: 5.33e-6, busVoltageNominalV: 13.5, rpm: 3800, cBusUf: 470, vdsRatingV: 40, busVoltagePeakV: 37.8 } },
     },
     expectedPattern: 'P001',
-    expectedCalculation: { '理论泵升峰值 Vbus_theo (V)': 39.1, '实测峰值 (V)': 37.8, '耐压裕量 (V)': 2.2 },
+    goldenOracle: { '理论泵升峰值 Vbus_theo (V)': 39.1, '实测峰值 (V)': 37.8, '耐压裕量 (V)': 2.2 },
     expectedRisk: 'High',
     expectedVeto: false, // 37.8V < 40V 未完全穿透，但触发极高警戒
     expectedNextBestAction: '立即在台架连接高压光隔离探头捕获下桥短接制动瞬态波形',
@@ -54,10 +54,10 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
     title: '高 dv/dt 门极米勒效应瞬态误导通',
     category: 'Power & Switching',
     input: {
-      issue: { failurePhenomenon: '对管开通瞬间开关节点 dv/dt 达到 8.5V/ns，下管门极感应 2.15V 尖峰', measuredValues: { dvdtVns: 8.5, cgdPf: 115, cgsPf: 800, rgOffOhm: 2.2, vthMinV: 2.0, sourceInductanceNh: 2, diDtANs: 5 } },
+      issue: { failurePhenomenon: '对管开通瞬间开关节点 dv/dt 达到 8.5V/ns，下管门极感应 2.15V 尖峰', measuredValues: { dvdtVns: 8.5, cgdPf: 115, cgsPf: 800, rgOffOhm: 2.2, vthMinV: 2.0, sourceInductanceNh: 2, diDtANs: 5, busVoltageNominalV: 13.5 } },
     },
     expectedPattern: 'P003',
-    expectedCalculation: { '门极感应瞬态抬升 Vgs_induced (V)': 2.15, '门极安全裕量 Margin (V)': -0.15 },
+    goldenOracle: { '门极感应瞬态抬升 Vgs_induced (V)': 2.15, '门极安全裕量 Margin (V)': -0.15 },
     expectedRisk: 'High',
     expectedVeto: true, // 直通风险必须一票否决！
     expectedNextBestAction: '启用驱动芯片有源米勒钳位 (Active Miller Clamp) 或加装反向低阻下拉',
@@ -71,7 +71,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '线束振动导致 H1 信号引脚间歇性开路，电机出现转矩丢失与抖动' },
     },
     expectedPattern: 'P009',
-    expectedCalculation: { '检测响应时间 (ms)': 2.5, '整车危害等级': 'ASIL B' },
+    goldenOracle: { '检测响应时间 (ms)': 2.5, '整车危害等级': 'ASIL B' },
     expectedRisk: 'Medium-High',
     expectedVeto: false,
     expectedNextBestAction: '使能双霍尔容错估计算法并配置转矩平滑滤波',
@@ -85,7 +85,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: 'CISPR 25 传导发射测试中，48.5MHz 频点超标 6.8dB', measuredValues: { harnessLengthM: 1.5 } },
     },
     expectedPattern: 'P008',
-    expectedCalculation: { '超标幅度 (dBμV)': '+6.8 dB', '振铃频率 (MHz)': 48.5 },
+    goldenOracle: { '超标幅度 (dBμV)': '+6.8 dB', '振铃频率 (MHz)': 48.5 },
     expectedRisk: 'High',
     expectedVeto: false,
     expectedNextBestAction: '半桥中点并联 1360pF NPO + 4.7Ω 0805 RC Snubber 并在供电端加装磁环',
@@ -99,7 +99,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '相间短路发生时，从电流上升到门极完全关断总耗时 2.8μs，MOSFET 短路耐受仅 2.5μs', measuredValues: { senseDelayNs: 500, compDelayNs: 500, digitalFilterDelayNs: 500, driverPropDelayNs: 300, gateTurnOffDelayNs: 300, currentFallDelayNs: 400, soaShortCircuitTimeUs: 2.0, easEnergyMj: 200 } },
     },
     expectedPattern: 'P016',
-    expectedCalculation: { '全关闭时间 Fault-to-Off (μs)': 0.85, 'SOA耐受时间 (μs)': 2.5, '时序裕量 (μs)': 1.65 },
+    goldenOracle: { '全关闭时间 Fault-to-Off (μs)': 0.85, 'SOA耐受时间 (μs)': 2.5, '时序裕量 (μs)': 1.65 },
     expectedRisk: 'Low',
     expectedVeto: false,
     expectedNextBestAction: '示波器同时使用 4 通道精确标定 5 级延迟实测值',
@@ -113,7 +113,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '将死区加大至 800ns 后，低速 200rpm 运转出现明显电磁嗡鸣与转矩纹波', measuredValues: { deadTimeNs: 800, pwmSwitchingFreqHz: 20000 } },
     },
     expectedPattern: 'P005',
-    expectedCalculation: { '死区占PWM周期比例 (%)': 1.6, '转矩脉动增加 (%)': 8.5 },
+    goldenOracle: { '死区占PWM周期比例 (%)': 1.6, '转矩脉动增加 (%)': 8.5 },
     expectedRisk: 'Medium',
     expectedVeto: false,
     expectedNextBestAction: '固件加入电流极性死区非线性补偿算法并微调死区至 250ns',
@@ -127,7 +127,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '单电阻采样在急停与高占空比工况下丢失采样窗口，无法闭环' },
     },
     expectedPattern: 'P017',
-    expectedCalculation: { '推荐架构': '相电流独立采样', '决策理由': '全占空比支持 + 单相独立故障诊断' },
+    goldenOracle: { '推荐架构': '相电流独立采样', '决策理由': '全占空比支持 + 单相独立故障诊断' },
     expectedRisk: 'Low',
     expectedVeto: false,
     expectedNextBestAction: '选定双路低边独立分流架构并完成差分检流运放打样',
@@ -141,7 +141,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '机械卡死堵转时仅依赖热敏电阻，在温度传感器滞后 3 秒期间电机炸机', measuredValues: { currentPeakA: 22, rpm: 50, stallCurrentThresholdA: 18, stallRpmThreshold: 200, stallLevel1TimeMs: 300, stallLevel2TimeMs: 800, stallLevel3TimeMs: 1500, stallLockoutCountN: 3, stallRiskIndicated: 1 } },
     },
     expectedPattern: 'P018',
-    expectedCalculation: { '判据逻辑': '电流>18A AND 转速<200rpm AND 持续300ms', '保护层级': 'L1软限幅 -> L2降额 -> L3停机 -> L4锁存' },
+    goldenOracle: { '判据逻辑': '电流>18A AND 转速<200rpm AND 持续300ms', '保护层级': 'L1软限幅 -> L2降额 -> L3停机 -> L4锁存' },
     expectedRisk: 'Medium',
     expectedVeto: false,
     expectedNextBestAction: '部署分级堵转状态机，严禁单纯依赖单一温度阈值',
@@ -155,7 +155,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '连接器引脚接受 ISO 10605 ±15kV 空气放电时，预驱芯片死锁', measuredValues: { hasSupplyBoostRegulation: 0 } },
     },
     expectedPattern: 'P011',
-    expectedCalculation: { 'TVS钳位残压 (V)': 38.9, '敏感引脚耐受': '2kV HBM' },
+    goldenOracle: { 'TVS钳位残压 (V)': 38.9, '敏感引脚耐受': '2kV HBM' },
     expectedRisk: 'Medium-High',
     expectedVeto: false,
     expectedNextBestAction: '优化连接器金属外壳搭铁弹片并增加进板二级 TVS 钳位',
@@ -169,7 +169,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: 'ISO 11452-4 BCI 测试中，在 45MHz 注入 100mA 时相电流采样报异常超差', measuredValues: { harnessLengthM: 1.5 } },
     },
     expectedPattern: 'P008',
-    expectedCalculation: { '敏感频段': '20MHz ~ 80MHz', '注入点位置': '线束 150mm 处' },
+    goldenOracle: { '敏感频段': '20MHz ~ 80MHz', '注入点位置': '线束 150mm 处' },
     expectedRisk: 'Medium',
     expectedVeto: false,
     expectedNextBestAction: '运放采样差分信号线并联 100pF NPO 共模电容，并加装差模滤波网络',
@@ -183,7 +183,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '母线电解电容在 85℃ 环温与 3.5A 纹波下工作，需评估 15 年车规寿命', measuredValues: { cBusUf: 470, currentPeakA: 15, ambientTempC: 85, capRatedRippleCurrentA: 4.5, capRatedLifeHours: 5000, capRatedTempC: 105 } },
     },
     expectedPattern: 'P013',
-    expectedCalculation: { '估算寿命 (h)': 20000, '目标寿命 (h)': 15000, '寿命裕量 (h)': 5000 },
+    goldenOracle: { '估算寿命 (h)': 20000, '目标寿命 (h)': 15000, '寿命裕量 (h)': 5000 },
     expectedRisk: 'Low',
     expectedVeto: false,
     expectedNextBestAction: '选用 125℃ 耐高温固液混合电解电容，强制标注 MODEL ESTIMATE',
@@ -197,9 +197,9 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '急停后母线实测峰值 48V，而功率 MOSFET 额定耐压仅 40V，动态尖峰逼近击穿', measuredValues: { busVoltagePeakV: 48, vdsRatingV: 40, loopInductanceNh: 5, diDtANs: 2.88 } },
     },
     expectedPattern: 'P014',
-    expectedCalculation: { '动态浪涌过冲估算 Vds_peak (V)': 62.4, '器件额定耐压 Vds_rating (V)': 40, '耐压裕量 (V)': -22.4 },
+    goldenOracle: { '动态浪涌过冲估算 Vds_peak (V)': 62.4, '器件额定耐压 Vds_rating (V)': 40, '耐压裕量 (V)': -22.4 },
     expectedRisk: 'Medium-High',
-    expectedVeto: false,
+    expectedVeto: true, // 输入全为实测/规格值(无假设输入)，耐压裕量 -22.4V，按 B 策略属于证据充分的 VETO；旧值 false 与引擎实际判定脱节
     expectedNextBestAction: '选用更高耐压车规 MOSFET 拉开耐压裕量，并实测开关节点尖峰替换假设的 30% 过冲系数',
     expectedVerification: '示波器 1GHz 探头焊在引脚根部捕获极限开关尖峰，并测回路电感与 di/dt 替代假设的过冲系数',
   },
@@ -211,7 +211,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '需向主机厂客户提供逆变器功率级 ISO 26262 ASIL C FMEDA 报告' },
     },
     expectedPattern: 'P015',
-    expectedCalculation: { 'SPFM 单点度量 (%)': 98.2, 'LFM 潜伏度量 (%)': 82.5, '标准合规': 'PASS' },
+    goldenOracle: { 'SPFM 单点度量 (%)': 98.2, 'LFM 潜伏度量 (%)': 82.5, '标准合规': 'PASS' },
     expectedRisk: 'Low',
     expectedVeto: false,
     expectedNextBestAction: '固化完整 HARA -> SG -> FSR -> TSR -> HSR 链路，展示单点/潜伏失效贡献拆分',
@@ -226,7 +226,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '肩关节谐波减速器输出端实测背隙 4.5arcmin，35Nm额定扭矩工况下末端定位精度客户规格要求 ±3arcmin，产线抽检批量超差', measuredValues: { backlashArcmin: 4.5, requiredPositionAccuracyArcmin: 3.0, outputTorqueNm: 35, torsionalStiffnessNmPerRad: 15000 } },
     },
     expectedPattern: 'J001',
-    expectedCalculation: { '背隙 (arcmin)': 4.5, '扭转柔性附加误差 (arcmin)': 8.02, '输出端运动学总误差估算 (arcmin)': 12.52, '规格要求 (arcmin)': 3.0, '精度裕量 (arcmin)': -9.52 },
+    goldenOracle: { '背隙 (arcmin)': 4.5, '扭转柔性附加误差 (arcmin)': 8.02, '输出端运动学总误差估算 (arcmin)': 12.52, '规格要求 (arcmin)': 3.0, '精度裕量 (arcmin)': -9.52 },
     expectedRisk: 'High',
     expectedVeto: true, // 总误差已超出客户规格，一票否决！
     expectedNextBestAction: '关节输出端加装第二编码器实现全闭环消除背隙影响，同步评估更高背隙等级减速器型号',
@@ -241,7 +241,7 @@ export const GOLD_STANDARD_CASES: GoldStandardCase[] = [
       issue: { failurePhenomenon: '产品安全需求要求腕关节驱动器达到 PLd，但现有 STO 功能仅通过主控 MCU 软件封锁 PWM 实现，未接入独立硬件断使能通道' },
     },
     expectedPattern: 'J006',
-    expectedCalculation: { '当前 STO 实现方式': 'SOFTWARE_PWM_DISABLE_ONLY', '目标性能等级': 'PLd', 'STO响应时间 (ms)': 12, '要求响应时间上限 (ms)': 20 },
+    goldenOracle: { '当前 STO 实现方式': 'SOFTWARE_PWM_DISABLE_ONLY', '目标性能等级': 'PLd', 'STO响应时间 (ms)': 12, '要求响应时间上限 (ms)': 20 },
     expectedRisk: 'High',
     expectedVeto: true, // 通道独立性不满足，一票否决，不得进入人机共融现场！
     expectedNextBestAction: '改为双通道硬件 STO（预驱使能引脚 + 门极电源双重切断）或升级安全 MCU 方案，重新申请第三方安全认证',
@@ -256,8 +256,8 @@ type PatternLike = {
   calculatedValues?: Record<string, string | number>;
 };
 
-export function runGoldStandardCaseRegression(caseId: string): {
-  caseInfo: GoldStandardCase;
+export function runEngineeringGoldCaseRegression(caseId: string): {
+  caseInfo: EngineeringGoldCase;
   matchedPattern: string;
   isPatternMatch: boolean;
   status: 'PASS' | 'FAIL';
@@ -269,7 +269,7 @@ export function runGoldStandardCaseRegression(caseId: string): {
   vetoTriggered: boolean;
   summary: string;
 } {
-  const c = GOLD_STANDARD_CASES.find((item) => item.caseId === caseId) || GOLD_STANDARD_CASES[1];
+  const c = ENGINEERING_GOLD_CASES.find((item) => item.caseId === caseId) || ENGINEERING_GOLD_CASES[1];
 
   // 之前这个函数完全没有真的跑模式引擎——不管传进来什么caseId，永远把case自己的
   // expectedPattern原样抄回来当"匹配结果"，isPatternMatch/status也是硬编码true/PASS，
@@ -313,18 +313,23 @@ export function runGoldStandardCaseRegression(caseId: string): {
   }
 
   const isPatternMatch = triggeredIds.includes(c.expectedPattern);
+  // 只比"模式触发了没有"不够：VETO 是本系统的安全闸门，模式触发但 VETO 被吞（或凭空多出 VETO）
+  // 同样是回归。以前只查 pattern ID，Case03 的必须 VETO 被静默吞掉、Case13 的 expectedVeto 过期，都没被发现。
+  const isVetoMatch = vetoTriggered === c.expectedVeto;
   const matchedPattern = triggeredIds.length > 0 ? triggeredIds.join('、') : '(未触发任何判据)';
 
   return {
     caseInfo: c,
     matchedPattern,
     isPatternMatch,
-    status: isPatternMatch ? 'PASS' : 'FAIL',
+    status: isPatternMatch && isVetoMatch ? 'PASS' : 'FAIL',
     triggeredPatterns: triggeredIds,
     calculatedValues: engineCalculatedValues,
     vetoTriggered,
-    summary: isPatternMatch
-      ? `自动化用例 ${c.caseId} [${c.title}] 校验通过：模式引擎实际触发 ${matchedPattern}，包含预期的 ${c.expectedPattern}。`
-      : `自动化用例 ${c.caseId} [${c.title}] 校验失败：预期触发 ${c.expectedPattern}，模式引擎实际触发 ${matchedPattern}。`,
+    summary: isPatternMatch && isVetoMatch
+      ? `自动化用例 ${c.caseId} [${c.title}] 校验通过：模式引擎实际触发 ${matchedPattern}，包含预期的 ${c.expectedPattern}，VETO=${vetoTriggered ? 'YES' : 'NO'} 与预期一致。`
+      : !isPatternMatch
+        ? `自动化用例 ${c.caseId} [${c.title}] 校验失败：预期触发 ${c.expectedPattern}，模式引擎实际触发 ${matchedPattern}。`
+        : `自动化用例 ${c.caseId} [${c.title}] 校验失败：模式已触发，但 VETO 预期 ${c.expectedVeto ? 'YES' : 'NO'}，引擎实际 ${vetoTriggered ? 'YES' : 'NO'}。`,
   };
 }

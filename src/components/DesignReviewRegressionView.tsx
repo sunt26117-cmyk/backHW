@@ -24,9 +24,9 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import {
-  GOLD_STANDARD_CASES,
-  runGoldStandardCaseRegression,
-} from '../data/goldStandardCases';
+  SYSTEM_REGRESSION_CASES,
+  runSystemRegressionCase,
+} from '../data/systemRegressionCases';
 import { PhaseCheckItem, ComponentChangeImpactItem, ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
 import { derivePhaseChecklist, deriveWorstCases, deriveComponentChangeImpact } from '../utils/scenarioDerived';
 
@@ -75,34 +75,25 @@ export const DesignReviewRegressionView: React.FC<DesignReviewRegressionViewProp
   }, [derivedComponent]);
   const changeImpact = deriveComponentChangeImpact(context, issue, result, selectedComponent);
 
-  // 回归测试用例状态
+  // 系统回归：只验证“代码修改后系统行为是否保持”，不再把 BLDC 工程案例复制一套到这里。
   const [regressionResults, setRegressionResults] = useState<Record<string, 'PASS' | 'FAIL'>>({});
-  const scenarioCaseId = issue.issueCategories?.includes('EMC')
-    ? 'Case05'
-    : issue.issueCategories?.includes('Thermal') || issue.issueCategories?.includes('Power')
-    ? 'Case01'
-    : issue.issueCategories?.includes('Functional Safety')
-    ? 'Case04'
-    : issue.issueCategories?.includes('WCCA')
-    ? 'Case08'
-    : issue.issueCategories?.includes('Component Alternative')
-    ? 'Case06'
-    : 'Case02';
-  const [activeCaseId, setActiveCaseId] = useState<string>(scenarioCaseId);
-  React.useEffect(() => {
-    setActiveCaseId(scenarioCaseId);
-  }, [scenarioCaseId]);
+  const [regressionDetails, setRegressionDetails] = useState<Record<string, { summary: string; details: string[] }>>({});
+  const [activeCaseId, setActiveCaseId] = useState<string>('R01');
 
   const handleRunAllRegressions = () => {
     const results: Record<string, 'PASS' | 'FAIL'> = {};
-    GOLD_STANDARD_CASES.forEach((c) => {
-      const res = runGoldStandardCaseRegression(c.caseId);
-      results[c.caseId] = res.status;
+    const details: Record<string, { summary: string; details: string[] }> = {};
+    SYSTEM_REGRESSION_CASES.forEach((c) => {
+      const res = runSystemRegressionCase(c.id);
+      results[c.id] = res.status;
+      details[c.id] = { summary: res.summary, details: res.details };
     });
     setRegressionResults(results);
+    setRegressionDetails(details);
   };
 
-  const selectedCase = GOLD_STANDARD_CASES.find((c) => c.caseId === activeCaseId) || GOLD_STANDARD_CASES[1];
+  const selectedCase = SYSTEM_REGRESSION_CASES.find((c) => c.id === activeCaseId) || SYSTEM_REGRESSION_CASES[0];
+  const selectedResult = regressionDetails[activeCaseId];
 
   return (
     <div className="space-y-6">
@@ -138,7 +129,7 @@ export const DesignReviewRegressionView: React.FC<DesignReviewRegressionViewProp
           { id: 'DESIGN_REVIEW', label: '1. 阶段性设计评审 (Concept~SOP)' },
           { id: 'WORST_CASE', label: '2. 最坏情况引擎 (Worst Case Engine)' },
           { id: 'COMPONENT_CHANGE', label: '3. 器件变更影响分析 (Change Impact)' },
-          { id: 'GOLD_CASES', label: '4. 黄金标准用例自动回归 (Case01~16)' },
+          { id: 'GOLD_CASES', label: '4. 系统回归中心 (R01~R08)' },
         ].map((sub) => (
           <button
             key={sub.id}
@@ -358,144 +349,94 @@ export const DesignReviewRegressionView: React.FC<DesignReviewRegressionViewProp
         </div>
       </div>
 
-      {/* 4. 黄金标准用例自动回归 (Case01 ~ Case14) */}
+      {/* 4. 系统回归中心 */}
       {activeSubTab === 'GOLD_CASES' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-              <div>
-                <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  <FileCheck className="w-4 h-4 text-emerald-400" />
-                  <span>黄金标准回归用例集 (Gold Standard Cases 01 ~ 16)</span>
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  覆盖电热、急停泵升、米勒、霍尔、48MHz EMI、SOA、死区、采样、堵转等 14 项车规典型硬件难题，另加 2 项机器人关节机电系统层难题（背隙定位精度、STO安全通道独立性）。
-                </p>
-              </div>
-
-              <button
-                onClick={handleRunAllRegressions}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow cursor-pointer shrink-0"
-              >
-                <Play className="w-3.5 h-3.5" />
-                <span>运行全部 16 个回归测试</span>
-              </button>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-cyan-400" />
+                <span>系统回归中心 (System Regression Center)</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                不再重复维护 BLDC 工程案例。这里验证代码修改后：输入传递、缺参门禁、场景切换、VETO 与 AI Grounding 是否保持正确。
+              </p>
             </div>
+            <button
+              onClick={handleRunAllRegressions}
+              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow cursor-pointer shrink-0"
+            >
+              <Play className="w-3.5 h-3.5" />
+              运行 R01~R08
+            </button>
+          </div>
 
-            {/* 用例网格选择 */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mt-4">
-              {GOLD_STANDARD_CASES.map((c) => {
-                const isSelected = c.caseId === activeCaseId;
-                const regStatus = regressionResults[c.caseId];
+          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+            <div className="space-y-2">
+              {SYSTEM_REGRESSION_CASES.map((c) => {
+                const status = regressionResults[c.id];
                 return (
                   <button
-                    key={c.caseId}
-                    onClick={() => setActiveCaseId(c.caseId)}
-                    className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
-                      isSelected
-                        ? 'bg-blue-600/20 border-blue-500 text-white'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800/50'
+                    key={c.id}
+                    onClick={() => setActiveCaseId(c.id)}
+                    className={`w-full text-left p-3 rounded-lg border transition cursor-pointer ${
+                      activeCaseId === c.id
+                        ? 'bg-blue-950/40 border-blue-500/50'
+                        : 'bg-slate-950 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-mono text-xs font-bold text-cyan-400">{c.caseId}</span>
-                      {regStatus === 'PASS' && (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                      )}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[11px] font-bold text-cyan-300">{c.id}</span>
+                      <span className={`text-[10px] font-bold ${
+                        status === 'PASS' ? 'text-emerald-400' : status === 'FAIL' ? 'text-red-400' : 'text-slate-500'
+                      }`}>
+                        {status || '未运行'}
+                      </span>
                     </div>
-                    <div className="text-[11px] font-medium text-slate-200 line-clamp-1">{c.title}</div>
+                    <div className="text-xs text-slate-200 mt-1">{c.title}</div>
+                    <div className="text-[10px] text-slate-500 mt-1">{c.category}</div>
                   </button>
                 );
               })}
             </div>
 
-            {/* 单个用例详情 */}
-            {(() => {
-              const currentResult = runGoldStandardCaseRegression(selectedCase.caseId);
-              return (
-                <div className="mt-5 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs space-y-3">
-                  <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-2 gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-cyan-400 text-sm">{selectedCase.caseId}</span>
-                      <span className="text-white font-bold">{selectedCase.title}</span>
-                      <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">
-                        分类: {selectedCase.category}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono font-bold">
-                        目标规则: {selectedCase.expectedPattern}
-                      </span>
-                      <span
-                        className={`text-xs px-2.5 py-0.5 rounded font-bold font-mono ${
-                          currentResult.status === 'PASS'
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                            : 'bg-red-500/20 text-red-300 border border-red-500/30'
-                        }`}
-                      >
-                        {currentResult.status === 'PASS' ? '● 物理引擎验证通过 (PASS)' : '✕ 物理引擎判定未通过 (FAIL)'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-slate-300">
-                    <strong>问题输入: </strong>{selectedCase.input.issue.failurePhenomenon}
-                  </div>
-
-                  {/* 真实物理引擎执行反馈 */}
-                  <div className="bg-blue-950/20 border border-blue-500/30 rounded-lg p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-blue-300 flex items-center gap-1.5">
-                        <Cpu className="w-3.5 h-3.5 text-blue-400" />
-                        <span>真实物理引擎在线计算与判定结果 (Real Deterministic Engine Execution)</span>
-                      </span>
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        触发模式: [{currentResult.triggeredPatterns.join(', ') || '无'}]
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-300 font-mono leading-relaxed">
-                      {currentResult.summary}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="bg-slate-900 p-3 rounded border border-slate-800 space-y-1">
-                      <div className="font-bold text-cyan-400 mb-1 flex items-center justify-between">
-                        <span>引擎实际输出物理量:</span>
-                        <span className="text-[10px] text-cyan-500 font-normal">第一性原理与解析推导</span>
-                      </div>
-                      {currentResult.calculatedValues && Object.keys(currentResult.calculatedValues).length > 0 ? (
-                        Object.entries(currentResult.calculatedValues).map(([k, v], i) => (
-                          <div key={i} className="flex justify-between text-slate-300 font-mono text-[11px]">
-                            <span className="text-slate-400">{k}:</span>
-                            <strong className="text-cyan-300">{String(v)}</strong>
-                          </div>
-                        ))
-                      ) : (
-                        Object.entries(selectedCase.expectedCalculation).map(([k, v], i) => (
-                          <div key={i} className="flex justify-between text-slate-300 font-mono text-[11px]">
-                            <span>{k}:</span>
-                            <strong className="text-cyan-300">{String(v)}</strong>
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    <div className="bg-slate-900 p-3 rounded border border-slate-800 space-y-1">
-                      <div className="font-bold text-emerald-400 mb-1">预期决策与验证闭环:</div>
-                      <div className="text-slate-300"><strong>Next Best Action: </strong>{selectedCase.expectedNextBestAction}</div>
-                      <div className="text-slate-400 mt-1"><strong>门禁判据: </strong>{selectedCase.expectedVerification}</div>
-                      <div className="text-[11px] font-mono mt-1 text-slate-400 flex items-center justify-between border-t border-slate-800 pt-1.5">
-                        <span>一票否决 VETO 预期: <strong>{selectedCase.expectedVeto ? 'YES (触发)' : 'NO (通过)'}</strong></span>
-                        <span className={currentResult.vetoTriggered === selectedCase.expectedVeto ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
-                          实际判定: {currentResult.vetoTriggered ? 'YES (触发否决)' : 'NO (允许放行)'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-bold text-cyan-300">{selectedCase.id}</span>
+                  <span className="text-sm font-bold text-white">{selectedCase.title}</span>
                 </div>
-              );
-            })()}
+                <p className="text-xs text-slate-400 mt-2">{selectedCase.purpose}</p>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
+                <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">本次回归实际执行结果</div>
+                {selectedResult ? (
+                  <>
+                    <div className={`text-sm font-bold ${regressionResults[selectedCase.id] === 'PASS' ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {regressionResults[selectedCase.id]}
+                    </div>
+                    <div className="text-xs text-slate-300 mt-2 font-mono leading-relaxed">{selectedResult.summary}</div>
+                    {selectedResult.details.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {selectedResult.details.map((d, i) => (
+                          <div key={i} className="text-[11px] text-slate-400">• {d}</div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-xs text-slate-500">尚未运行。点击“运行 R01~R08”执行真实回归。</div>
+                )}
+              </div>
+
+              <div className="bg-blue-950/20 border border-blue-500/20 rounded-lg p-3 text-xs text-slate-300">
+                <div className="font-bold text-blue-300 mb-2">职责边界</div>
+                <div>BLDC P001~P018：验证“会不会做工程分析”。</div>
+                <div>工程 Gold Case：验证真实工程场景/案例基准。</div>
+                <div>R01~R08：验证“改代码以后有没有把系统行为改坏”。</div>
+              </div>
+            </div>
           </div>
         </div>
       )}

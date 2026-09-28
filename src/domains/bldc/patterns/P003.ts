@@ -41,11 +41,15 @@ export function evaluateP003(input: BldcEvaluationInput, ctx: BldcPatternContext
     L_source_nH: input.sourceInductanceNh,
     di_dt_A_per_ns: input.diDtANs,
     V_gs_measured_V: input.gateSpikeMeasuredV,
+    V_bus_is_assumed: ctx.vbusNominalWasAssumed,
   });
   const imiller = millerShared.millerCurrentA; // A
   const vgateInducedResistiveBound = millerShared.vGateInducedResistiveV!; // V，阻性上界
   const vgateInducedCapacitiveBound = millerShared.vGateInducedCapacitiveV;
-  const vgateInduced = vgateInducedCapacitiveBound !== undefined
+  // 与共享核心保持一致：母线电压是假设值时，容性界只展示、不参与取用值（否则一个未经确认的
+  // 母线电压会把不依赖任何假设的阻性上界悄悄拉低，把本该 VETO 的直通结论压成"安全"）。
+  const capacitiveSuppressed = millerShared.capacitiveBoundSuppressedByAssumedVbus === true;
+  const vgateInduced = (vgateInducedCapacitiveBound !== undefined && !capacitiveSuppressed)
     ? Math.min(vgateInducedResistiveBound, vgateInducedCapacitiveBound)
     : vgateInducedResistiveBound;
   const inductiveVgsSpike = millerShared.inductiveOvershootV!;
@@ -64,7 +68,9 @@ export function evaluateP003(input: BldcEvaluationInput, ctx: BldcPatternContext
   };
   if (vgateInducedCapacitiveBound !== undefined) {
     p003CalculatedValues['容性分压界 Vgs_capacitive (V)'] = Number(vgateInducedCapacitiveBound.toFixed(2));
-    p003CalculatedValues['取用值(两界较小者) Vgs_induced (V)'] = Number(vgateInduced.toFixed(2));
+    p003CalculatedValues[capacitiveSuppressed
+      ? '取用值(母线电压为假设值，仅采用阻性上界) Vgs_induced (V)'
+      : '取用值(两界较小者) Vgs_induced (V)'] = Number(vgateInduced.toFixed(2));
   } else {
     p003CalculatedValues['⚠ 数据缺口'] = '未提供 Cgs，暂只能给出阻性上界，开关沿较短时可能显著高估实际感应电压';
   }

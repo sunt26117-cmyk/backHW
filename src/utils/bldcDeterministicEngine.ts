@@ -207,6 +207,10 @@ function buildMiller(issue: IssueInput, state: UnifiedEngineeringModel, context?
     // Cgs/Vbus 启用共享核心的「容性分压界」，与 P003 传入的是同一批数（同器件、同 Vbus、同点 Cgs）。
     C_gs_pF: cgsPf,
     V_bus_V: vbusForMiller,
+    // path B 也有同一个洞：vbusForMiller 在缺省时是 13.5 的**假设值**，而容性界依赖它。
+    // 不标"假设"，一个没确认的母线电压就会把不依赖任何假设的阻性上界压低（0.73V → 0.32V），
+    // 把结论推向"更安全"甚至压掉 VETO。共享核心据此把容性界降为"仅展示"。
+    V_bus_is_assumed: !vbusProvided,
     R_g_pulldown_ohm: values.rgOffOhm!,
     dv_dt_V_per_ns: values.dvdtVns!,
   });

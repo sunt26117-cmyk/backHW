@@ -1,6 +1,6 @@
 import { CopilotAnalysisResult, IssueInput } from '../types';
 import { PrecomputedFact } from './deterministicPrecomputation';
-import { GOLD_STANDARD_CASES } from '../data/goldStandardCases';
+import { ENGINEERING_GOLD_CASES, runEngineeringGoldCaseRegression } from '../data/engineeringGoldCases';
 
 function normalize(text: string): string {
   return text
@@ -63,15 +63,22 @@ function extractPhysicalInputs(issue: IssueInput): Map<PhysicalDimension, number
   return collectPhysicalInputs(issue.measuredValues);
 }
 
-function extractGoldPhysicalInputs(goldCase: (typeof GOLD_STANDARD_CASES)[number]): Map<PhysicalDimension, number[]> {
+function extractGoldPhysicalInputs(goldCase: (typeof ENGINEERING_GOLD_CASES)[number]): Map<PhysicalDimension, number[]> {
+  // 用引擎这次真算出来的 calculatedValues，而不是用例里手写的 goldenOracle——
+  // 后者是编写用例时的一次性记录，引擎迭代后会跟真实输出脱节（例如 Case05 的
+  // "振铃频率 48.5MHz" 是叙述性症状，引擎现在按 L/C 真实算出的是 11.9MHz；Case06 更
+  // 严重，goldenOracle 记的时序裕量是 +1.65μs(安全)，引擎现在真算出来是 -0.5μs
+  // (不安全)）。拿脱节的手写数字去做相似度匹配/喂给 AI 当参考，等于让 AI 学到过时甚至
+  // 相反的结论。
+  const live = runEngineeringGoldCaseRegression(goldCase.caseId).calculatedValues;
   const merged: Record<string, number | string> = {
     ...((goldCase.input.issue as unknown as { measuredValues?: Record<string, number | string> }).measuredValues || {}),
-    ...(goldCase.expectedCalculation || {}),
+    ...live,
   };
   return collectPhysicalInputs(merged);
 }
 
-function physicalSimilarity(issue: IssueInput, goldCase: (typeof GOLD_STANDARD_CASES)[number]): { ratioPenalty: number; hardReject: boolean } {
+function physicalSimilarity(issue: IssueInput, goldCase: (typeof ENGINEERING_GOLD_CASES)[number]): { ratioPenalty: number; hardReject: boolean } {
   const issueInputs = extractPhysicalInputs(issue);
   const caseInputs = extractGoldPhysicalInputs(goldCase);
   if (issueInputs.size === 0 || caseInputs.size === 0) return { ratioPenalty: 1, hardReject: false };
@@ -122,7 +129,7 @@ export function findSimilarGoldCases(issue: IssueInput, limit = 2) {
   const issueNormalized = normalize(issueText);
   const categoryLabels = new Set((issue.issueCategories || []).map((c) => normalize(c)));
 
-  return GOLD_STANDARD_CASES
+  return ENGINEERING_GOLD_CASES
     .map((item) => {
       const caseText = [
         item.title,
@@ -181,9 +188,13 @@ export function buildGroundingText(
 
   const groundedEvidenceText = evidenceText || '（暂无结构化计算结果证据条目）';
 
+  // 同样：喂给 AI 的"关键计算结论"和 VETO 状态改用引擎实时结果，不用用例里可能已经过期的静态字段。
   const goldCaseText = similarGoldCases.length
     ? similarGoldCases
-        .map((c) => `【Pattern 参考 ${c.expectedPattern} · ${c.caseId}】\n- 关键计算结论: ${JSON.stringify(c.expectedCalculation)}\n- VETO: ${c.expectedVeto ? 'YES' : 'NO'}\n- expectedNextBestAction: ${c.expectedNextBestAction}`)
+        .map((c) => {
+          const live = runEngineeringGoldCaseRegression(c.caseId);
+          return `【Pattern 参考 ${c.expectedPattern} · ${c.caseId}】\n- 关键计算结论(引擎实时输出): ${JSON.stringify(live.calculatedValues)}\n- VETO(引擎实时判定): ${live.vetoTriggered ? 'YES' : 'NO'}\n- expectedNextBestAction: ${c.expectedNextBestAction}`;
+        })
         .join('\n\n')
     : '（未匹配到足够相似的金标准 Pattern，不强行 few-shot）';
 

@@ -81,6 +81,7 @@ export interface MillerRiskResult {
   theoreticalVGateV?: number;         // 理论估算总值 = 两界较小值 + 电感过冲 (V)
   modelUsed?: 'MEASURED' | 'THEORETICAL'; // 判据取用值来源：实测优先，否则理论估算
   hasCapacitiveBound?: boolean;       // 是否启用了容性分压界
+  capacitiveBoundSuppressedByAssumedVbus?: boolean; // 容性界已算出，但因母线电压是假设值而未参与判据取用值
 }
 
 export interface SnubberCalcResult {

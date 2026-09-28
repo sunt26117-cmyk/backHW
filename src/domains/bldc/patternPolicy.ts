@@ -56,6 +56,11 @@ export function finalizeBldcPatternResult(result: PatternOutputItem): PatternOut
     // B 策略：‘识别到模式’与‘证据足以确认风险/VETO’解耦。
     // ASSUMPTION_BASED 仍保留 pattern evaluator 原始 triggered 值，供候选方案/验证优先级使用；
     // 但任何 VETO 必须被压住，且证据等级降为 ENGINEERING_ASSUMPTION + LOW。
+    // 这是硬性不开口子的规则（见 verify-pattern-policy.cjs 的结构性断言）：不在这里按
+    // Pattern 自报的"我这条不依赖假设"开例外——那种判断本身就容易出错（P003 曾经这样
+    // 试过，第一版公式就把方向搞反了），真正需要"不被这条假设拖累"的 Pattern，应该在
+    // 物理模型内部就不使用那个被假设的输入作为结论依据（见 miller.ts 的 V_bus_is_assumed
+    // 处理方式），而不是算完了再让通用策略层法外开恩。
     return {
       ...result,
       analysisStatus: 'ASSUMPTION_BASED',

@@ -566,7 +566,7 @@ export interface LeadershipEconomicRisk {
 // 13. 回归测试用例模型 (Gold Standard Cases)
 // ==========================================
 
-export interface GoldStandardCase {
+export interface EngineeringGoldCase {
   caseId: string;
   title: string;
   category: string;
@@ -578,7 +578,7 @@ export interface GoldStandardCase {
     powerStage?: Partial<PowerStageModel>;
   };
   expectedPattern: BldcPatternId | RobotJointPatternId;
-  expectedCalculation: Record<string, string | number>;
+  goldenOracle: Record<string, string | number>;
   expectedRisk: RiskLevel;
   expectedVeto: boolean;
   expectedNextBestAction: string;
