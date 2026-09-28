@@ -16,7 +16,8 @@ import { RecommendationRaciView } from './RecommendationRaciView';
 import { EngineeringDocsView } from './EngineeringDocsView';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 
-export type MainWorkbenchTab = 'overview' | 'facts' | 'physics' | 'decision' | 'verification' | 'safety' | 'delivery';
+import type { MainWorkbenchTab } from './workbenchNavigation';
+export type { MainWorkbenchTab };
 type SubTab = 'first' | 'workflow' | 'inputs' | 'facts' | 'patterns' | 'calculator' | 'options' | 'cockpit' | 'loop' | 'review' | 'raci' | 'docs';
 
 interface Props {

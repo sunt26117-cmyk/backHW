@@ -1,6 +1,7 @@
 import React from 'react';
 import { HwLeadStyle } from '../types';
 import { SeniorEngineeringWorkbenchView, MainWorkbenchTab } from './SeniorEngineeringWorkbenchView';
+import { toMainTab } from './workbenchNavigation';
 import { useScenario } from '../contexts/ScenarioContext';
 import { useAnalysis } from '../contexts/AnalysisContext';
 import { useUI } from '../contexts/UIContext';
@@ -10,13 +11,6 @@ interface AppTabRouterProps {
   onDeleteCustomScenario: () => void;
   onLoadScenarioSection14: () => void;
 }
-
-const LEGACY_TO_MAIN: Record<string, MainWorkbenchTab> = {
-  workflow: 'overview', overview: 'overview', input: 'facts', facts: 'facts',
-  patterns: 'physics', calc: 'physics', options: 'decision', cockpit: 'decision',
-  verification: 'verification', review: 'verification', safety: 'safety',
-  recommendation: 'delivery', docs: 'delivery', 'trace-audit': 'overview',
-};
 
 export const AppTabRouter: React.FC<AppTabRouterProps> = ({
   onSaveCustomScenario,
@@ -30,7 +24,9 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = ({
   const isCustomScenario = currentScenario?.isCustom;
   const onOpenScenarioManage = () => setScenarioManageOpen(true);
 
-  const mainTab = LEGACY_TO_MAIN[activeTab] || 'overview';
+  // activeTab 可能是新工作台 id（Navbar 直接设置），也可能是旧一级 id（历史跳转/预设）。
+  // 解析必须双向完全 —— 只做"旧→新"单向映射会让 physics/decision/delivery 静默弹回总览。
+  const mainTab = toMainTab(activeTab);
   const runCurrentAnalysis = () => { void runAnalysis(context, issue, currentScenarioId); };
 
   return (

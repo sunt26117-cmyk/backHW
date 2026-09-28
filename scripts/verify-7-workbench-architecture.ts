@@ -13,6 +13,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { MAIN_TABS, LEGACY_TO_MAIN, toMainTab } from '../src/components/workbenchNavigation';
 
 const ROOT = process.cwd();
 const read = (rel: string): string => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -23,6 +24,7 @@ const navbar = read('src/components/Navbar.tsx');
 const ui = read('src/contexts/UIContext.tsx');
 const app = read('src/App.tsx');
 const workbench = read('src/components/SeniorEngineeringWorkbenchView.tsx');
+const appRouter = read('src/components/AppTabRouter.tsx');
 const overlay = read('src/components/GlobalTraceAuditOverlay.tsx');
 
 let checks = 0;
@@ -60,10 +62,23 @@ ok(/<FunctionalSafetyReliabilityView[\s\S]{0,600}?onApplyMeasuredValues/.test(wo
 ok(/onApplyMeasuredValues=\{\(values, sourceLabel\)[\s\S]{0,600}?setIssue/.test(workbench), 'onApplyMeasuredValues 的 handler 没有真正写回 setIssue');
 ok(workbench.includes('measurementProvenance'), '一供/二供写回缺少 measurementProvenance 记录');
 
-// 6) MainWorkbenchTab 恰好 7 个
-const union = workbench.match(/export type MainWorkbenchTab = ([^;]+);/);
-ok(union !== null, '找不到 MainWorkbenchTab 类型声明');
-const ids = (union as RegExpMatchArray)[1].match(/'[a-z]+'/g)?.map((s) => s.replace(/'/g, '')) ?? [];
-ok(ids.length === 7, `MainWorkbenchTab 应为 7 个，实际 ${ids.length}: ${ids.join(',')}`);
+// 6) 恰好 7 个工作台
+ok(MAIN_TABS.length === 7, `工作台应为 7 个，实际 ${MAIN_TABS.length}`);
+for (const id of ['overview', 'facts', 'physics', 'decision', 'verification', 'safety', 'delivery']) {
+  ok((MAIN_TABS as readonly string[]).includes(id), `工作台缺少: ${id}`);
+}
+
+// 7) 导航解析必须"双向完全" —— 真实故障回归：physics/decision/delivery 被单向映射静默弹回总览
+//    （Navbar 与 onNavigateMain 传的是新工作台 id，而当时只做了"旧 id → 新工作台"的单向查表）
+for (const id of MAIN_TABS) {
+  ok(toMainTab(id) === id, `新工作台 id 解析错误: ${id} → ${toMainTab(id)}（会静默弹回总览，表现为该 Tab 点不动）`);
+}
+for (const legacy of Object.keys(LEGACY_TO_MAIN)) {
+  ok(toMainTab(legacy) === LEGACY_TO_MAIN[legacy], `旧 id 解析错误: ${legacy} → ${toMainTab(legacy)}`);
+}
+ok(toMainTab('不存在的-tab') === 'overview', '未知 id 应回落到总览而不是抛错');
+ok(toMainTab(undefined) === 'overview', '空 id 应回落到总览');
+// router 必须复用这份唯一真源，不能再本地另写一份单向映射
+ok(appRouter.includes('toMainTab(activeTab)'), 'AppTabRouter 未使用共享的 toMainTab 解析（可能又写了第二份单向映射）');
 
 console.log(`7-workbench-architecture: PASS（${checks} 项检查，原 14 个视图全部可达）`);
