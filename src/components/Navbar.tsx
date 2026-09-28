@@ -61,6 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     setDeviceLibraryOpen,
     setAiOfflineOpen,
     setOscilloscopeOpen,
+    setTraceAuditOpen,
   } = useUI();
   const { currentScenarioId, customScenarios, presetScenarios, context, issue } = useScenario();
   const { isAnalyzing, runAnalysis } = useAnalysis();
@@ -692,26 +693,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="flex-1 bg-slate-900 border border-slate-700 text-xs text-blue-300 font-medium rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500 cursor-pointer shadow-inner"
             >
               {[
-                { id: 'workflow', label: '0. 工程工作流' },
-                { id: 'overview', label: '🌟 10秒第一屏决策' },
-                { id: 'input', label: '1. 统一工程输入' },
-                { id: 'facts', label: '2. 事实证据与追溯' },
-                { id: 'patterns', label: '3. 物理机理 / 场景引擎' },
-                { id: 'options', label: '4. 候选方案与残余风险' },
-                { id: 'cockpit', label: '5. C-T-S-Q-L 决策驾驶舱' },
-                { id: 'verification', label: '6. 验证闭环 & VOI' },
-                { id: 'safety', label: '7. 功能安全 & 可靠性' },
-                { id: 'review', label: '8. 评审与回归 (Case01~14)' },
-                { id: 'recommendation', label: '9. 团队博弈推演 · RACI (团队隐秘担忧点+领导多方博弈)' },
-                { id: 'docs', label: '10. 受控文档 & EDR' },
-                { id: 'calc', label: '11. 确定性物理计算器' },
-                { id: 'trace-audit', label: '12. Trace 审计' },
+                { id: 'overview', label: '① 总览' },
+                { id: 'facts', label: '② 工程事实' },
+                { id: 'physics', label: '③ 物理分析' },
+                { id: 'decision', label: '④ 方案决策' },
+                { id: 'verification', label: '⑤ 验证与回归' },
+                { id: 'safety', label: '⑥ 功能安全 / 可靠性' },
+                { id: 'delivery', label: '⑦ 决策交付' },
               ].map((tab) => (
                 <option key={tab.id} value={tab.id} className="bg-slate-900 text-slate-200">
                   {tab.label}
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="md:hidden mb-1.5">
+            <button
+              type="button"
+              onClick={() => setTraceAuditOpen(true)}
+              className="w-full rounded-md border border-cyan-700/50 bg-cyan-950/30 px-3 py-1.5 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-900/40 cursor-pointer transition"
+            >
+              打开全局 Trace
+            </button>
           </div>
 
           {/* Desktop & Mobile Scrollable Nav Ribbon */}
@@ -727,25 +731,28 @@ export const Navbar: React.FC<NavbarProps> = ({
               <ChevronLeft className="w-3.5 h-3.5" />
             </button>
 
+            <button
+              id="global-trace-btn"
+              type="button"
+              onClick={() => setTraceAuditOpen(true)}
+              className="shrink-0 rounded-md border border-cyan-700/50 bg-cyan-950/30 px-2.5 py-1.5 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-900/40 cursor-pointer transition"
+              title="打开全局 Trace：Input → Source → Formula → Calculation → Threshold → Verdict"
+            >
+              Trace
+            </button>
+
             <nav
               ref={navRef}
               className="flex-1 flex space-x-1 overflow-x-auto py-1 scrollbar-none text-xs scroll-smooth"
             >
               {[
-                { id: 'workflow', label: '0. 工程工作流' },
-                { id: 'overview', label: '🌟 10秒第一屏决策' },
-                { id: 'input', label: '1. 统一工程输入' },
-                { id: 'facts', label: '2. 事实证据与追溯' },
-                { id: 'patterns', label: '3. 物理机理 / 场景引擎' },
-                { id: 'options', label: '4. 候选方案与残余风险' },
-                { id: 'cockpit', label: '5. C-T-S-Q-L 决策驾驶舱' },
-                { id: 'verification', label: '6. 验证闭环 & VOI' },
-                { id: 'safety', label: '7. 功能安全 & 可靠性' },
-                { id: 'review', label: '8. 评审与回归 (Case01~14)' },
-                { id: 'recommendation', label: '9. 团队博弈推演 · RACI' },
-                { id: 'docs', label: '10. 受控文档 & EDR' },
-                { id: 'calc', label: '11. 确定性物理计算器' },
-                { id: 'trace-audit', label: '12. Trace 审计' },
+                { id: 'overview', label: '① 总览' },
+                { id: 'facts', label: '② 工程事实' },
+                { id: 'physics', label: '③ 物理分析' },
+                { id: 'decision', label: '④ 方案决策' },
+                { id: 'verification', label: '⑤ 验证与回归' },
+                { id: 'safety', label: '⑥ 功能安全 / 可靠性' },
+                { id: 'delivery', label: '⑦ 决策交付' },
               ].map((tab) => {
                 const isActive = activeTab === tab.id;
                 return (

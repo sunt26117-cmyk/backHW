@@ -4,6 +4,7 @@ import { Navbar } from './components/Navbar';
 import { AppTabRouter } from './components/AppTabRouter';
 import { AppModals } from './components/AppModals';
 import { PageErrorBoundary } from './components/PageErrorBoundary';
+import GlobalTraceAuditOverlay from './components/GlobalTraceAuditOverlay';
 import { ScenarioProvider, useScenario } from './contexts/ScenarioContext';
 import { AnalysisProvider, useAnalysis } from './contexts/AnalysisContext';
 import { UIProvider, useUI } from './contexts/UIContext';
@@ -112,6 +113,8 @@ function AppContent() {
       <main className="flex-1 w-full min-w-0 px-3 sm:px-5 lg:px-6 2xl:px-8 py-5"><PageErrorBoundary key={ui.activeTab}><AppTabRouter onSaveCustomScenario={handleSaveCustom} onDeleteCustomScenario={() => handleDeleteScenario(scenario.currentScenarioId)} onLoadScenarioSection14={handleLoadSection14} /></PageErrorBoundary></main>
 
       <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500 transition-colors duration-200"><div className="w-full px-4 sm:px-6 lg:px-7 2xl:px-8 flex flex-col sm:flex-row items-center justify-between gap-2"><span>ECU Hardware Risk & Decision Copilot · 车载电子硬件技术决策系统</span><span>ISO 26262 · IATF 16949 · AEC-Q · CISPR 25 · C-T-S-Q-L Engine</span></div></footer>
+
+      <GlobalTraceAuditOverlay />
 
       <AppModals onSelectScenario={handleSelectScenario} onSaveAsCustomScenario={handleSaveAsCustom} onApplyAiResult={(r) => { analysis.setResult(r); saveAnalysisResult(scenario.currentScenarioId, r); ui.setActiveTab('facts'); ui.showToast('已导入免费 AI 结果并完成审计渲染', 'success'); }} />
     </div>
