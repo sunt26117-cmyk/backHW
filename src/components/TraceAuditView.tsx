@@ -98,6 +98,7 @@ const TraceAuditView: React.FC<TraceAuditViewProps> = ({ context, issue, result 
                     type="button"
                     onClick={() => setSelectedNodeId(node.id)}
                     aria-pressed={isSelected}
+                    title={`${patternName} · ${node.id}`}
                     className={`w-full rounded-lg border px-2.5 py-2 text-left transition cursor-pointer ${isSelected ? 'border-cyan-500/70 bg-cyan-950/25' : 'border-slate-800 bg-slate-900 hover:border-slate-600'}`}
                   >
                     <div className="flex items-center gap-2">
@@ -106,7 +107,13 @@ const TraceAuditView: React.FC<TraceAuditViewProps> = ({ context, issue, result 
                       {node.degraded && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-400" />}
                       <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${verdictClass[node.verdict || 'INFO'] || verdictClass.INFO}`}>{node.verdict || 'INFO'}</span>
                     </div>
-                    <div className="mt-0.5 truncate font-mono text-[9px] text-slate-500">{patternName} · {node.id}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[9px] text-slate-500">
+                      <span>结果 <b className="text-cyan-300">{String(node.value)}{node.unit ? ` ${node.unit}` : ''}</b></span>
+                      <span className="text-slate-700">·</span>
+                      <span>输入 <b className="text-slate-300">{node.inputs.length} 个</b></span>
+                      <span className="text-slate-700">·</span>
+                      <span>判定边界 <b className="text-amber-300">{node.threshold ? `${node.threshold.value} ${node.threshold.unit}` : '未声明'}</b></span>
+                    </div>
                   </button>
                 );
               })}

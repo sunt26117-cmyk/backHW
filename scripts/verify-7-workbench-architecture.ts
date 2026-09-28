@@ -89,5 +89,10 @@ ok(traceAudit.includes('TraceNodeList'), 'Trace 审计未复用 TraceNodeList（
 ok(!/<TraceDrawer[\s/>]/.test(traceAudit), 'Trace 审计又用回了 TraceDrawer 弹窗（应改为右侧常驻详情）');
 ok(traceAudit.includes('setSelectedNodeId'), 'Trace 审计缺少选中状态（无法在右侧切换详情）');
 ok(traceDrawer.includes('export const TraceNodeList'), 'TraceDrawer 未导出可复用的 TraceNodeList');
+// 列表每行必须仍能看到「结果 / 输入 / 判定边界」这三项事实（本次重构曾把它们从列表里删掉，
+// 只剩右侧详情，导致无法在列表里横向扫读）。右侧详情的同名标签在 TraceDrawer 里，不在本文件。
+for (const label of ['结果', '输入', '判定边界']) {
+  ok(traceAudit.includes(label), `Trace 审计列表每行缺少事实项: ${label}（重构时又被删掉了）`);
+}
 
 console.log(`7-workbench-architecture: PASS（${checks} 项检查，原 14 个视图全部可达）`);
