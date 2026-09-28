@@ -24,7 +24,7 @@ const sourceClass: Record<string, string> = {
   DERIVED: 'border-sky-700/50 bg-sky-950/30 text-sky-300',
 };
 
-const verdictClass: Record<string, string> = {
+export const verdictClass: Record<string, string> = {
   PASS: 'border-emerald-700/50 bg-emerald-950/30 text-emerald-300',
   MARGINAL: 'border-amber-700/50 bg-amber-950/30 text-amber-300',
   FAIL: 'border-orange-700/50 bg-orange-950/30 text-orange-300',
@@ -144,6 +144,18 @@ const TraceNodeCard: React.FC<{ node: TraceNode; waveforms: Map<string, StoredWa
   );
 };
 
+/**
+ * 节点详情列表：抽屉与「Trace 审计」内联详情**共用同一份渲染**（不复制/不重写），
+ * 这样"点一下在右侧显示详情"与"抽屉里看详情"永远不会出现两套不一致的说法。
+ */
+export const TraceNodeList: React.FC<{ traces: TraceNode[]; waveforms?: Map<string, StoredWaveform> }> = ({ traces, waveforms }) => {
+  const resolved = useMemo(() => waveforms ?? new Map(loadWaveforms().map((w) => [w.id, w])), [waveforms]);
+  if (!traces.length) {
+    return <div className="rounded-xl border border-amber-800/40 bg-amber-950/15 p-4 text-xs text-amber-200">当前 Pattern 没有可追溯节点。不要用 UI 文案补造 Trace；应先在确定性 Pattern Engine 声明真实输入。</div>;
+  }
+  return <div className="space-y-3">{traces.map((node) => <TraceNodeCard key={node.id} node={node} waveforms={resolved} />)}</div>;
+};
+
 const TraceDrawer: React.FC<TraceDrawerProps> = ({ open, traces, title = '结论可追溯 Trace', onClose }) => {
   const [mode, setMode] = useState<'DETAIL' | 'FLOW'>('DETAIL');
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -204,7 +216,7 @@ const TraceDrawer: React.FC<TraceDrawerProps> = ({ open, traces, title = '结论
           {traces.length === 0 ? (
             <div className="rounded-xl border border-amber-800/40 bg-amber-950/15 p-4 text-xs text-amber-200">当前 Pattern 没有可追溯节点。不要用 UI 文案补造 Trace；应先在确定性 Pattern Engine 声明真实输入与公式。</div>
           ) : mode === 'DETAIL' ? (
-            <div className="space-y-3">{traces.map((node) => <TraceNodeCard key={node.id} node={node} waveforms={waveforms} />)}</div>
+            <TraceNodeList traces={traces} waveforms={waveforms} />
           ) : (
             <div className="space-y-3">
               <div className="flex flex-wrap gap-1.5">

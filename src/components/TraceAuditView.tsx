@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileSearch, Filter, GitBranch, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Filter, GitBranch, ShieldAlert } from 'lucide-react';
 import { CopilotAnalysisResult, IssueInput, ProjectContext, TraceNode } from '../types';
 import { evaluateAllBldcPatterns } from '../domains/bldc';
 import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
-import TraceDrawer from './TraceDrawer';
+import { TraceNodeList, verdictClass } from './TraceDrawer';
 
 interface TraceAuditViewProps {
   context: ProjectContext;
@@ -18,7 +18,7 @@ interface TraceAuditRow { patternId: string; patternName: string; node: TraceNod
 
 const TraceAuditView: React.FC<TraceAuditViewProps> = ({ context, issue, result }) => {
   const [filter, setFilter] = useState<AuditFilter>('ALL');
-  const [drawerTrace, setDrawerTrace] = useState<TraceNode[] | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const domain = resolveEngineeringDomain(issue);
   const isBldc = domain === 'BLDC';
   const input = useMemo(() => deriveBldcEvaluationInput(context, issue), [context, issue]);
@@ -37,6 +37,9 @@ const TraceAuditView: React.FC<TraceAuditViewProps> = ({ context, issue, result 
     if (filter === 'CRITICAL_FAIL') return node.verdict === 'CRITICAL' || node.verdict === 'FAIL';
     return true;
   }), [rows, filter]);
+
+  // 主从布局：右侧常驻详情，默认选中第一条（不再点开弹窗）
+  const selectedNode = filteredRows.find((row) => row.node.id === selectedNodeId) ?? filteredRows[0];
 
   const degraded = rows.filter((r) => r.node.degraded).length;
   const criticalFail = rows.filter((r) => r.node.verdict === 'CRITICAL' || r.node.verdict === 'FAIL').length;
@@ -84,37 +87,51 @@ const TraceAuditView: React.FC<TraceAuditViewProps> = ({ context, issue, result 
             </div>
           </div>
 
-          <div className="space-y-2">
-            {filteredRows.map(({ patternId, patternName, node }) => (
-              <button key={node.id} type="button" onClick={() => setDrawerTrace([node])} className="w-full rounded-xl border border-slate-800 bg-slate-900 p-4 text-left hover:border-slate-700 hover:bg-slate-800/70 cursor-pointer transition">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-cyan-400">{patternId}</span>
-                      <span className="text-xs font-medium text-white">{patternName}</span>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+            {/* 左：紧凑列表（一行一条，不再让每行占满横向空间） */}
+            <div className="min-w-0 space-y-1.5 lg:max-h-[62vh] lg:overflow-y-auto lg:pr-1">
+              {filteredRows.map(({ patternId, patternName, node }) => {
+                const isSelected = selectedNode?.node.id === node.id;
+                return (
+                  <button
+                    key={node.id}
+                    type="button"
+                    onClick={() => setSelectedNodeId(node.id)}
+                    aria-pressed={isSelected}
+                    className={`w-full rounded-lg border px-2.5 py-2 text-left transition cursor-pointer ${isSelected ? 'border-cyan-500/70 bg-cyan-950/25' : 'border-slate-800 bg-slate-900 hover:border-slate-600'}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="shrink-0 font-mono text-[10px] font-bold text-cyan-400">{patternId}</span>
+                      <span className="min-w-0 flex-1 truncate text-xs text-slate-200">{node.title}</span>
+                      {node.degraded && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-400" />}
+                      <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${verdictClass[node.verdict || 'INFO'] || verdictClass.INFO}`}>{node.verdict || 'INFO'}</span>
                     </div>
-                    <div className="mt-1 text-[10px] font-mono text-slate-500 break-all">{node.id}</div>
+                    <div className="mt-0.5 truncate font-mono text-[9px] text-slate-500">{patternName} · {node.id}</div>
+                  </button>
+                );
+              })}
+              {!filteredRows.length && <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-center text-xs text-slate-500">当前筛选条件没有 Trace 节点。</div>}
+            </div>
+
+            {/* 右：选中节点的详情常驻显示（点一下即切换，不弹窗） */}
+            <div className="min-w-0 rounded-xl border border-slate-800 bg-slate-900/40 p-3 lg:max-h-[62vh] lg:overflow-y-auto">
+              {selectedNode ? (
+                <>
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                    <span className="font-mono text-cyan-400">{selectedNode.patternId}</span>
+                    <span className="text-slate-300">{selectedNode.patternName}</span>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {node.degraded && <span className="rounded border border-amber-700/60 bg-amber-950/25 px-2 py-1 text-[9px] font-semibold text-amber-300">待实测/规格确认</span>}
-                    <span className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[9px] font-semibold text-slate-300">{node.verdict || 'INFO'}</span>
-                    <FileSearch className="h-4 w-4 text-cyan-400" />
-                  </div>
-                </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                  <AuditCell label="结果" value={`${String(node.value)}${node.unit ? ` ${node.unit}` : ''}`} />
-                  <AuditCell label="输入" value={`${node.inputs.length} 个`} />
-                  <AuditCell label="判定边界" value={node.threshold ? `${node.threshold.value} ${node.threshold.unit}` : '未声明'} />
-                </div>
-              </button>
-            ))}
-            {!filteredRows.length && <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-center text-xs text-slate-500">当前筛选条件没有 Trace 节点。</div>}
+                  <TraceNodeList traces={[selectedNode.node]} />
+                </>
+              ) : (
+                <div className="p-4 text-center text-xs text-slate-500">左侧没有可显示的 Trace 节点。</div>
+              )}
+            </div>
           </div>
         </>
       )}
 
       {result?.analysisBasis && <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-[10px] text-slate-500">Trace Audit 与 AI 分析是两条不同证据链：这里不把 AI 推理文字冒充为确定性计算输入。AI 的 calculatedOutputs 仍应回指其对应的本地计算证据。</div>}
-      <TraceDrawer open={!!drawerTrace} traces={drawerTrace || []} title="Trace Audit · 节点详情" onClose={() => setDrawerTrace(null)} />
     </div>
   );
 };
@@ -126,11 +143,5 @@ const Stat: React.FC<{ label: string; value: number; tone: string; icon?: React.
   </div>
 );
 
-const AuditCell: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div className="rounded-lg border border-slate-800 bg-slate-950 p-2.5">
-    <div className="text-[9px] text-slate-500">{label}</div>
-    <div className="mt-1 text-xs font-mono text-slate-200 break-words">{value}</div>
-  </div>
-);
 
 export default TraceAuditView;

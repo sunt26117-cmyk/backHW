@@ -81,4 +81,13 @@ ok(toMainTab(undefined) === 'overview', '空 id 应回落到总览');
 // router 必须复用这份唯一真源，不能再本地另写一份单向映射
 ok(appRouter.includes('toMainTab(activeTab)'), 'AppTabRouter 未使用共享的 toMainTab 解析（可能又写了第二份单向映射）');
 
+// 8) Trace 审计的交互契约：点一下就在右侧常驻显示详情，不得再弹窗
+const traceAudit = read('src/components/TraceAuditView.tsx');
+const traceDrawer = read('src/components/TraceDrawer.tsx');
+ok(traceAudit.includes('TraceNodeList'), 'Trace 审计未复用 TraceNodeList（详情会出现第二套渲染/两套说法）');
+// 注意只能匹配 JSX 用法：审计页仍然要从 './TraceDrawer' 里 import TraceNodeList/verdictClass
+ok(!/<TraceDrawer[\s/>]/.test(traceAudit), 'Trace 审计又用回了 TraceDrawer 弹窗（应改为右侧常驻详情）');
+ok(traceAudit.includes('setSelectedNodeId'), 'Trace 审计缺少选中状态（无法在右侧切换详情）');
+ok(traceDrawer.includes('export const TraceNodeList'), 'TraceDrawer 未导出可复用的 TraceNodeList');
+
 console.log(`7-workbench-architecture: PASS（${checks} 项检查，原 14 个视图全部可达）`);
