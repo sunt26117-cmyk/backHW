@@ -2,7 +2,9 @@ import { runExpertAnalysis } from '../data/expertEngine';
 import { assessInputIntegrity, generatePromptIntegrityDirectives } from './inputIntegrityEngine';
 import { runDeterministicPrecomputations } from './deterministicPrecomputation';
 import { findSimilarGoldCases, buildGroundingText } from './aiGrounding';
-import { getDomainMeasurementFields, resolveEngineeringDomain, resolveEngineeringDomains } from './scenarioDomainEngine';
+import { getDomainMeasurementFields, getDomainMeasurementGroups, resolveEngineeringDomain, resolveEngineeringDomains, getEngineeringDomainLabel } from './scenarioDomainEngine';
+import { getMultiDomainAdaptivePromptGuidance } from './domainAdaptivePromptEngine';
+import { getCrossDomainCouplings } from './crossDomainCouplingMatrix';
 import { buildDualTimelinePlan } from './dualTimelineEngine';
 import { auditAiResult } from './aiResultAuditor';
 import { validateAiResultStructure } from './aiResultSchema';
@@ -48,18 +50,35 @@ function buildJsonFieldOutline(schema: any, indent = ''): string {
 export const COPILOT_RESULT_FIELD_OUTLINE = buildJsonFieldOutline(COPILOT_RESULT_JSON_SCHEMA);
 
 export const HARDWARE_CHIEF_SYSTEM_PROMPT = [
-  '你是一位在汽车国际顶级Tier-1拥有20年经验的首席硬件架构师，精通ISO 26262 (Part 5)、ASPICE 4.0 (HWE.1-4) 及IATF 16949体系。',
-  '你的使命是协助硬件开发工程师进行技术攻关、防身免责与跨部门推演。',
+  '你是汽车电子硬件工程的资深首席工程师，负责基于当前项目证据进行风险判断、物理机理解释、方案权衡、验证规划与决策支持。',
+  '你的任务不是替代本地确定性工程引擎计算，而是在其事实边界之上进行工程推理。',
   '',
-  '【核心工作准则】',
-  '1. 严禁和稀泥：方案必须给出鲜明的支持/否决倾向，必须揭示每一个方案的隐藏代价（Side Effects）。',
-  '2. 绝对区分特采性质（根据 IATF 16949 Section 8.7）：内部样件特批（Internal Deviation）必须有台套数范围与物理隔离报废措施；主机厂外部让步（Customer Concession）涉及功能安全/降额击穿/EMC未达标/引脚变更，必须走正式VDA ECR流程，严禁建议工程师私下放行。',
-  '3. 严格执行ISO 26262硬件度量判定：SPFM ASIL B>=90% / C>=97% / D>=99%；LFM ASIL B>=60% / C>=80% / D>=90%；PMHF ASIL D<10 FIT / C<100 FIT。任何削减硬件安全机制又无诊断补偿的方案必须标记 VETO_SAFETY_VIOLATION。',
-  '4. 深度洞察直属领导风格 (hwLeadStyle)：CONSERVATIVE(技术求稳) / AGILE_DELIVERY(敏捷交付) / PROCESS_DEFENSIVE(流程免责)，每个方案给出针对 HW Lead/PM/SW/System 的防身策略。',
-  '5. 语言必须极其专业：使用正规汽车工程语境（工况剖面Mission Profile、抛负载抑制度、寄生振荡、体二极管反向恢复损耗、AEC-Q Grade 1）。',
-  '6. 【工况强定锚与防幻觉红线】：把输入的项目上下文与实测问题作为唯一最高事实依据；本地预核算事实必须严格直接引用其数值与裕量，严禁另造冲突数字；缺失参数视为 UNKNOWN 禁止默认值填充；绝对禁止脱离工况给通用套话。',
+  '【证据优先级——必须严格遵守】',
+  '1. 当前项目的结构化输入、实测值、规格/要求和带 provenance 的本地确定性计算结果，是本次分析的最高事实来源。',
+  '2. 本地确定性计算已经给出的数值、Margin、Verdict、VETO 不得被模型重新计算、改写或用另一个未标注来源的数字覆盖。',
+  '3. Gold Case 只用于识别 Pattern、验证思路和输出严谨度；绝不能把案例中的数值、工况、结论或推荐方案冒充当前项目事实。',
+  '4. 通用工程知识和领域规则只能用于解释机制、提出验证方法或识别风险；如果需要一个当前项目没有提供的具体数值，必须写 UNKNOWN，而不是猜测。',
+  '5. 当不同来源冲突时，优先级为：当前实测/规格与项目输入 > 本地确定性计算及其 provenance > 当前项目明确假设 > Gold Case > 通用知识。冲突必须进入 assumptions/unknowns。',
   '',
-  '【输出格式强制要求】严格输出符合预定义JSON Schema的纯JSON文本，禁止任何Markdown代码块外壳，禁止任何前言和结语。',
+  '【模型职责边界】',
+  '1. 本地引擎负责确定性计算、硬性门禁、物理量和可审计数值；你负责解释、因果推理、方案权衡、风险沟通和最小验证路径。',
+  '2. 不得为了让答案完整而补齐缺失参数；缺失参数就是 UNKNOWN，并说明它阻塞什么判断以及最小验证动作。',
+  '3. 不得把“看起来合理”的经验值写成 measured/spec/calculated；任何数值都必须能追溯到 citedFields。',
+  '4. 不得把管理偏好、领导风格、心理博弈、攻心、甩锅、免责策略、Nash equilibrium 等作为技术依据，也不得据此改变方案评分或推荐。',
+  '5. 不得输出与当前工程无关的产品宣传、软件介绍、泛泛而谈的工程鸡汤或“建议优化/加强/检查”类无验证条件空话。',
+  '',
+  '【方案判断规则】',
+  '1. 每个候选方案必须说明：技术收益、工程代价、副作用、残余风险、验证方法、前置条件、停止条件和 Plan B。',
+  '2. candidateActions 的 T/S/C/Q/L 只能依据当前项目的工程事实、确定性基线和明确的工程约束进行判断；不能依据人员偏好。',
+  '3. scores.total 必须与给定权重一致；如果本地基线已有候选方案评分，优先以基线评分为锚，不得无依据重写。',
+  '4. 本地确定性引擎触发的 VETO 必须保留；模型不得通过改写文字把 VETO 变成“可接受”。',
+  '5. 对安全、可靠性、EMC、器件额定值等阈值，优先使用当前项目提供的规格和本地引擎结果；未提供时不得虚构项目阈值。',
+  '',
+  '【输出要求】',
+  '1. 严格输出预定义 JSON Schema 的纯 JSON，不要 Markdown、前言或结语。',
+  '2. knownFacts 只放有证据支持的当前项目事实；assumptions 明确标记推断；unknowns 明确列出证据缺口。',
+  '3. citedFields 必须引用真实存在的 measuredValues.*、baseline.analysisBasis.calculatedOutputs:* 或 precomputed.* 键。',
+  '4. 最终推荐必须说明为什么现在选择、为什么不选主要替代方案、下一步验证什么以及什么证据会推翻当前推荐。',
 ].join('\n');
 
 export function healAndParseJson(raw: string): any {
@@ -124,57 +143,181 @@ export function validateAndEnrichAiResult(parsed: any, baseline: any, modelName:
   return sanitizedResult;
 }
 
-export function buildAnalysisPrompt(context: any, issue: any) {
+export function buildAnalysisPrompt(context: any, issue: any, modelConfig?: any) {
   const integrityAssessment = assessInputIntegrity(context, issue);
   const integrityPromptDirectives = generatePromptIntegrityDirectives(integrityAssessment);
   const baseline = runExpertAnalysis(context, issue);
   if (baseline.provenance) baseline.provenance.inputIntegrity = integrityAssessment;
   const precomputedFacts = runDeterministicPrecomputations(context, issue);
   const similarGoldCases = findSimilarGoldCases(issue, 2);
+  // 将离散预计算事实正式挂到 baseline.analysisBasis，保证 citedFields 在 AI 返回后仍可被 Auditor 反查。
+  const precomputedEvidence = precomputedFacts.map((f) => ({
+    id: f.id,
+    key: `precomputed.${f.id}`,
+    title: f.title,
+    status: f.status || 'CALCULATED',
+    ...(typeof f.calculatedValue === 'number' ? { value: f.calculatedValue } : {}),
+    unit: f.unit,
+    engine: 'deterministicPrecomputation',
+    calculation: f.category,
+    formula: f.formulaOrBasis,
+    inputs: f.inputs || [],
+    inputSources: f.inputSources || {},
+    missingInputs: f.missingInputs || [],
+    ...(typeof f.specThreshold === 'number' ? { specThreshold: f.specThreshold } : {}),
+    ...(typeof f.safetyMargin === 'number' ? { safetyMargin: f.safetyMargin } : {}),
+    complianceVerdict: f.complianceVerdict,
+    directiveForAi: f.directiveForAi,
+  }));
+  baseline.analysisBasis = {
+    ...(baseline.analysisBasis || { ruleInputs: [], measuredInputs: [], calculatedOutputs: [], assumptions: [], fixedTemplateFields: [] }),
+    calculatedOutputs: Array.from(new Set([
+      ...(baseline.analysisBasis?.calculatedOutputs || []),
+      ...precomputedFacts
+        .filter((f) => f.status !== 'INSUFFICIENT_INPUT')
+        .map((f) => `precomputed.${f.id}=${f.calculatedValue}${f.unit ? ` ${f.unit}` : ''}; margin=${f.safetyMargin ?? 'N/A'}; verdict=${f.complianceVerdict}`),
+    ])),
+    calculatedOutputEvidence: [
+      ...(baseline.analysisBasis?.calculatedOutputEvidence || []),
+      ...precomputedEvidence,
+    ],
+  };
   const grounding = buildGroundingText(baseline, precomputedFacts, similarGoldCases);
-  const allExpectedFields = getDomainMeasurementFields(issue);
+
+  const primaryDomain = resolveEngineeringDomain(issue);
+  const relatedDomains = resolveEngineeringDomains(issue).filter((d) => d !== primaryDomain);
+  const multiDomainGuidance = getMultiDomainAdaptivePromptGuidance(issue, context);
+  const primaryGuidance = multiDomainGuidance.primary;
+  const primaryFields = getDomainMeasurementGroups(issue).find((g) => g.domain === primaryDomain)?.fields || [];
+  const values = issue?.measuredValues || {};
   const isFilled = (v: unknown) => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
-  const missingFieldsList = allExpectedFields.filter((f) => !isFilled((issue?.measuredValues || {})[f.key]));
-  const missingFieldsText = missingFieldsList.length ? missingFieldsList.map((f) => '- ' + f.key + '（' + f.label + (f.unit ? '，单位 ' + f.unit : '') + '，' + f.tag + (f.required ? '，必填缺失' : '') + '）').join('\n') : '（本次涉及的工程域测量字段均已填写）';
-  const prompt = [
-    '【执行优先级（不可违背）】',
-    '1. 必须直接引用【本地确定性预核算事实】中的数值与裕量，严禁另造冲突数字。',
-    '2. 缺失参数一律视为 UNKNOWN，禁止默认值填充。',
-    '3. 输出必须是纯 JSON，无任何 Markdown 外壳。',
-    '4. 必须同时给出 containmentPhase（T+24h）与 permanentPhase。',
-    '5. 任何触及功能安全/降额击穿的方案必须显式标记 VETO。',
-    '',
-    '=============================================',
-    '【1. 输入工程背景】',
-    '- 项目名称: ' + (context?.projectName || '未提供'),
-    '- ECU 类型: ' + (context?.ecuType || '未提供') + ' (' + (context?.productType || '未提供') + ')',
-    '- 项目阶段: ' + (context?.projectPhase || 'DV') + ' | 样品状态: ' + (context?.sampleStatus || 'B样'),
-    '- 功能安全等级: ' + (context?.asilLevel || 'ASIL B'),
-    '- 交付倒计时: 距离【' + (context?.nextMilestone || '交付节点') + '】仅剩【' + (context?.daysRemaining ?? 14) + '天】',
-    '- 成本约束: ' + (context?.costConstraint || '未提供'),
-    '',
-    '【2. 输入实测问题与工程顾虑】',
-    '- 领域分类: ' + (issue?.issueCategories?.join(', ') || '硬件工程'),
-    '- 规范要求: ' + (issue?.requirement || '未定义'),
-    '- 实际测量结果: ' + (issue?.actualMeasurement || '未提供实测'),
-    '- 测试条件: ' + (issue?.testCondition || '未提供测试边界'),
-    '- 失效现象: ' + (issue?.failurePhenomenon || '未提供现象'),
-    '- 核心工程顾虑: ' + (issue?.engineeringConcern || '未提供顾虑'),
-    '- 关键实测数值: ' + JSON.stringify(issue?.measuredValues || {}, null, 2),
-    '',
-    '【3. 本地确定性工程事实层（NON-NEGOTIABLE FACTS）】',
-    grounding.baselineText, '', grounding.precomputedText, '',
-    '★ 事实边界：以上事实来自本地确定性规则或物理计算；同一工程量的结论直接沿用。若认为输入/模型/计算存在冲突，应在 assumptions/unknowns 中说明，不生成第二套未标注来源的数字。',
-    '',
-    '【4. 输入数据完整度车规审计】', integrityPromptDirectives, '',
-    '【5. 本次未提供的工程参数（UNKNOWN 边界）】', missingFieldsText, '',
-    '【6. 金标准参考案例（只作分析严谨度参考，不得把案例数值当当前项目事实）】', grounding.goldCaseText, '',
-    '【7. 车规基准定锚】',
-    '- 确定性问题定性: ' + (baseline?.coreConclusion?.problemSummary || ''),
-    '- 综合风险评级基准: ' + (baseline?.riskRatings?.overallRisk || 'Medium-High') + ' (' + (baseline?.riskRatings?.overallRiskScore ?? 75) + '分)',
-  ].join('\n');
-  const userPrompt = prompt + '\n\n【输出JSON字段结构清单（必须严格按此结构输出完整 JSON，不得遗漏必填字段，不得新增字段）】\n' + COPILOT_RESULT_FIELD_OUTLINE;
-  return { systemPrompt: HARDWARE_CHIEF_SYSTEM_PROMPT, userPrompt, baseline, integrityAssessment, precomputedFacts };
+  const missingRequired = primaryFields.filter((f) => f.required && !isFilled(values[f.key]));
+  const coverage = primaryFields.length ? primaryFields.filter((f) => isFilled(values[f.key])).length / primaryFields.length : 1;
+  const evidenceLevel = missingRequired.length || integrityAssessment.grade === 'GRADE_D_BLOCKING' || integrityAssessment.grade === 'GRADE_C_INSUFFICIENT'
+    ? 'LOW' : coverage >= 0.8 ? 'HIGH' : 'MEDIUM_INFERRED';
+
+  const primaryGuidanceText = evidenceLevel === 'LOW'
+    ? `【主导工程域：${primaryGuidance.title}｜证据等级：LOW】\n- 当前仅允许使用硬性门禁/否决边界，不做未经验证的定量外推。\n- 必须补齐：${missingRequired.length ? missingRequired.map((f) => `${f.label}${f.unit ? ` (${f.unit})` : ''}`).join('、') : '输入完整度审计指出的关键缺口'}\n- 禁止：把经验值写成实测或规格值。`
+    : `【主导工程域：${primaryGuidance.title}｜证据等级：${evidenceLevel}】\n- 物理机理与公式：${primaryGuidance.physicsFormulas}\n- 元器件/设计基准：${primaryGuidance.componentSpecs}\n- 测试与验证：${primaryGuidance.testProtocol}\n- 跨域影响：${primaryGuidance.crossDisciplinaryImpact}\n- 禁止空话：${primaryGuidance.prohibitedVagueness.join('；')}`;
+
+  const relatedGuidanceText = multiDomainGuidance.related.length
+    ? multiDomainGuidance.related.map((r) => `【关联域：${r.title}】\n- 只关注与主导域的物理耦合、影响和否决边界：${r.crossDisciplinaryImpact}`).join('\n\n')
+    : '无关联工程域。';
+
+  const couplings = getCrossDomainCouplings(primaryDomain, relatedDomains);
+  const couplingText = couplings.length
+    ? couplings.map((c) => `- ${c.fromDomain} → ${c.toDomain}：动作=${c.action}；物理变化=${c.physicalChange}；代价=${c.physicalTradeoff}；复核=${c.requiredRevalidation.join('; ')}${c.vetoCondition ? `；VETO=${c.vetoCondition}` : ''}`).join('\n')
+    : '无已定义的跨域耦合规则。';
+
+  const allExpectedFields = getDomainMeasurementFields(issue);
+  const missingFields = allExpectedFields.filter((f) => !isFilled(values[f.key]));
+  const missingFieldsText = missingFields.length
+    ? missingFields.map((f) => `- ${f.key}（${f.label}${f.unit ? `，${f.unit}` : ''}，${f.tag}${f.required ? '，必填缺失' : ''}）`).join('\n')
+    : '无缺失测量字段。';
+
+  const domainEvidence = getDomainMeasurementGroups(issue).map((group, idx) => {
+    const filled = group.fields.filter((f) => isFilled(values[f.key])).map((f) => `${f.key}=${values[f.key]}`);
+    const missing = group.fields.filter((f) => !isFilled(values[f.key])).map((f) => f.key);
+    return `【${idx === 0 ? '主导域' : '关联域'} ${getEngineeringDomainLabel(group.domain)}】已填=${filled.length ? filled.join(', ') : '无'}；缺失=${missing.length ? missing.join(', ') : '无'}`;
+  }).join('\n');
+
+  // 给模型一个“当前工程方案基线”，防止模型凭空创造候选方案分数。
+  const baselineActions = (baseline.candidateActions || []).map((a: any) => ({
+    id: a.id,
+    name: a.name,
+    category: a.category,
+    scores: a.scores,
+    veto: a.veto,
+    riskDelta: a.riskDelta,
+    residualRisk: a.residualRisk,
+    verificationCost: a.verificationCost,
+    timeCost: a.timeCost,
+    citedFields: a.citedFields,
+  }));
+
+  const userPrompt = `
+【分析任务边界】
+本次云端模型是“推理与决策层”，不是第二套计算引擎。你必须在以下当前工程事实之内工作。
+
+【A. 当前项目上下文】
+- 项目：${context?.projectName || '未提供'}
+- ECU：${context?.ecuType || '未提供'} / ${context?.productType || '未提供'}
+- 阶段：${context?.projectPhase || '未提供'}；样品：${context?.sampleStatus || '未提供'}
+- ASIL：${context?.asilLevel || '未提供'}
+- 下一门禁：${context?.nextMilestone || '未提供'}；剩余：${context?.daysRemaining ?? 'UNKNOWN'} 天
+- 成本约束：${context?.costConstraint || '未提供'}
+
+【B. 当前工程问题——最高事实层】
+- 主导域：${getEngineeringDomainLabel(primaryDomain)}
+- 关联域：${relatedDomains.map(getEngineeringDomainLabel).join(' / ') || '无'}
+- 问题分类：${issue?.issueCategories?.join(', ') || '未提供'}
+- 规范/要求：${issue?.requirement || 'UNKNOWN'}
+- 实际测量：${issue?.actualMeasurement || 'UNKNOWN'}
+- 测试条件：${issue?.testCondition || 'UNKNOWN'}
+- 测试环境：${issue?.environment || 'UNKNOWN'}
+- 失效现象：${issue?.failurePhenomenon || 'UNKNOWN'}
+- 工程顾虑：${issue?.engineeringConcern || 'UNKNOWN'}
+- 结构化实测值：${JSON.stringify(values, null, 2)}
+
+【C. 本地确定性事实——NON-NEGOTIABLE】
+${grounding.baselineText}
+${grounding.precomputedText}
+
+规则：这些事实中的 CALCULATED / measured / spec / VETO / Margin 是权威边界。不得重新计算出第二套数字。若发现冲突，只能在 assumptions/unknowns 中指出并要求复核。
+
+【D. 当前方案基线——只作为本项目当前工程状态，不得凭空重造】
+${JSON.stringify(baselineActions, null, 2)}
+- 当前确定性风险：${baseline?.riskRatings?.overallRisk || 'UNKNOWN'}；当前确定性风险分数：${baseline?.riskRatings?.overallRiskScore ?? 'UNKNOWN'}
+- 当前确定性问题：${baseline?.coreConclusion?.problemSummary || 'UNKNOWN'}
+- 当前确定性物理机理：${baseline?.physicalMechanism?.rootCauseAnalysis || 'UNKNOWN'}
+
+如果需要提出新方案，必须解释它相对于上述基线的变化、工程依据和验证条件；不能只因为“看起来更好”就改变评分。
+
+【E. 输入完整度与 UNKNOWN 边界】
+${integrityPromptDirectives}
+未提供字段：
+${missingFieldsText}
+按工程域的证据浓度：
+${domainEvidence}
+
+【F. 主导域工程推理规则】
+${primaryGuidanceText}
+
+${relatedGuidanceText}
+
+【G. 跨域耦合与 VETO 复核】
+${couplingText}
+候选方案必须逐条回填 crossDomainCouplingChecks；不得遗漏已经给出的 VETO 边界。
+
+【H. Gold Case——仅用于 Pattern 参考】
+${grounding.goldCaseText}
+Gold Case 绝不是当前项目事实。禁止复制其中数值、结论、工况或推荐作为当前项目答案。
+
+【I. 最终决策要求】
+你必须回答：
+1. 当前最可信的工程问题是什么？
+2. 哪些是已证实事实，哪些只是推断，哪些未知？
+3. 主导物理机理是什么？
+4. 候选方案分别解决什么、付出什么代价、留下什么残余风险？
+5. 当前为什么可以/不能继续推进？
+6. 未来24小时最小且最有价值的验证动作是什么？
+7. 什么证据出现后必须推翻当前建议？
+8. 必须同时给出 T+24h containmentPhase 和下一版 permanentPhase。
+
+【J. 禁止输出】
+- 禁止领导风格、领导接受度、心理博弈、攻心、甩锅、免责概率、Nash equilibrium 等内容。
+- 禁止软件功能介绍、AI 自我介绍、泛泛工程口号。
+- 禁止把 UNKNOWN 写成确定事实。
+- 禁止把 Gold Case 数值当当前项目数值。
+- 禁止用未提供的默认参数完成计算。
+- 禁止用新的未标注公式覆盖本地确定性计算。
+
+【K. 输出协议】
+严格输出预定义 JSON Schema 的纯 JSON；不得增加字段。所有带数值的关键结论必须能通过 citedFields 回溯到当前输入或本地确定性事实。
+`;
+
+  const finalUserPrompt = `${userPrompt}\n\n【输出JSON字段结构清单】\n${COPILOT_RESULT_FIELD_OUTLINE}`;
+  return { systemPrompt: HARDWARE_CHIEF_SYSTEM_PROMPT, userPrompt: finalUserPrompt, baseline, integrityAssessment, precomputedFacts };
 }
 
 export function processImportedAiResult(aiContent: string, context: any, issue: any): { success: boolean; data?: any; aiAudit?: any; error?: string } {
