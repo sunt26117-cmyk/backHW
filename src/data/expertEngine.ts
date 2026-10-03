@@ -74,7 +74,7 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     result = createEmptyLegacyAnalysisResult();
   }
 
-    const editor = createSemanticAnalysisResultEditor(result);
+    let editor = createSemanticAnalysisResultEditor(result);
 
 // 当前案例的 P0 支柱统一由 scenarioDynamic 基于当前 issue/context 重建。
   // 不再调用 decisionPillars.ts，避免历史模板数字/方案成为运行时事实来源。
@@ -257,6 +257,10 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   }
 
   result = applyScenarioDynamicLayer(result, context, issue);
+  // applyScenarioDynamicLayer 返回 structuredClone 后的**新对象**。必须立即重新绑定语义编辑器：
+  // 否则其后所有写入（动态 VETO / source / provenance）都落在被丢弃的旧对象上，
+  // 运行时表现为"顶层 provenance 丢失"以及"纯临时缓解方案不再被否决"。
+  editor = createSemanticAnalysisResultEditor(result);
 
   // 确保 candidateActions 中的 riskDelta、crossDomainCouplingChecks、veto 100% 完整具备
   if (editor.action.candidates) {
