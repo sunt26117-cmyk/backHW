@@ -589,10 +589,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="header-open-oscilloscope-btn"
               onClick={() => setOscilloscopeOpen(true)}
               className="flex items-center space-x-1.5 bg-amber-600/20 hover:bg-amber-600/35 active:bg-amber-600/40 text-amber-300 font-medium text-xs sm:text-sm px-2.5 sm:px-3 py-2 rounded-lg border border-amber-500/40 transition shadow-sm cursor-pointer shrink-0"
-              title="导入示波器 CSV，自动提取峰值/dv/dt/振铃频率"
+              title="打开波形分析工作台：真实时间轴、缩放、游标、FFT 与工程证据回填"
             >
               <Activity className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">示波器导入</span>
+              <span className="hidden sm:inline">波形分析</span>
             </button>
 
             {/* AI Offline Collaboration Button */}

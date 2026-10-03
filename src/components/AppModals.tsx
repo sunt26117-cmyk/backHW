@@ -10,7 +10,7 @@ import { ScenarioManageModal } from './ScenarioManageModal';
 import { SourceDownloadModal } from './SourceDownloadModal';
 import { DeviceLibraryModal } from './DeviceLibraryModal';
 import { AiOfflineModal } from './AiOfflineModal';
-import { OscilloscopeImportModal } from './OscilloscopeImportModal';
+import { WaveformWorkbenchModal } from './WaveformWorkbenchModal';
 import { useScenario } from '../contexts/ScenarioContext';
 import { useUI } from '../contexts/UIContext';
 
@@ -81,7 +81,7 @@ export const AppModals: React.FC<AppModalsProps> = ({
         onApplyToIssue={(values, provenance) => setIssue((prev) => ({ ...prev, measuredValues: { ...(prev.measuredValues || {}), ...values }, measurementProvenance: { ...(prev.measurementProvenance || {}), ...provenance }, measuredValueSource: 'IMPORTED' }))}
       />
 
-      <OscilloscopeImportModal
+      <WaveformWorkbenchModal
         isOpen={oscilloscopeOpen}
         onClose={() => setOscilloscopeOpen(false)}
         onApplyMeasured={(values, provenance) => {
