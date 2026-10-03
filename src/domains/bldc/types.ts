@@ -31,7 +31,7 @@ export interface BldcEvaluationInput {
   // P003
   cgsPf?: number; // 栅源电容，用于容性分压界
   sourceInductanceNh?: number; // 源极寄生电感 L_source(nH)，配合 di/dt 估算门极过冲
-  // [本次修复新增] 示波器导入的门极 Vgs 实测尖峰(参见 OscilloscopeImportModal 的"Vgs 门极"
+  // [本次修复新增] 示波器导入的门极 Vgs 实测尖峰(参见波形分析工作台的"Vgs 门极"
   // 通道)。此前这个字段(gateSpikeV)只被导入并展示，没有任何引擎读取它——用户辛辛苦苦导入
   // 的门极尖峰波形不会影响任何风险判断。现在接入 P003：有实测值时优先于米勒效应理论估算值，
   // 因为实测直接反映了包括米勒耦合、源极电感过冲、以及模型未覆盖的其他寄生路径在内的

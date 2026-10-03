@@ -173,6 +173,25 @@ export function computeSpectrum(
   return { frequencies, magnitudes, dbValues, sampleRate, resolution: df, fftSize: baseN };
 }
 
+export type WaveformEngineeringRole = 'none' | 'vbus' | 'vgs' | 'vds';
+
+/** Assign one engineering role to one channel; selecting the same role elsewhere clears the prior owner. */
+export function assignUniqueScopeRole(
+  roles: readonly WaveformEngineeringRole[],
+  index: number,
+  role: WaveformEngineeringRole,
+): WaveformEngineeringRole[] {
+  if (index < 0 || index >= roles.length) throw new Error('Scope role index out of range.');
+  const next = [...roles];
+  if (role !== 'none') {
+    for (let i = 0; i < next.length; i++) {
+      if (i !== index && next[i] === role) next[i] = 'none';
+    }
+  }
+  next[index] = role;
+  return next;
+}
+
 export function nearestTimeIndex(t: Float64Array, target: number): number {
   if (!t.length) return 0;
   let lo = 0;
