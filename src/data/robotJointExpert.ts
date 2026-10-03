@@ -250,6 +250,8 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
       planB: '量产版本同步开展方案 A 的 PCB 硬件级 STO 物理双通道重新走线与制板，本方案仅作为 DVT 门禁放行依据。',
     },
     dualTimeline: {
+      // 本地规则（知识基线）时间轴自报来源，避免被兜底逻辑标成 AI 生成。
+      provenance: 'LEGACY_KNOWLEDGE_BASELINE',
       containmentPhase: {
         phaseTag: 'T_PLUS_24H_CONTAINMENT',
         timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,

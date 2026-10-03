@@ -369,6 +369,8 @@ function buildDynamicDualTimeline(context: ProjectContext, issue: IssueInput, do
     deliverable: String(a?.output || '改制样件与验证记录'),
   });
   return {
+    // 本地规则（知识基线）时间轴必须自报来源，不得依赖引擎兜底把自己标成 AI 生成。
+    provenance: 'LEGACY_KNOWLEDGE_BASELINE',
     containmentPhase: {
       phaseTag: 'T_PLUS_24H_CONTAINMENT',
       timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,

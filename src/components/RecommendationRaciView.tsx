@@ -1382,7 +1382,7 @@ ${dualTimeline.permanentPhase.actions.map((a, i) => `  ${i + 1}. [${a.duration}]
 - 正式结案门禁：${dualTimeline.permanentPhase.exitCriteria}
 
 =========================================
-【时间轴来源】：${dualTimeline.provenance || 'AI_GENERATED'}
+【时间轴来源】：${dualTimeline.provenance || '未标注（需复核来源）'}
 【战略协同权衡】：
 ${dualTimeline.strategicTradeoff}`;
 

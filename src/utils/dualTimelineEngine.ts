@@ -108,8 +108,10 @@ export function deriveTimelineFromActions(
 
   const containmentSteps = containment.map((a, i) => toStep(a, i));
   const permanentSteps = permanent.map((a, i) => toStep(a, i));
-  const days = context?.daysRemaining ?? 'UNKNOWN';
-  const phase = context?.projectPhase || 'UNKNOWN';
+  // 缺值不得拼成裸 token（'UNKNOWN'）进入正文：它会原样出现在界面与 AI 提示词里。
+  const days = typeof context?.daysRemaining === 'number' ? context.daysRemaining : undefined;
+  const phase = typeof context?.projectPhase === 'string' && context.projectPhase.trim() ? context.projectPhase.trim() : undefined;
+  const scheduleClause = [phase ? `当前 ${phase} 阶段` : null, days !== undefined ? `剩余 ${days} 天` : null].filter(Boolean).join('、');
   const verifyAll = [...containment, ...permanent].map(verifyText).filter(Boolean);
 
   return {
@@ -117,7 +119,7 @@ export function deriveTimelineFromActions(
       phaseTag: 'T_PLUS_24H_CONTAINMENT',
       timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
       title: containment.map((a) => a.name).join(' + '),
-      objective: `针对「${issueLabel}」在当前节点窗口内先形成不等待硬件改版的受控路径；当前剩余 ${days} 天。`,
+      objective: `针对「${issueLabel}」在当前节点窗口内先形成不等待硬件改版的受控路径${days !== undefined ? `；当前剩余 ${days} 天。` : '；节点日期未提供。'}`,
       hardwareImpact: '以候选方案既有字段判断为准，不新增措施或数值。',
       actions: containmentSteps,
       verificationCriteria: verifyAll.slice(0, 6).join('；') || '按候选方案既有验证方法完成证据闭环。',
@@ -135,7 +137,7 @@ export function deriveTimelineFromActions(
       exitCriteria: '完成候选方案既有验证方法与对应工程变更归档后，关闭当前永久纠正项。',
       responsibilityRole: '硬件架构师 / 质量负责人',
     },
-    strategicTradeoff: `当前 ${phase} 阶段、剩余 ${days} 天：先用非硬件变更候选项形成受控遏制，再将需要硬件变化的候选项纳入永久纠正；两阶段共用同一候选方案证据，不跨域复制其他工况文字。`,
+    strategicTradeoff: `${scheduleClause ? `【${scheduleClause}】` : ''}先用非硬件变更候选项形成受控遏制，再将需要硬件变化的候选项纳入永久纠正；两阶段共用同一候选方案证据，不跨域复制其他工况文字。`,
     provenance: 'DERIVED_FROM_CANDIDATES',
   };
 }
@@ -156,7 +158,9 @@ export function buildDualTimelinePlan(
   // 兼容现有 AI / 动态层结果：如果分析结果已经包含完整 dualTimeline，则继续直接采用。
   const existingTimeline = readDualTimeline(analysis as CopilotAnalysisResult);
   if (existingTimeline?.containmentPhase?.actions?.length && existingTimeline?.permanentPhase?.actions?.length) {
-    return { ...existingTimeline, provenance: existingTimeline.provenance || 'AI_GENERATED' };
+    // 不把"未标注"默认解释成 AI 生成：本地规则时间轴由生产端自报 LEGACY_KNOWLEDGE_BASELINE，
+    // 真正的 AI 时间轴必须由 AI 侧显式打标 AI_GENERATED；都没有时宁可留空，让界面显示"需审计"。
+    return { ...existingTimeline };
   }
 
   // WP4e：legacy 分支中的固定工程数字属于知识基线，不得被解释成当前项目实测/规格事实。
