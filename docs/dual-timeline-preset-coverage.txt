@@ -1,0 +1,28 @@
+# WP4a-c legacy/derived coverage snapshot (historical A/B evidence)
+# WP4d production default gates are defined in src/utils/dualTimelineEngine.ts.
+# 12/15 presets can derive both tracks; BLDC x2 + ROBOT_JOINT remain fallback.
+EMC_RE_CE	emc-150mhz	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+EMC_BCI	emc-bci-immunity	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+EMC_ESD	emc-esd-port-reset	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+POWER_TRANSIENT	power-iso7637-transient	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+BLDC	bldc-motor-drive	actions=3	derived=FALLBACK	vetoInPlan=NO	gate=FAIL
+  ACTION	Option A	conservative	针对「P001 急停→母线泵升」的根治措施	软件制动模式重构：触发急停时切入三相全下桥动态能耗短接制动，动能化为电机定子铜耗；硬件被动吸收：母线侧并联 600W~1500W 车规级双向 TVS 阵列与 RC 吸收网络	changeImpact=null
+  ACTION	Option B	balanced	联合治理「P001 + P002」	在 MCU FOC 算法中配置超前角与 Id<0 负向弱磁控制策略，抵消直轴磁通；硬件设置超速硬切断安全窗口，软件底层实施最高机械转速硬件转速钳位	changeImpact=null
+  ACTION	Option C	schedule_priority	仅做软件/限值侧临时缓解（不改变物理根因）	针对 P001：不改变物理根因，仅以软件/限值侧缓解争取节点时间。	changeImpact=null
+BLDC	bldc-stall-restart	actions=3	derived=FALLBACK	vetoInPlan=NO	gate=FAIL
+  ACTION	Option A	conservative	针对「P004 死区过短→桥臂瞬态直通风险」的根治措施	在 MCU PWM 寄存器中将互补通道死区时间由 100ns 增大至 250ns~350ns；优化门极驱动器开通/关断独立通道，减小功率管关断延迟	changeImpact=null
+  ACTION	Option B	balanced	联合治理「P004 + P008」	在电源线束根部卡装高性能纳米晶/镍锌共模磁环 (抑制 30MHz~100MHz 频段)；功率开关节点并联 RC Snubber 抑制估算谐振频率附近的高频振铃，参数按 C_snub≈(3~5)×Coss、R=√(L_loop/C_snub) 计算而非直接套用固定值	changeImpact=null
+  ACTION	Option C	schedule_priority	仅做软件/限值侧临时缓解（不改变物理根因）	针对 P004：不改变物理根因，仅以软件/限值侧缓解争取节点时间。	changeImpact=null
+COMPONENT	mosfet-alternative	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+THERMAL	thermal-power-stage	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+WCCA_EOL	wcca-cost-conflict	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+WCCA_EOL	wcca-production-calibration	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+WCCA_EOL	wcca-sensor-chain	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+WCCA_EOL	eol-current-sensor-drift	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+SIGNAL	can-fd-signal-integrity	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+CUSTOMER	customer-silence	actions=3	derived=YES	vetoInPlan=NO	gate=OK
+ROBOT_JOINT	robot-joint-backlash-sto	actions=3	derived=FALLBACK	vetoInPlan=NO	gate=FAIL
+  ACTION	Option A	conservative	针对「J001 谐波/RV减速器背隙+扭转柔性 → 关节输出定位精度与换向冲击」的根治措施	关节输出端加装第二编码器（Full-Closed-Loop 双编码器），直接闭环消除背隙与柔性引入的运动学误差；选用更高等级（更小背隙）的谐波/RV减速器，或对现有减速器做预加载/研配降低背隙	changeImpact=null
+  ACTION	Option B	balanced	联合治理「J001 + J004」	按实际作业节拍与真实减速曲线形状（而非车规单次急停假设的矩形功率）重新选型泄放电阻，核实连续功率而非仅看峰值功率；评估多关节联动时母线是否可互相支援（一个关节回馈的能量被另一个关节加速消耗），降低对泄放电阻的依赖	changeImpact=null
+  ACTION	Option C	schedule_priority	仅做软件/限值侧临时缓解（不改变物理根因）	针对 J001：不改变物理根因，仅以软件/限值侧缓解争取节点时间。	changeImpact=null
+coverage=12/15

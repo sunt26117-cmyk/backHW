@@ -9,6 +9,8 @@ import { buildDualTimelinePlan } from './dualTimelineEngine';
 import { auditAiResult } from './aiResultAuditor';
 import { validateAiResultStructure } from './aiResultSchema';
 import { normalizeDecisionFrame } from './decisionFrame';
+import { createSemanticAnalysisResultEditor, readAction, readFacts, readJudgment, readTraceSummary } from '../adapters/analysisResultAdapter';
+import type { CopilotAnalysisResult } from '../types';
 
 // ---- 协议层（原 server.ts，现搬到前端共享，供在线/离线双模式复用） ----
 const s = (description: string) => ({ type: 'string', description });
@@ -97,27 +99,33 @@ export function healAndParseJson(raw: string): any {
 
 export function validateAndEnrichAiResult(parsed: any, baseline: any, modelName: string, context: any, issue: any, integrityAssessment?: any): any {
   if (!parsed || typeof parsed !== 'object') { return baseline; }
-  if (!parsed.coreConclusion || !parsed.coreConclusion.problemSummary) { parsed.coreConclusion = baseline.coreConclusion; }
-  if (!parsed.physicalMechanism || !parsed.physicalMechanism.rootCauseAnalysis) { parsed.physicalMechanism = baseline.physicalMechanism; }
-  if (!parsed.riskRatings || !parsed.riskRatings.overallRisk) { parsed.riskRatings = baseline.riskRatings; }
-  if (!Array.isArray(parsed.candidateActions) || parsed.candidateActions.length === 0) { parsed.candidateActions = baseline.candidateActions; }
-  if (!parsed.finalRecommendation || !parsed.finalRecommendation.recommendedOptionName) { parsed.finalRecommendation = baseline.finalRecommendation; }
-  parsed.dfmeaView = parsed.dfmeaView || baseline.dfmeaView;
-  parsed.containment = parsed.containment || baseline.containment;
-  parsed.capa = parsed.capa || baseline.capa;
-  parsed.raciMatrix = parsed.raciMatrix || baseline.raciMatrix;
-  parsed.engineeringDocs = parsed.engineeringDocs || baseline.engineeringDocs;
-  parsed.classifiedInfo = parsed.classifiedInfo || baseline.classifiedInfo;
-  parsed.multiRiskBreakdown = parsed.multiRiskBreakdown || baseline.multiRiskBreakdown;
-  parsed.whyNotComparison = parsed.whyNotComparison || baseline.whyNotComparison;
-  parsed.next24HourPlan = parsed.next24HourPlan || baseline.next24HourPlan;
-  parsed.edrRecord = parsed.edrRecord || baseline.edrRecord;
-  parsed.redTeamChallenge = parsed.redTeamChallenge || baseline.redTeamChallenge;
-  const md = parsed.multiDomainAnalysis;
+  const baselineFacts = readFacts(baseline);
+  const baselineJudgment = readJudgment(baseline);
+  const baselineAction = readAction(baseline);
+  const baselineTrace = readTraceSummary(baseline);
+  const baselineRisk = baselineJudgment?.risk;
+  const parsedEditor = createSemanticAnalysisResultEditor(parsed as CopilotAnalysisResult);
+  if ((!parsedEditor.judgment.conclusion || !parsedEditor.judgment.conclusion.problemSummary) && baselineJudgment?.coreConclusion) parsedEditor.judgment.conclusion = baselineJudgment.coreConclusion;
+  if ((!parsedEditor.facts.physicalMechanism || !parsedEditor.facts.physicalMechanism.rootCauseAnalysis) && baselineFacts?.physicalMechanism) parsedEditor.facts.physicalMechanism = baselineFacts.physicalMechanism;
+  if ((!parsedEditor.judgment.risk || !parsedEditor.judgment.risk.overallRisk) && baselineRisk) parsedEditor.judgment.risk = baselineRisk;
+  if ((!Array.isArray(parsedEditor.action.candidates) || parsedEditor.action.candidates.length === 0) && baselineAction?.candidateActions) parsedEditor.action.candidates = baselineAction.candidateActions;
+  if ((!parsedEditor.judgment.recommendation || !parsedEditor.judgment.recommendation.recommendedOptionName) && baselineJudgment?.finalRecommendation) parsedEditor.judgment.recommendation = baselineJudgment.finalRecommendation;
+  parsedEditor.facts.dfmeaView = parsedEditor.facts.dfmeaView || baselineFacts?.dfmea?.[0];
+  parsedEditor.action.containment = parsedEditor.action.containment || baselineAction?.containment;
+  parsedEditor.action.capa = parsedEditor.action.capa || baselineAction?.capa;
+  parsedEditor.delivery.raciMatrix = parsedEditor.delivery.raciMatrix || baselineAction?.raciMatrix;
+  parsedEditor.delivery.engineeringDocs = parsedEditor.delivery.engineeringDocs || baselineAction?.engineeringDocs;
+  parsedEditor.facts.classifiedInfo = parsedEditor.facts.classifiedInfo || baselineFacts?.classifiedInfo;
+  if (!parsedEditor.judgment.multiRiskBreakdown && baselineJudgment?.multiRiskBreakdown) parsedEditor.judgment.multiRiskBreakdown = baselineJudgment.multiRiskBreakdown;
+  parsedEditor.judgment.whyNotComparison = parsedEditor.judgment.whyNotComparison || baselineJudgment?.whyNotComparison;
+  if (!parsedEditor.action.next24HourPlan && baselineAction?.next24HourPlan) parsedEditor.action.next24HourPlan = baselineAction.next24HourPlan;
+  if (!parsedEditor.delivery.edrRecord && baselineAction?.edrRecord) parsedEditor.delivery.edrRecord = baselineAction.edrRecord;
+  if (!parsedEditor.judgment.redTeamChallenge && baselineJudgment?.redTeamChallenge) parsedEditor.judgment.redTeamChallenge = baselineJudgment.redTeamChallenge;
+  const md = parsedEditor.judgment.multiDomainAnalysis;
   if (!md || typeof md !== 'object') {
     const primaryDomain = resolveEngineeringDomain(issue);
     const relatedDomains = resolveEngineeringDomains(issue).filter((d) => d !== primaryDomain);
-    parsed.multiDomainAnalysis = { primaryDomain, relatedDomains, domainAssessments: [primaryDomain, ...relatedDomains].map((domain, index) => ({ domain, role: index === 0 ? 'PRIMARY' : 'RELATED', evidenceLevel: 'MEDIUM_INFERRED', knownFacts: [], evidenceGaps: ['当前分析未返回该域独立分层'], minimumValidation: '补齐该领域最小实测证据后重新核对', domainConclusion: '证据不足，需台架闭环' })), crossDomainLinks: [], crossDomainVetoes: [] };
+    parsedEditor.judgment.multiDomainAnalysis = { primaryDomain, relatedDomains, domainAssessments: [primaryDomain, ...relatedDomains].map((domain, index) => ({ domain, role: index === 0 ? 'PRIMARY' : 'RELATED', evidenceLevel: 'MEDIUM_INFERRED', knownFacts: [], evidenceGaps: ['当前分析未返回该域独立分层'], minimumValidation: '补齐该领域最小实测证据后重新核对', domainConclusion: '证据不足，需台架闭环' })), crossDomainLinks: [], crossDomainVetoes: [] };
   } else {
     md.primaryDomain = md.primaryDomain || resolveEngineeringDomain(issue);
     md.relatedDomains = Array.isArray(md.relatedDomains) ? md.relatedDomains : resolveEngineeringDomains(issue).filter((d) => d !== md.primaryDomain);
@@ -125,20 +133,20 @@ export function validateAndEnrichAiResult(parsed: any, baseline: any, modelName:
     md.crossDomainLinks = Array.isArray(md.crossDomainLinks) ? md.crossDomainLinks : [];
     md.crossDomainVetoes = Array.isArray(md.crossDomainVetoes) ? md.crossDomainVetoes : [];
   }
-  parsed.dualTimeline = parsed.dualTimeline || baseline.dualTimeline || buildDualTimelinePlan(parsed, context, issue);
+  parsedEditor.action.dualTimeline = parsedEditor.action.dualTimeline || baselineAction?.dualTimeline || buildDualTimelinePlan(parsed, context, issue);
   const dfDefaults = {
     decisionQuestion: (context?.nextMilestone || '下一工程门禁') + ' 前是否具备继续推进的证据条件',
     currentDecisionGate: context?.nextMilestone || '当前工程门禁',
     decisionWindow: '剩余 ' + (context?.daysRemaining ?? 14) + ' 天',
-    bestNextAction: parsed.finalRecommendation?.immediateSteps?.[0]?.action || '先完成当前关键未知量的最小验证',
-    minimumEvidenceToProceed: [parsed.finalRecommendation?.preconditions?.[0] || '关键实测证据达到项目规范门槛'],
-    unknownsBlockingDecision: Array.isArray(parsed.unknowns) ? parsed.unknowns.slice(0, 5) : ['关键输入数据不足'],
-    reversalCriteria: Array.isArray(parsed.finalRecommendation?.reEvaluationTriggers) ? parsed.finalRecommendation.reEvaluationTriggers.slice(0, 5) : ['关键实测证据与当前物理假设不一致'],
+    bestNextAction: parsedEditor.judgment.recommendation?.immediateSteps?.[0]?.action || '先完成当前关键未知量的最小验证',
+    minimumEvidenceToProceed: [parsedEditor.judgment.recommendation?.preconditions?.[0] || '关键实测证据达到项目规范门槛'],
+    unknownsBlockingDecision: Array.isArray(parsedEditor.facts.unknowns) ? parsedEditor.facts.unknowns.slice(0, 5) : ['关键输入数据不足'],
+    reversalCriteria: Array.isArray(parsedEditor.judgment.recommendation?.reEvaluationTriggers) ? parsedEditor.judgment.recommendation.reEvaluationTriggers.slice(0, 5) : ['关键实测证据与当前物理假设不一致'],
   };
   // [健壮性收口] AI 常把 string[] 字段回灌成单个字符串；在此统一归一化，
-  // 否则前端 result.decisionFrame.reversalCriteria.slice(...).join() 会抛 join is not a function 而白屏。
-  parsed.decisionFrame = normalizeDecisionFrame(parsed.decisionFrame, dfDefaults);
-  parsed.provenance = { executionMode: 'ONLINE_AI_INFERRED', engineName: '云端大模型 (' + modelName + ') 工况强定锚推理', isAiInferred: true, isDeterministicRule: false, generatedAt: new Date().toLocaleTimeString(), modelIdentifier: modelName, transparencyNote: '本分析由云端大模型 [' + modelName + '] 严格限定在当前项目工况与实测数据下推演生成，严禁脱离实际作答。' };
+  // 否则前端 parsedEditor.judgment.frame.reversalCriteria.slice(...).join() 会抛 join is not a function 而白屏。
+  parsedEditor.judgment.frame = normalizeDecisionFrame(parsedEditor.judgment.frame, dfDefaults);
+  parsedEditor.metadata.provenance = { executionMode: 'ONLINE_AI_INFERRED', engineName: '云端大模型 (' + modelName + ') 工况强定锚推理', isAiInferred: true, isDeterministicRule: false, generatedAt: new Date().toLocaleTimeString(), modelIdentifier: modelName, transparencyNote: '本分析由云端大模型 [' + modelName + '] 严格限定在当前项目工况与实测数据下推演生成，严禁脱离实际作答。' };
   const { sanitizedResult } = auditAiResult(parsed, baseline, context, issue, integrityAssessment);
   return sanitizedResult;
 }
@@ -147,10 +155,15 @@ export function buildAnalysisPrompt(context: any, issue: any, modelConfig?: any)
   const integrityAssessment = assessInputIntegrity(context, issue);
   const integrityPromptDirectives = generatePromptIntegrityDirectives(integrityAssessment);
   const baseline = runExpertAnalysis(context, issue);
-  if (baseline.provenance) baseline.provenance.inputIntegrity = integrityAssessment;
+  const baselineFacts = readFacts(baseline);
+  const baselineJudgment = readJudgment(baseline);
+  const baselineAction = readAction(baseline);
+  const baselineTrace = readTraceSummary(baseline);
+  const baselineEditor = createSemanticAnalysisResultEditor(baseline);
+  if (baselineEditor.metadata.provenance) baselineEditor.metadata.provenance.inputIntegrity = integrityAssessment;
   const precomputedFacts = runDeterministicPrecomputations(context, issue);
   const similarGoldCases = findSimilarGoldCases(issue, 2);
-  // 将离散预计算事实正式挂到 baseline.analysisBasis，保证 citedFields 在 AI 返回后仍可被 Auditor 反查。
+  // 将离散预计算事实正式挂到 baselineEditor.facts.analysisBasis，保证 citedFields 在 AI 返回后仍可被 Auditor 反查。
   const precomputedEvidence = precomputedFacts.map((f) => ({
     id: f.id,
     key: `precomputed.${f.id}`,
@@ -169,16 +182,16 @@ export function buildAnalysisPrompt(context: any, issue: any, modelConfig?: any)
     complianceVerdict: f.complianceVerdict,
     directiveForAi: f.directiveForAi,
   }));
-  baseline.analysisBasis = {
-    ...(baseline.analysisBasis || { ruleInputs: [], measuredInputs: [], calculatedOutputs: [], assumptions: [], fixedTemplateFields: [] }),
+  baselineEditor.facts.analysisBasis = {
+    ...(baselineEditor.facts.analysisBasis || { ruleInputs: [], measuredInputs: [], calculatedOutputs: [], assumptions: [], fixedTemplateFields: [] }),
     calculatedOutputs: Array.from(new Set([
-      ...(baseline.analysisBasis?.calculatedOutputs || []),
+      ...(baselineEditor.facts.analysisBasis?.calculatedOutputs || []),
       ...precomputedFacts
         .filter((f) => f.status !== 'INSUFFICIENT_INPUT')
         .map((f) => `precomputed.${f.id}=${f.calculatedValue}${f.unit ? ` ${f.unit}` : ''}; margin=${f.safetyMargin ?? 'N/A'}; verdict=${f.complianceVerdict}`),
     ])),
     calculatedOutputEvidence: [
-      ...(baseline.analysisBasis?.calculatedOutputEvidence || []),
+      ...(baselineEditor.facts.analysisBasis?.calculatedOutputEvidence || []),
       ...precomputedEvidence,
     ],
   };
@@ -222,7 +235,7 @@ export function buildAnalysisPrompt(context: any, issue: any, modelConfig?: any)
   }).join('\n');
 
   // 给模型一个“当前工程方案基线”，防止模型凭空创造候选方案分数。
-  const baselineActions = (baseline.candidateActions || []).map((a: any) => ({
+  const baselineActions = (baselineAction?.candidateActions || []).map((a: any) => ({
     id: a.id,
     name: a.name,
     category: a.category,
@@ -267,9 +280,9 @@ ${grounding.precomputedText}
 
 【D. 当前方案基线——只作为本项目当前工程状态，不得凭空重造】
 ${JSON.stringify(baselineActions, null, 2)}
-- 当前确定性风险：${baseline?.riskRatings?.overallRisk || 'UNKNOWN'}；当前确定性风险分数：${baseline?.riskRatings?.overallRiskScore ?? 'UNKNOWN'}
-- 当前确定性问题：${baseline?.coreConclusion?.problemSummary || 'UNKNOWN'}
-- 当前确定性物理机理：${baseline?.physicalMechanism?.rootCauseAnalysis || 'UNKNOWN'}
+- 当前确定性风险：${baselineJudgment?.risk?.overallRisk || 'UNKNOWN'}；当前确定性风险分数：${baselineJudgment?.risk?.overallRiskScore ?? 'UNKNOWN'}
+- 当前确定性问题：${baselineJudgment?.coreConclusion?.problemSummary || 'UNKNOWN'}
+- 当前确定性物理机理：${baselineFacts?.physicalMechanism?.rootCauseAnalysis || 'UNKNOWN'}
 
 如果需要提出新方案，必须解释它相对于上述基线的变化、工程依据和验证条件；不能只因为“看起来更好”就改变评分。
 
@@ -330,7 +343,8 @@ export function processImportedAiResult(aiContent: string, context: any, issue: 
     const enriched = validateAndEnrichAiResult(parsed, built.baseline, 'offline-free-ai', context || {}, issue || {}, built.integrityAssessment);
     const audited = auditAiResult(enriched, built.baseline, context || {}, issue || {}, built.integrityAssessment);
     const finalData = audited.sanitizedResult;
-    if (finalData && finalData.provenance) { finalData.provenance.inputIntegrity = built.integrityAssessment; finalData.provenance.aiAudit = audited.auditResult; }
+    const finalDataEditor = createSemanticAnalysisResultEditor(finalData);
+    if (finalDataEditor.metadata.provenance) { finalDataEditor.metadata.provenance.inputIntegrity = built.integrityAssessment; finalDataEditor.metadata.provenance.aiAudit = audited.auditResult; }
     return { success: true, data: finalData, aiAudit: audited.auditResult };
   } catch (err: any) {
     return { success: false, error: err?.message || String(err) };

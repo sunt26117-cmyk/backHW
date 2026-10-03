@@ -128,7 +128,7 @@ export function generateBldcMotorAnalysis(context: ProjectContext, issue: IssueI
       residualRiskDetail: '门极电阻过小导致开启 dv/dt 飙升，将严重恶化 CISPR 25 辐射发射，引发连锁失败。',
       sideEffects: '单板成本超支、空间干涉、EMC 恶化。',
       verificationCost: '约为 PCB 打样 + 贴片 + 模具修改评估（按当前项目资源核算）',
-      timeCost: '约 约三周（需按当前项目 DV 门禁重新核算是否违约）',
+      timeCost: '约三周（需按当前项目 DV 门禁重新核算是否违约）',
       failureConsequence: '项目 DV 准入延期 1 个月，客户启动商务考核。',
       preconditions: '结构空间允许增大外壳尺寸，PM 批准超支与延期。',
       verificationMethod: '新样板打样后进暗室与台架重测。',

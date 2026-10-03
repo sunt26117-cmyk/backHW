@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Filter, GitBranch, ShieldAlert } from 'lucide-react';
 import { CopilotAnalysisResult, IssueInput, ProjectContext, TraceNode } from '../types';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import { evaluateAllBldcPatterns } from '../domains/bldc';
 import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
@@ -45,6 +46,10 @@ const TraceAuditView: React.FC<TraceAuditViewProps> = ({ context, issue, result 
   const criticalFail = rows.filter((r) => r.node.verdict === 'CRITICAL' || r.node.verdict === 'FAIL').length;
   const passed = rows.filter((r) => r.node.verdict === 'PASS').length;
 
+  const contract = selectAnalysisResultContract(result);
+  const traceSummary = contract.trace;
+  const analysisBasis = contract.basis;
+
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-cyan-800/50 bg-cyan-950/15 p-5">
@@ -57,6 +62,23 @@ const TraceAuditView: React.FC<TraceAuditViewProps> = ({ context, issue, result 
           <div className="text-right text-[10px] text-slate-500">当前工程 · {context.projectName}<div className="mt-1 text-slate-400">{domain} · {context.projectPhase}</div></div>
         </div>
       </div>
+
+      {/* 数据口径：与 Pattern 页内「查看 Trace」抽屉是两个不同来源，必须写明，否则同一 Pattern 会出现两套数字 */}
+      <div className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-[10px] leading-relaxed text-slate-500">
+        <b className="text-slate-300">数据口径：</b>本视图按<b className="text-slate-300">已保存的工况输入</b>重新计算，不包含 Pattern 页内的本地调参（what-if）。
+        调参后的 Trace 请在「物理分析 → 主导机理 / Pattern」点对应 Pattern 的「查看 Trace」。
+      </div>
+
+      {traceSummary.analysisRecord && (
+        <div className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-[10px] leading-relaxed text-slate-500">
+          <b className="text-slate-300">分析记录：</b>
+          <span className="ml-2 font-mono text-cyan-300">{traceSummary.analysisRecord.analysisId}</span>
+          <span className="mx-2 text-slate-700">·</span>
+          <span>inputHash <b className="font-mono text-slate-300">{traceSummary.analysisRecord.inputHash}</b></span>
+          <span className="mx-2 text-slate-700">·</span>
+          <span>engine <b className="font-mono text-slate-300">{traceSummary.analysisRecord.engineVersion}</b></span>
+        </div>
+      )}
 
       {!isBldc ? (
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-xs text-slate-400">
@@ -138,7 +160,7 @@ const TraceAuditView: React.FC<TraceAuditViewProps> = ({ context, issue, result 
         </>
       )}
 
-      {result?.analysisBasis && <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-[10px] text-slate-500">Trace Audit 与 AI 分析是两条不同证据链：这里不把 AI 推理文字冒充为确定性计算输入。AI 的 calculatedOutputs 仍应回指其对应的本地计算证据。</div>}
+      {analysisBasis && <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-[10px] text-slate-500">Trace Audit 与 AI 分析是两条不同证据链：这里不把 AI 推理文字冒充为确定性计算输入。AI 的 calculatedOutputs 仍应回指其对应的本地计算证据。</div>}
     </div>
   );
 };

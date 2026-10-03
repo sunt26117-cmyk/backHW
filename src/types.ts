@@ -211,10 +211,14 @@ export interface DualTimelinePhase {
   responsibilityRole: string;
 }
 
+export type DualTimelineProvenance = 'DERIVED_FROM_CANDIDATES' | 'LEGACY_KNOWLEDGE_BASELINE' | 'AI_GENERATED';
+
 export interface DualTimelineActionPlan {
   containmentPhase: DualTimelinePhase;
   permanentPhase: DualTimelinePhase;
   strategicTradeoff: string;
+  /** 明确时间轴来源，防止 legacy 知识模板被误认为当前工程事实。 */
+  provenance?: DualTimelineProvenance;
 }
 
 export interface EngineeringDecisionRecord {
@@ -634,6 +638,14 @@ export interface TraceNode {
   children?: TraceNode[];
 }
 
+export interface AnalysisResultRecordMetadata {
+  schemaVersion: 1;
+  analysisId: string;
+  inputHash: string;
+  engineVersion: string;
+  generatedAt: string;
+}
+
 export interface CopilotAnalysisResult {
   coreConclusion: {
     problemSummary: string;
@@ -686,9 +698,16 @@ export interface CopilotAnalysisResult {
   redTeamChallenge?: RedTeamAuditChallenge; // 逆向质疑与盲区挑战 (P1)
   // [模板/参考内容显式标注] 历史通用模板仅保留在 data/legacy，运行时当前 case 由 scenarioDynamic 基于 issue/context 动态生成。
   // 这些字段不是当前 case 的确定性结论；UI 仍应保持模板/参考性质标识，禁止把历史示例数字当作当前事实。
+  /** @deprecated 页面使用 selectTemplateNotice(result)。 */
   templateContentNotice?: { blocks: string[]; message: string };
+  /** 结果生成时绑定的 context + issue 指纹；用于检测输入变更后的旧结果。 */
+  /** @deprecated 仅 AnalysisContext 用于结果新鲜度检查。 */
+  analysisInputFingerprint?: string;
+  /** @deprecated UI 与当前分析链不得从结果快照反读工程 Context；使用 ScenarioContext。仅用于旧备份兼容。 */
   context?: ProjectContext;
+  /** @deprecated 仅 Trace/兼容适配层读取，页面使用 selector。 */
   source?: 'deterministic-expert' | 'custom-llm' | string;
+  /** @deprecated 页面使用 selectTraceSummary(result).provenance。 */
   provenance?: ResultProvenance; // 结果来源透明度标注：明确区分 AI 发散推理 vs 车规专家确定性模版/物理公式
   analysisBasis?: {
     ruleInputs: string[];
@@ -754,6 +773,8 @@ export interface CopilotAnalysisResult {
   inputIntegrity?: InputIntegrityAssessment;
   aiAudit?: AiAuditResult;
   debugSnapshot?: DebugSnapshot;
+  /** WP10 stable record identity; current-result freshness uses this metadata. */
+  analysisRecord?: AnalysisResultRecordMetadata;
 }
 
 export interface DebugSnapshot {

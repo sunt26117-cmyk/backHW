@@ -1,5 +1,6 @@
 import React from 'react';
 import { CopilotAnalysisResult, CandidateAction } from '../types';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import { ShieldCheck, AlertOctagon, CheckCircle2, ArrowRight, Clock, DollarSign, AlertTriangle, ShieldAlert, Sparkles, HelpCircle, Layers, Activity } from 'lucide-react';
 
 interface OptionsComparisonViewProps {
@@ -10,8 +11,13 @@ interface OptionsComparisonViewProps {
 export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ result, onGoToCockpit }) => {
   if (!result) return null;
 
-  const candidateActions = Array.isArray(result.candidateActions) ? result.candidateActions : [];
-  const safeRecommendedId = result.finalRecommendation?.recommendedOptionId || '';
+  const contract = selectAnalysisResultContract(result);
+  const action = contract.action;
+  const judgment = contract.judgment;
+  if (!action || !judgment || !judgment.finalRecommendation) return null;
+  const candidateActions = action.candidateActions;
+  const recommendedAction = action.recommendedAction;
+  const safeRecommendedId = judgment.finalRecommendation.recommendedOptionId || recommendedAction?.id || '';
 
   const getResidualBadge = (risk: string) => {
     switch (risk) {
@@ -29,10 +35,6 @@ export const OptionsComparisonView: React.FC<OptionsComparisonViewProps> = ({ re
 
   return (
     <div className="space-y-6">
-      <div className="bg-blue-950/30 border border-blue-500/30 rounded-xl p-3 text-xs">
-        <span className="text-blue-300 font-semibold">当前典型工况：</span>{' '}
-        <span className="text-white">{(result as any).__scenarioLabel || '当前工程工况'}</span>
-      </div>
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>

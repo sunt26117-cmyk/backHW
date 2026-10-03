@@ -1,3 +1,4 @@
+/** WP7：用户可加载的典型工况库。它是运行时场景入口，不是测试夹具，也不能被 AI 当成当前工程事实。 */
 import { PresetScenario } from '../types';
 
 export const PRESET_SCENARIOS: PresetScenario[] = [

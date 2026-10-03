@@ -35,6 +35,7 @@ import {
 } from '../data/robotJointPatternEngine';
 import { BldcPatternId, ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
 import { deriveBldcEvaluationInput } from '../utils/scenarioDerived';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
 import { calculateDomainMetrics, getDomainDataQuality, getDomainPhysics, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 import TraceDrawer from './TraceDrawer';
@@ -117,6 +118,11 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
   const scenarioCategory = issue.issueCategories?.[0] || 'Other';
   const scenarioDomain = useMemo(() => getDomainPhysics(issue), [issue]);
   const domainMetrics = useMemo(() => calculateDomainMetrics(issue, context), [issue, context]);
+  const contract = selectAnalysisResultContract(result);
+  const resultRisk = contract.risk;
+  const resultBasis = contract.basis;
+  const resultFacts = contract.facts;
+  const bldcExtended = contract.safety.extended;
 
   // 机器人关节机电系统层专项判据 (J001~J007)：与 P001~P018 互补，仅在 ROBOT_JOINT 场景下计算与展示。
   const isRobotJointScenario = scenarioDomainKey === 'ROBOT_JOINT';
@@ -133,14 +139,14 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
         <div className="bg-blue-950/30 border border-blue-500/30 rounded-xl p-5">
           <div className="flex items-center justify-between gap-4">
             <div><div className="text-xs text-blue-300 font-semibold">当前典型工况 · {context.projectName}</div><h1 className="text-lg font-bold text-white mt-1">{scenarioDomain.title}</h1><div className="text-xs text-slate-400 mt-1">{scenarioDomainKey} · {context.projectPhase} · {context.asilLevel} · 结果来源：专家规则 + 当前工况输入 + 实测回填</div></div>
-            <div className="text-right"><div className="text-[11px] text-slate-500">风险</div><div className="font-mono font-bold text-amber-300">{result?.riskRatings.overallRisk || '—'} / {result?.riskRatings.overallRiskScore ?? '—'}</div></div>
+            <div className="text-right"><div className="text-[11px] text-slate-500">风险</div><div className="font-mono font-bold text-amber-300">{resultRisk?.overallRisk || '—'} / {resultRisk?.overallRiskScore ?? '—'}</div></div>
           </div>
           <div className="mt-3 bg-slate-950/70 border border-slate-800 rounded-lg p-3 text-xs text-slate-200">{scenarioDomain.chain}</div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><div className="text-[10px] text-slate-500 mb-2">MEASURED · 当前输入</div><div className="flex flex-wrap gap-1.5">{Object.entries(issue.measuredValues || {}).filter(([,v]) => v !== '' && v !== null && v !== undefined).map(([k,v]) => <span key={k} className="px-2 py-1 rounded bg-emerald-950/60 border border-emerald-800/40 text-[10px] text-emerald-300 font-mono">{k}={String(v)}</span>)}{!Object.keys(issue.measuredValues || {}).length && <span className="text-xs text-amber-300">暂无结构化实测值</span>}</div></div>
-          <div className="bg-slate-900 border border-cyan-800/30 rounded-xl p-4"><div className="text-[10px] text-slate-500 mb-2">计算结果 / EVIDENCE</div><div className="text-xs text-slate-300">{(Array.isArray(result?.analysisBasis?.calculatedOutputs) ? result?.analysisBasis?.calculatedOutputs : result?.analysisBasis?.calculatedOutputs ? [String(result.analysisBasis.calculatedOutputs)] : []).join(' · ') || '基于当前输入运行确定性规则'}</div></div>
-          <div className="bg-slate-900 border border-amber-800/30 rounded-xl p-4"><div className="text-[10px] text-slate-500 mb-2">ASSUMPTION / UNKNOWN</div><div className="text-xs text-slate-300">{(Array.isArray(result?.unknowns) ? result.unknowns.slice(0,2).map(String) : result?.unknowns ? [String(result.unknowns)] : []).join('；') || '当前暂无高优先级未知项'}</div></div>
+          <div className="bg-slate-900 border border-cyan-800/30 rounded-xl p-4"><div className="text-[10px] text-slate-500 mb-2">计算结果 / EVIDENCE</div><div className="text-xs text-slate-300">{(resultBasis?.calculatedOutputs || []).join(' · ') || '基于当前输入运行确定性规则'}</div></div>
+          <div className="bg-slate-900 border border-amber-800/30 rounded-xl p-4"><div className="text-[10px] text-slate-500 mb-2">ASSUMPTION / UNKNOWN</div><div className="text-xs text-slate-300">{(resultFacts?.unknowns.slice(0,2).map(String) || []).join('；') || '当前暂无高优先级未知项'}</div></div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <h2 className="text-sm font-bold text-white mb-3">当前工况关键计算结果（由输入值驱动）</h2>
@@ -159,8 +165,8 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
           )}
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5"><h2 className="text-sm font-bold text-white mb-3">当前工况确定性计算框架</h2><div className="space-y-2">{scenarioDomain.formulas.map((x,i)=><div key={i} className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-300"><span className="text-cyan-300 font-mono mr-2">{i+1}</span>{x}</div>)}</div>{(result?.physicalMechanism.keyPhysicalFactors || []).length>0 && <div className="mt-4"><div className="text-xs font-semibold text-slate-400 mb-2">当前工况关键物理因子</div>{(result?.physicalMechanism.keyPhysicalFactors || []).slice(0,6).map((f,i)=><div key={i} className="text-xs text-slate-300 border-l-2 border-cyan-500/40 pl-3 mb-2"><b>{f.factor}</b>：{f.description}</div>)}</div>}<div className="mt-4 bg-cyan-950/20 border border-cyan-900/50 rounded-lg p-3 text-xs text-cyan-100"><b>工程输出：</b>{scenarioDomain.outputs.join(' · ')}</div></div>
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5"><h2 className="text-sm font-bold text-white mb-3">当前工况验证闭环</h2><div className="space-y-2">{scenarioDomain.tests.map((x,i)=><div key={i} className="text-xs text-slate-300 bg-slate-950 rounded-lg p-3 border border-slate-800"><span className="text-emerald-400 mr-2">✓</span>{x}</div>)}</div><div className="mt-4 text-xs text-slate-300 bg-slate-950/60 border border-slate-800 rounded-lg p-3">根因：{result?.physicalMechanism.rootCauseAnalysis || issue.engineeringConcern}</div><div className="mt-3"><div className="text-[10px] text-slate-500 mb-1">当前已录入结构化实测值</div><div className="flex flex-wrap gap-1.5">{Object.entries(issue.measuredValues || {}).filter(([,v]) => v !== '' && v !== null && v !== undefined).map(([k,v]) => <span key={k} className="px-2 py-1 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-emerald-300">MEASURED · {k}={String(v)}</span>)}{!Object.entries(issue.measuredValues || {}).some(([,v]) => v !== '' && v !== null && v !== undefined) && <span className="text-[10px] text-slate-500">暂无结构化实测值，请在 1.统一工程输入 回填</span>}</div></div></div>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5"><h2 className="text-sm font-bold text-white mb-3">当前工况确定性计算框架</h2><div className="space-y-2">{scenarioDomain.formulas.map((x,i)=><div key={i} className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-300"><span className="text-cyan-300 font-mono mr-2">{i+1}</span>{x}</div>)}</div>{(resultFacts?.physicalMechanism?.keyPhysicalFactors || []).length>0 && <div className="mt-4"><div className="text-xs font-semibold text-slate-400 mb-2">当前工况关键物理因子</div>{(resultFacts?.physicalMechanism?.keyPhysicalFactors || []).slice(0,6).map((f,i)=><div key={i} className="text-xs text-slate-300 border-l-2 border-cyan-500/40 pl-3 mb-2"><b>{f.factor}</b>：{f.description}</div>)}</div>}<div className="mt-4 bg-cyan-950/20 border border-cyan-900/50 rounded-lg p-3 text-xs text-cyan-100"><b>工程输出：</b>{scenarioDomain.outputs.join(' · ')}</div></div>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5"><h2 className="text-sm font-bold text-white mb-3">当前工况验证闭环</h2><div className="space-y-2">{scenarioDomain.tests.map((x,i)=><div key={i} className="text-xs text-slate-300 bg-slate-950 rounded-lg p-3 border border-slate-800"><span className="text-emerald-400 mr-2">✓</span>{x}</div>)}</div><div className="mt-4 text-xs text-slate-300 bg-slate-950/60 border border-slate-800 rounded-lg p-3">根因：{resultFacts?.physicalMechanism?.rootCauseAnalysis || issue.engineeringConcern}</div><div className="mt-3"><div className="text-[10px] text-slate-500 mb-1">当前已录入结构化实测值</div><div className="flex flex-wrap gap-1.5">{Object.entries(issue.measuredValues || {}).filter(([,v]) => v !== '' && v !== null && v !== undefined).map(([k,v]) => <span key={k} className="px-2 py-1 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-emerald-300">MEASURED · {k}={String(v)}</span>)}{!Object.entries(issue.measuredValues || {}).some(([,v]) => v !== '' && v !== null && v !== undefined) && <span className="text-[10px] text-slate-500">暂无结构化实测值，请在 1.统一工程输入 回填</span>}</div></div></div>
         </div>
 
         {isRobotJointScenario && (
@@ -301,8 +307,8 @@ export const BldcPatternEngineView: React.FC<BldcPatternEngineViewProps> = ({
           <span className="text-slate-400">{context.projectPhase} · {context.asilLevel} · 剩余 {context.daysRemaining} 天</span>
         </div>
         <div className="mt-1 text-slate-400 line-clamp-2">{issue.failurePhenomenon || issue.engineeringConcern}</div>
-        {result?.riskRatings && (
-          <div className="mt-1 text-slate-500">分析风险：{result.riskRatings.overallRisk} / {result.riskRatings.overallRiskScore}</div>
+        {resultRisk && (
+          <div className="mt-1 text-slate-500">分析风险：{resultRisk.overallRisk} / {resultRisk.overallRiskScore}</div>
         )}
       </div>
       {(() => {

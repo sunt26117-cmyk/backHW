@@ -25,11 +25,13 @@ import {
 interface ResultProvenanceBannerProps {
   provenance?: ResultProvenance;
   className?: string;
+  resultIsStale?: boolean;
 }
 
 export const ResultProvenanceBanner: React.FC<ResultProvenanceBannerProps> = ({
   provenance,
   className = '',
+  resultIsStale = false,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showPromptSnippet, setShowPromptSnippet] = useState(false);
@@ -41,6 +43,13 @@ export const ResultProvenanceBanner: React.FC<ResultProvenanceBannerProps> = ({
   const integrity = provenance?.inputIntegrity;
   const audit = provenance?.aiAudit;
   const debug = provenance?.debugSnapshot;
+
+  const staleNotice = resultIsStale ? (
+    <div className="mb-2.5 flex items-start gap-2 rounded-lg border border-amber-700/60 bg-amber-950/35 px-3 py-2 text-[11px] text-amber-200">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+      <span><strong>当前结果已过期：</strong>工程 context / issue 已发生变化，这份分析对应的是上一次输入。请重新执行分析后再用于工程决策。</span>
+    </div>
+  ) : null;
 
   const getIntegrityBadge = () => {
     if (!integrity) return null;
@@ -89,6 +98,7 @@ export const ResultProvenanceBanner: React.FC<ResultProvenanceBannerProps> = ({
   if (isAiInferred) {
     return (
       <div className={`rounded-xl border bg-gradient-to-r from-purple-950/40 via-slate-900 to-indigo-950/30 border-purple-500/40 p-3.5 shadow-sm ${className}`}>
+        {staleNotice}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="flex items-center space-x-2.5 min-w-0">
             <div className="w-7 h-7 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center shrink-0">

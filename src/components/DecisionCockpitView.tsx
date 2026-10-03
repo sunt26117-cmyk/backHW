@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { CopilotAnalysisResult, CandidateAction, HwLeadStyle } from '../types';
+import { CopilotAnalysisResult, CandidateAction, HwLeadStyle, ProjectContext } from '../types';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import { evaluateLeadershipFit, applyRecurrencePenaltyToQ } from '../utils/leadershipEngine';
 import { evaluateLeadershipEconomicRisk } from '../data/safetyReliabilityEngine';
 import { STANDARD_TSCQL_WEIGHTS } from '../utils/scoringWeights';
 import type { TscqlWeights } from '../utils/scoringWeights';
-import { ResultProvenanceBanner } from './ResultProvenanceBanner';
-import { TemplateContentNotice } from './TemplateContentNotice';
 import {
   Sliders,
   ShieldAlert,
@@ -42,6 +41,7 @@ interface DecisionCockpitViewProps {
   onLeadStyleChange?: (style: HwLeadStyle) => void;
   recurrenceCount?: number;
   daysRemaining?: number;
+  context: ProjectContext;
 }
 
 export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
@@ -50,7 +50,8 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
   hwLeadStyle = 'AGILE_DELIVERY',
   onLeadStyleChange,
   recurrenceCount = 0,
-  daysRemaining = 14,
+  daysRemaining,
+  context,
 }) => {
   // C-T-S-Q-L 标准权重定义已统一到 scoringWeights.ts（跟 aiResultAuditor.ts 核对AI总分用的是同一份），
   // 这里的 useState 只是把它当作交互滑块的初始值——用户仍然可以拖动调整做 what-if 探索。
@@ -59,8 +60,9 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
   // 直属领导态度风格状态
   const [currentLeadStyle, setCurrentLeadStyle] = useState<HwLeadStyle>(hwLeadStyle);
 
-  // 4.1 SOP 倒计时 / 节点剩余天数状态 (默认 14 天激活临界模式)
-  const [remainingDays, setRemainingDays] = useState<number>(daysRemaining);
+  // 4.1 SOP 倒计时 / 节点剩余天数状态；默认值仅用于组件独立挂载的 UI 兜底，不作为当前工程事实源。
+  const initialDaysRemaining = typeof daysRemaining === 'number' ? daysRemaining : context.daysRemaining;
+  const [remainingDays, setRemainingDays] = useState<number>(initialDaysRemaining);
 
   // 5大重型辅助分析模块默认折叠状态（降低视觉复杂度，按需点开）
   const [isLeadStyleOpen, setIsLeadStyleOpen] = useState<boolean>(false);
@@ -71,10 +73,9 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
 
   // 响应父组件工况切换与属性变化
   React.useEffect(() => {
-    if (typeof daysRemaining === 'number') {
-      setRemainingDays(daysRemaining);
-    }
-  }, [daysRemaining]);
+    const nextDays = typeof daysRemaining === 'number' ? daysRemaining : context.daysRemaining;
+    if (typeof nextDays === 'number') setRemainingDays(nextDays);
+  }, [daysRemaining, context.daysRemaining]);
 
   React.useEffect(() => {
     if (hwLeadStyle) {
@@ -86,6 +87,11 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
     return <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-sm text-slate-400">当前典型工况分析结果尚未生成，请稍候。</div>;
   }
 
+  const contract = selectAnalysisResultContract(result);
+  const judgment = contract.judgment;
+  const action = contract.action;
+  if (!judgment || !action || !judgment.risk) return null;
+  const riskRatings = judgment.risk;
   const handleStyleSelect = (style: HwLeadStyle) => {
     setCurrentLeadStyle(style);
     if (onLeadStyleChange) {
@@ -151,7 +157,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
   };
 
   // 依据最终得分重新排序
-  const safeCandidateActions = Array.isArray(result.candidateActions) ? result.candidateActions : [];
+  const safeCandidateActions = action.candidateActions;
   const sortedActions = [...safeCandidateActions].sort((a, b) => {
     if (a.veto.rejection_veto && !b.veto.rejection_veto) return 1;
     if (!a.veto.rejection_veto && b.veto.rejection_veto) return -1;
@@ -160,9 +166,6 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* 0. 结果来源透明度标注 */}
-      <ResultProvenanceBanner provenance={result.provenance} />
-
       {/* 1. Header & 节点倒计时衰减控制器 */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
@@ -308,7 +311,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                 项目节点/SOP 倒计时时间衰减因子 (Time Decay Penalty)
               </span>
               <span className="text-[11px] text-slate-400">
-                离 SOP 还有 300 天时改版是好方案；离节点只有 15 天时，提改版就是找死。
+                当前项目剩余 <strong>{remainingDays} 天</strong>；当进入 ≤21 天的临界窗口时，改版方案必须先核实真实 lead time 与节点影响，不能用模板经验数字替代项目排期。
               </span>
             </div>
           </div>
@@ -449,13 +452,9 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
         </div>
       </div>
 
-      {result.templateContentNotice && (
-        <TemplateContentNotice blocks={result.templateContentNotice.blocks} message={result.templateContentNotice.message} />
-      )}
-
       {/* P0-2: 去黑箱化多维工程风险解构 (Multi-Dimensional Risk Breakdown) */}
-      {result.multiRiskBreakdown && (() => {
-        const mb = result.multiRiskBreakdown as any;
+      {judgment.multiRiskBreakdown && (() => {
+        const mb = judgment.multiRiskBreakdown as any;
         const tech = mb.techMargin || mb.technicalRisk || { level: 'Medium', score: 65, description: '技术裕量在可控范围内', limitMetric: '设计规格要求' };
         const reli = mb.reliabilityStress || mb.reliabilityRisk || { level: 'Medium', score: 60, description: '应力负载在安全工作区内', soaStatus: 'SOA 边界内' };
         const sched = mb.scheduleDelay || mb.scheduleRisk || { level: 'Medium', score: 55, description: '节点周期仍有缓冲余量', slipWeeks: 1 };
@@ -826,7 +825,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
           </p>
 
           <div className="space-y-3 text-xs">
-            {result.candidateActions
+            {action.candidateActions
               .filter((a) => a.veto.rejection_veto)
               .map((vetoed) => (
                 <div key={vetoed.id} className="bg-red-900/20 border border-red-800/40 rounded-lg p-3 text-slate-300 space-y-2">
@@ -878,8 +877,8 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
       </div>
 
       {/* P0-3: 措施决策理由显性化：为什么推荐 B 而不选 A / C 三栏对比 */}
-      {result.whyNotComparison && (() => {
-        const raw = result.whyNotComparison as any;
+      {judgment.whyNotComparison && (() => {
+        const raw = judgment.whyNotComparison as any;
         const asStringArray = (value: unknown, fallback: string[] = []): string[] => {
           if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
           if (typeof value === 'string' && value.trim()) return [value];
@@ -896,7 +895,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
                 optionName: raw.recommendedOption?.name || '推荐方案 (方案B)',
                 isRecommended: true,
                 verdictTitle: '为什么选推荐方案',
-                coreTradeoffReason: raw.recommendedOption?.tradeoffRationale || '达成性能、周期与责任平衡的最优工程解',
+                coreTradeoffReason: raw.recommendedOption?.tradeoffRationale || '当前候选未返回结构化权衡理由',
                 keyRiskOrPenalty: asStringArray(raw.recommendedOption?.closingEvidence, ['台架实测波形具备充足工程裕量']),
                 reActivationCondition: '基准推荐',
               },
@@ -1027,7 +1026,7 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
 
       {/* Section 11: 领导视角：项目经济风险 (Technical Risk x Business Impact) */}
       {(() => {
-        const candidateList = result.candidateActions || (result as any).options || [];
+        const candidateList = action.candidateActions;
         const hasVeto = candidateList.some((o: any) => o?.veto?.rejection_veto);
         const econRisk = evaluateLeadershipEconomicRisk(hasVeto, remainingDays);
 
@@ -1096,8 +1095,8 @@ export const DecisionCockpitView: React.FC<DecisionCockpitViewProps> = ({
     })()}
 
       {/* P0-4: 未来 24 小时执行时刻表与三色量化放行标准 (Next 24-Hour Plan & Pass/Fail Criteria) */}
-      {result.next24HourPlan && (() => {
-        const plan = result.next24HourPlan as any;
+      {action.next24HourPlan && (() => {
+        const plan = action.next24HourPlan as any;
         const timelineList = Array.isArray(plan.timeline) ? plan.timeline : [];
         const greenPass = plan.passCriteria?.greenPass || plan.passFailCriteria?.[0]?.greenCriteria || '实测关键电气波形与温升满足车规降额要求，具备工艺窗口。';
         const yellowConditional = plan.passCriteria?.yellowConditional || plan.passFailCriteria?.[0]?.yellowCriteria || '增加局部吸收滤波或限额受控放行，由系统与质量负责人签字。';

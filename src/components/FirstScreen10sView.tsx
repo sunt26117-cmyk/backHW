@@ -26,7 +26,7 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import { CopilotAnalysisResult, ProjectContext, IssueInput } from '../types';
-import { TemplateContentNotice } from './TemplateContentNotice';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import { calculateDomainMetrics, resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 import { toStringArray } from '../utils/decisionFrame';
 
@@ -60,7 +60,14 @@ export const FirstScreen10sView: React.FC<FirstScreen10sProps> = ({
     );
   }
 
-  const { coreConclusion, physicalMechanism, finalRecommendation, riskRatings } = result;
+  const contract = selectAnalysisResultContract(result);
+  const facts = contract.facts;
+  const judgment = contract.judgment;
+  const action = contract.action;
+  const riskRatings = contract.risk;
+  if (!facts || !judgment || !action || !riskRatings) return null;
+  const { physicalMechanism } = facts;
+  const { coreConclusion, finalRecommendation } = judgment;
 
   // 10秒第一屏 4 核心要素提取
   const extractNumber = (text: string, pattern: RegExp, fallback = '—') => { const m = text.match(pattern); return m?.[1] || fallback; };
@@ -75,20 +82,18 @@ export const FirstScreen10sView: React.FC<FirstScreen10sProps> = ({
   const whatIsWrong = issue.failurePhenomenon || '当前典型工况存在关键参数超限/裕量不足，请以“事实与证据”页为准。';
   const whyPhysical = `${physicalMechanism.rootCauseAnalysis.slice(0, 220)}${physicalMechanism.rootCauseAnalysis.length > 220 ? '…' : ''}`;
   const whatToDoNow = `【首选推荐方案】${finalRecommendation.recommendedOptionName}。${(Array.isArray(finalRecommendation.whyReason) ? finalRecommendation.whyReason : [String(finalRecommendation.whyReason || '')])[0] || '按当前工况验证关键风险后推进。'}`;
-  const gate = result.next24HourPlan?.passFailCriteria?.[0];
+  const gate = action.next24HourPlan?.passFailCriteria?.[0];
   const scenarioGate = gate?.parameter || issue.requirement || issue.engineeringConcern || '当前工况关键工程指标';
   const gateDetail = gate ? `绿色：${gate.greenCriteria}；黄色：${gate.yellowCriteria}；红色：${gate.redCriteria}` : '必须以实测证据判定 Pass / Fail，不能用模型计算值替代实测。';
   const categoryText = Array.isArray(issue.issueCategories) ? issue.issueCategories.join(' / ') : 'Other';
   const whatWouldProveIt = `【${context.projectName} / ${categoryText}】在 ${issue.environment || '当前环境'}、${issue.testCondition || '当前测试条件'} 下验证：${scenarioGate}。${gateDetail}`;
   // [健壮性] decisionFrame 的数组字段可能被 AI / 导入 JSON 写成字符串，渲染前统一成 string[]
-  const reversalCriteria = toStringArray(result.decisionFrame?.reversalCriteria);
-  const unknownsBlockingDecision = toStringArray(result.decisionFrame?.unknownsBlockingDecision);
+  const reversalCriteria = toStringArray(judgment.decisionFrame?.reversalCriteria);
+  const decisionSnapshot = contract.decision;
+  const unknownsBlockingDecision = decisionSnapshot?.blockingUnknowns || toStringArray(judgment.decisionFrame?.unknownsBlockingDecision);
 
   return (
     <div className="space-y-6">
-      {result.templateContentNotice && (
-        <TemplateContentNotice blocks={result.templateContentNotice.blocks} message={result.templateContentNotice.message} />
-      )}
       {/* 顶部醒目标题与项目工况快照 */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950/40 border border-slate-800 rounded-xl p-5 shadow-lg">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -126,7 +131,7 @@ export const FirstScreen10sView: React.FC<FirstScreen10sProps> = ({
         </div>
       </div>
 
-      {result.decisionFrame && (
+      {judgment.decisionFrame && (
         <div className="bg-slate-900/90 border border-cyan-500/30 rounded-xl p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div>
@@ -135,16 +140,16 @@ export const FirstScreen10sView: React.FC<FirstScreen10sProps> = ({
               </div>
               <div className="text-[11px] text-slate-400 mt-1">不是“写报告”，而是明确当前能否继续推进，以及缺什么证据。</div>
             </div>
-            <span className="text-[10px] px-2 py-1 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-mono">{result.decisionFrame.decisionWindow}</span>
+            <span className="text-[10px] px-2 py-1 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-mono">{decisionSnapshot?.decisionWindow || judgment.decisionFrame.decisionWindow}</span>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-3">
               <div className="text-[10px] text-slate-500 mb-1">当前要回答的问题</div>
-              <div className="text-xs text-slate-200 leading-relaxed">{result.decisionFrame.decisionQuestion}</div>
+              <div className="text-xs text-slate-200 leading-relaxed">{decisionSnapshot?.decisionQuestion || judgment.decisionFrame.decisionQuestion}</div>
             </div>
             <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-3">
               <div className="text-[10px] text-slate-500 mb-1">未来 24 小时最优先动作</div>
-              <div className="text-xs text-emerald-300 leading-relaxed">{result.decisionFrame.bestNextAction}</div>
+              <div className="text-xs text-emerald-300 leading-relaxed">{decisionSnapshot?.bestNextAction || judgment.decisionFrame.bestNextAction}</div>
             </div>
             <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-3">
               <div className="text-[10px] text-slate-500 mb-1">什么证据会推翻当前方案</div>
@@ -288,6 +293,21 @@ export const FirstScreen10sView: React.FC<FirstScreen10sProps> = ({
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
+      </div>
+
+      {/* WP6：工作流是帮助内容，不再占用正式二级页。 */}
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <HelpCircle className="w-4 h-4 text-cyan-400 shrink-0" />
+          <span className="text-[11px] text-slate-400 truncate">需要了解“事实 → 机理 → 方案 → 验证 → 决策 → 回归 → 交付”的推进顺序？</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigateTab('workflow')}
+          className="shrink-0 text-[11px] font-medium text-cyan-300 hover:text-cyan-200 flex items-center gap-1 cursor-pointer"
+        >
+          打开工作流帮助 <ChevronRight className="w-3 h-3" />
+        </button>
       </div>
 
       {/* 完整工程决策闭环链路导览 (Section 0 & 9 规范) */}

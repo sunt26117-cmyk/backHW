@@ -1,13 +1,11 @@
 import React from 'react';
 import { CopilotAnalysisResult, InformationTag } from '../types';
-import { ResultProvenanceBanner } from './ResultProvenanceBanner';
-import { TemplateContentNotice } from './TemplateContentNotice';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import {
   CheckCircle2,
   HelpCircle,
   AlertTriangle,
   ShieldCheck,
-  Flame,
   Cpu,
   Compass,
   Activity,
@@ -34,17 +32,15 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
     );
   }
 
-  const {
-    coreConclusion,
-    knownFacts,
-    assumptions,
-    unknowns,
-    physicalMechanism,
-    dfmeaView,
-    riskRatings,
-    classifiedInfo,
-    redTeamChallenge,
-  } = result;
+  const contract = selectAnalysisResultContract(result);
+  const facts = contract.facts;
+  const judgment = contract.judgment;
+  if (!facts || !judgment) return null;
+  const { knownFacts, assumptions, unknowns, physicalMechanism, dfmea: dfmeaItems, classifiedInfo, bldcExtendedAnalysis } = facts;
+  const { coreConclusion, risk: riskSnapshot, redTeamChallenge } = judgment;
+  if (!riskSnapshot || !physicalMechanism || !coreConclusion) return null;
+  const riskRatings = riskSnapshot;
+  const dfmeaView = dfmeaItems[0];
 
   const getRiskBadgeColor = (risk: string) => {
     switch (risk) {
@@ -111,34 +107,32 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
 
   return (
     <div className="space-y-6">
-      {/* 0. 结果来源透明度标注 (明确区分 AI 推演 vs 车规确定性模版/物理公式) */}
-      <ResultProvenanceBanner provenance={result.provenance} />
-
-      {/* 1. Core Conclusion Hero Card (固定结构 1: 核心结论) */}
+      {/* 1. Engineering Facts Hero Card：这里只负责事实边界，不重复第一屏/方案决策页的推荐结论。 */}
       <div className="bg-gradient-to-r from-blue-950/70 via-slate-900 to-indigo-950/60 border border-blue-500/30 rounded-xl p-6 shadow-lg">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
           <div className="space-y-3 max-w-4xl">
             <div className="flex items-center space-x-2">
               <span className="px-2.5 py-0.5 rounded text-xs font-semibold bg-blue-600 text-white tracking-wide uppercase">
-                Core Conclusion (核心结论)
+                Engineering Facts (工程事实)
               </span>
-              <span className="text-xs text-slate-400">严守汽车硬件工程决策铁律 · 拒绝模棱两可</span>
+              <span className="text-xs text-slate-400">本页只锁定输入、证据、缺参与失效链事实；推荐方案以总览 / 方案决策页为准。</span>
             </div>
 
             <div>
               <h3 className="text-base sm:text-lg font-bold text-white flex items-start">
                 <Compass className="w-5 h-5 mr-2 text-blue-400 shrink-0 mt-0.5" />
-                推荐措施：{coreConclusion.recommendedMeasure}
+                当前工程问题
               </h3>
               <p className="text-xs sm:text-sm text-slate-300 mt-2 leading-relaxed bg-slate-800/60 p-3 rounded-lg border border-slate-700/50">
-                <span className="font-semibold text-blue-300">核心理由：</span>
-                {coreConclusion.reasonSummary}
+                {coreConclusion.problemSummary}
               </p>
             </div>
 
-            <div className="text-xs text-slate-400">
-              <span className="text-slate-500">工程问题简述：</span>
-              {coreConclusion.problemSummary}
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+              <span className="px-2 py-1 rounded bg-slate-800/70 border border-slate-700">已知 {knownFacts.length}</span>
+              <span className="px-2 py-1 rounded bg-amber-950/30 border border-amber-800/50">假设 {assumptions.length}</span>
+              <span className="px-2 py-1 rounded bg-rose-950/30 border border-rose-800/50">未知 {unknowns.length}</span>
+              <span className="px-2 py-1 rounded bg-cyan-950/30 border border-cyan-800/50">证据分类 {Object.keys(classifiedInfo || {}).length}</span>
             </div>
           </div>
 
@@ -337,12 +331,6 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
             </div>
           </div>
 
-          {result.templateContentNotice && (
-            <div className="mb-3">
-              <TemplateContentNotice blocks={result.templateContentNotice.blocks} message={result.templateContentNotice.message} compact />
-            </div>
-          )}
-
           <div className="p-3 bg-rose-950/30 border border-rose-800/40 rounded-lg mb-3 text-xs text-rose-200 font-medium leading-relaxed">
             {redTeamChallenge.auditVerdict}
           </div>
@@ -381,29 +369,20 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
         </div>
       )}
 
-      {/* 3. Physical Mechanism & Root Cause (固定结构 2: 失效机理与物理根因) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 mb-3 flex items-center">
-          <Flame className="w-4 h-4 mr-2 text-orange-400" />
-          物理本质与失效机理 (Physical Mechanism Analysis)
-        </h3>
-
-        <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-4 mb-4">
-          <span className="text-xs font-semibold text-orange-400 uppercase tracking-wide block mb-1">
-            底层物理与电路机理深剖 (Root Cause Physics):
-          </span>
-          <p className="text-xs text-slate-200 leading-relaxed">
-            {physicalMechanism.rootCauseAnalysis}
-          </p>
+      {/* 3. 机理引用：完整确定性机理归 physics / Pattern；Facts 只保留事实关联摘要。 */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300">机理证据引用</h3>
+            <p className="mt-1 text-[11px] text-slate-500">完整公式、Pattern 输出与根因深剖由“物理分析”工作台负责，本页不再复制整块正文。</p>
+          </div>
+          <span className="shrink-0 px-2 py-1 rounded bg-cyan-950/30 border border-cyan-800/50 text-[10px] text-cyan-300">Physics / Pattern Owner</span>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {physicalMechanism.keyPhysicalFactors.map((item, idx) => (
-            <div key={idx} className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3 text-xs">
-              <span className="font-semibold text-blue-300 block mb-1">{item.factor}</span>
-              <p className="text-slate-400 leading-normal text-[11px]">{item.description}</p>
-            </div>
-          ))}
+        <div className="mt-3 bg-slate-800/60 border border-slate-700/60 rounded-lg p-3">
+          <span className="text-[10px] text-slate-500 uppercase tracking-wide block mb-1">根因摘要</span>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            {physicalMechanism.rootCauseAnalysis.length > 260 ? `${physicalMechanism.rootCauseAnalysis.slice(0, 260)}…` : physicalMechanism.rootCauseAnalysis}
+          </p>
         </div>
       </div>
 
@@ -432,7 +411,7 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-slate-200">
-              {(result.dfmeaItems && result.dfmeaItems.length > 0 ? result.dfmeaItems : [dfmeaView]).map((item, idx) => (
+              {(dfmeaItems.length > 0 ? dfmeaItems : [dfmeaView]).map((item, idx) => (
                 <tr key={idx} className="hover:bg-slate-850/50">
                   <td className="p-3 font-medium text-amber-300">
                     <div className="font-semibold">{item.failureMode}</div>
@@ -479,7 +458,7 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
         </div>
 
         {/* BLDC Extended Safety Chain & Commutation Analysis */}
-        {result.bldcExtendedAnalysis && (
+        {bldcExtendedAnalysis && (
           <div className="mt-6 border-t border-slate-800 pt-5 space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-cyan-300 flex items-center space-x-1.5 uppercase tracking-wider">
@@ -495,19 +474,19 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-amber-300">换相角误差与转矩纹波</span>
                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                    result.bldcExtendedAnalysis.commutationRisk.stallOutProbability === 'high'
+                    bldcExtendedAnalysis.commutationRisk.stallOutProbability === 'high'
                       ? 'bg-red-950 text-red-300 border border-red-800'
                       : 'bg-amber-950 text-amber-300 border border-amber-800'
                   }`}>
-                    失步风险: {result.bldcExtendedAnalysis.commutationRisk.stallOutProbability.toUpperCase()}
+                    失步风险: {bldcExtendedAnalysis.commutationRisk.stallOutProbability.toUpperCase()}
                   </span>
                 </div>
                 <div className="text-slate-300 space-y-1 text-[11px]">
-                  <div>控制拓扑: <span className="text-white font-medium">{result.bldcExtendedAnalysis.commutationRisk.controlModeLabel}</span></div>
-                  <div>工作转速区间: <span className="font-mono text-cyan-300">{result.bldcExtendedAnalysis.commutationRisk.speedRangeRpm[0]} ~ {result.bldcExtendedAnalysis.commutationRisk.speedRangeRpm[1]} rpm</span></div>
-                  <div>观测提前角偏差: <span className="font-mono text-amber-300">+{result.bldcExtendedAnalysis.commutationRisk.speedOffsetDeg}°</span> | 纹波估计: <span className="font-mono text-red-300">{result.bldcExtendedAnalysis.commutationRisk.torqueRippleEstimatePct}%</span></div>
+                  <div>控制拓扑: <span className="text-white font-medium">{bldcExtendedAnalysis.commutationRisk.controlModeLabel}</span></div>
+                  <div>工作转速区间: <span className="font-mono text-cyan-300">{bldcExtendedAnalysis.commutationRisk.speedRangeRpm[0]} ~ {bldcExtendedAnalysis.commutationRisk.speedRangeRpm[1]} rpm</span></div>
+                  <div>观测提前角偏差: <span className="font-mono text-amber-300">+{bldcExtendedAnalysis.commutationRisk.speedOffsetDeg}°</span> | 纹波估计: <span className="font-mono text-red-300">{bldcExtendedAnalysis.commutationRisk.torqueRippleEstimatePct}%</span></div>
                   <div className="bg-slate-900/60 p-2 rounded text-[11px] text-slate-400 leading-normal">
-                    {result.bldcExtendedAnalysis.commutationRisk.stallOutReason}
+                    {bldcExtendedAnalysis.commutationRisk.stallOutReason}
                   </div>
                 </div>
               </div>
@@ -517,15 +496,15 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-blue-300">位置传感器失效容错</span>
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800">
-                    {result.bldcExtendedAnalysis.positionSensorDegradation.redundancyAvailable ? '具备冗余' : '单点无冗余'}
+                    {bldcExtendedAnalysis.positionSensorDegradation.redundancyAvailable ? '具备冗余' : '单点无冗余'}
                   </span>
                 </div>
                 <div className="text-slate-300 space-y-1 text-[11px]">
-                  <div>传感器类型: <span className="text-white font-medium">{result.bldcExtendedAnalysis.positionSensorDegradation.sensorTypeLabel}</span></div>
-                  <div>故障诊断码: <span className="font-mono text-amber-300">{result.bldcExtendedAnalysis.positionSensorDegradation.dtcTriggered}</span></div>
-                  <div>降级模式: <span className="text-slate-200">{result.bldcExtendedAnalysis.positionSensorDegradation.powerLimitMode}</span></div>
+                  <div>传感器类型: <span className="text-white font-medium">{bldcExtendedAnalysis.positionSensorDegradation.sensorTypeLabel}</span></div>
+                  <div>故障诊断码: <span className="font-mono text-amber-300">{bldcExtendedAnalysis.positionSensorDegradation.dtcTriggered}</span></div>
+                  <div>降级模式: <span className="text-slate-200">{bldcExtendedAnalysis.positionSensorDegradation.powerLimitMode}</span></div>
                   <div className="bg-slate-900/60 p-2 rounded text-[11px] text-slate-400 leading-normal">
-                    {result.bldcExtendedAnalysis.positionSensorDegradation.switchingLogic}
+                    {bldcExtendedAnalysis.positionSensorDegradation.switchingLogic}
                   </div>
                 </div>
               </div>
@@ -535,15 +514,15 @@ export const AnalysisFactView: React.FC<AnalysisFactViewProps> = ({ result, onGo
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-emerald-300">功能安全链与看门狗</span>
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-                    FHTI: {result.bldcExtendedAnalysis.functionalSafetyChain.watchdogTiming.timingCompliance}
+                    FHTI: {bldcExtendedAnalysis.functionalSafetyChain.watchdogTiming.timingCompliance}
                   </span>
                 </div>
                 <div className="text-slate-300 space-y-1 text-[11px]">
-                  <div>双采样交叉互检: <span className="font-medium text-emerald-300">{result.bldcExtendedAnalysis.functionalSafetyChain.currentSenseDualChannel.crossCheckStatus}</span> (阈值 &plusmn;{result.bldcExtendedAnalysis.functionalSafetyChain.currentSenseDualChannel.toleranceThresholdPct}%)</div>
-                  <div>时序预算: <span className="font-mono text-slate-200">总容错 {result.bldcExtendedAnalysis.functionalSafetyChain.watchdogTiming.fhtiBudgetMs}ms</span> (切换 {result.bldcExtendedAnalysis.functionalSafetyChain.watchdogTiming.safeStateTransitionMs}ms + 裕量 <span className="text-emerald-300 font-bold">{result.bldcExtendedAnalysis.functionalSafetyChain.watchdogTiming.marginMs}ms</span>)</div>
-                  <div>ASIL分解证明: <span className="text-cyan-300 font-mono">{result.bldcExtendedAnalysis.functionalSafetyChain.asilDecomposition.mcuSubsystem}</span> + <span className="text-cyan-300 font-mono">{result.bldcExtendedAnalysis.functionalSafetyChain.asilDecomposition.gateDriverSubsystem}</span></div>
+                  <div>双采样交叉互检: <span className="font-medium text-emerald-300">{bldcExtendedAnalysis.functionalSafetyChain.currentSenseDualChannel.crossCheckStatus}</span> (阈值 &plusmn;{bldcExtendedAnalysis.functionalSafetyChain.currentSenseDualChannel.toleranceThresholdPct}%)</div>
+                  <div>时序预算: <span className="font-mono text-slate-200">总容错 {bldcExtendedAnalysis.functionalSafetyChain.watchdogTiming.fhtiBudgetMs}ms</span> (切换 {bldcExtendedAnalysis.functionalSafetyChain.watchdogTiming.safeStateTransitionMs}ms + 裕量 <span className="text-emerald-300 font-bold">{bldcExtendedAnalysis.functionalSafetyChain.watchdogTiming.marginMs}ms</span>)</div>
+                  <div>ASIL分解证明: <span className="text-cyan-300 font-mono">{bldcExtendedAnalysis.functionalSafetyChain.asilDecomposition.mcuSubsystem}</span> + <span className="text-cyan-300 font-mono">{bldcExtendedAnalysis.functionalSafetyChain.asilDecomposition.gateDriverSubsystem}</span></div>
                   <div className="bg-slate-900/60 p-2 rounded text-[11px] text-slate-400 leading-normal">
-                    {result.bldcExtendedAnalysis.functionalSafetyChain.currentSenseDualChannel.diagnosisMechanism}
+                    {bldcExtendedAnalysis.functionalSafetyChain.currentSenseDualChannel.diagnosisMechanism}
                   </div>
                 </div>
               </div>

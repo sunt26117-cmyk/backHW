@@ -1,4 +1,5 @@
-import { CopilotAnalysisResult, IssueInput, ProjectContext, RaciItem, DFMEAView, DualTimelineActionPlan } from '../types';
+import { CopilotAnalysisResult, IssueInput, ProjectContext, RaciItem, DFMEAView, DualTimelineActionPlan, CandidateAction } from '../types';
+import { createSemanticAnalysisResultEditor, readFacts, readRiskSnapshot } from '../adapters/analysisResultAdapter';
 import { evaluateAllBldcPatterns } from '../domains/bldc';
 import { deriveBldcEvaluationInput } from './scenarioDerived';
 import { evaluateAllRobotJointPatterns, deriveRobotJointEvaluationInput } from '../data/robotJointPatternEngine';
@@ -6,6 +7,7 @@ import { buildScenarioPassFailCriteria, getDomainPhysics, resolveEngineeringDoma
 import { getCrossDomainCouplings } from './crossDomainCouplingMatrix';
 import { recalculateStandardWeightedScore } from './scoringWeights';
 import { readMeasuredNumber } from './unifiedStateExtractor';
+import { JOINT_CONTAINMENT_STRATEGY, TIMELINE_CONTAINMENT_PHASE_TITLE } from '../content/robotJointText';
 
 const firstNum = (text: string, regs: RegExp[], fallback = NaN) => {
   for (const re of regs) {
@@ -113,7 +115,7 @@ function collectTriggeredPatterns(domain: string, context: ProjectContext, issue
   return [];
 }
 
-function buildDynamicCandidateActions(context: ProjectContext, issue: IssueInput, domain: string, riskScore: number): CopilotAnalysisResult['candidateActions'] {
+function buildDynamicCandidateActions(context: ProjectContext, issue: IssueInput, domain: string, riskScore: number): CandidateAction[] {
   const days = context.daysRemaining;
   const cats = issue.issueCategories || [];
   const text = `${issue.actualMeasurement || ''} ${issue.failurePhenomenon || ''} ${issue.requirement || ''} ${issue.notes || ''}`;
@@ -259,7 +261,7 @@ function buildDynamicCandidateActions(context: ProjectContext, issue: IssueInput
   if (domain === 'ROBOT_JOINT') {
     return [
       mk('Option A', 'conservative', '物理硬件重构', 'PCB Layout 双通道 STO 物理隔离 + 关节第二编码器全闭环 + 泄放电阻外置散热', '从硬件单板走线、机械测角全闭环与传热路径从源头根治背隙、单点失效与过热。', '彻底达到量产级硬指标，通过正式 TÜV Cat 3 PLd 认证并具备长期运行可靠性。', baseScores(18, 55, 45, 95, 95), 'Low', '需重新投板制作 PCB 并微调机械结构，工期按项目排期核算。', 'PCB 投板打样 + 机械小改模', '按项目排期', '激光干涉仪双向定位精度复测 + STO 单通道短路/开路故障注入 + 连续满载温升', '并行推进软件补偿作为过渡，待新硬件归档后完成切换。'),
-      mk('Option B', 'balanced', '双轨推进 (推荐)', '软件反向间隙查表动态补偿 + 外挂独立双通道安全继电器箱过渡 + 加减速 S 曲线回馈削峰', '利用固件反向补偿消除背隙，外设独立安全盒确保 STO 双通道电气隔离，微调加减速保护电阻。', '在不改动板卡（0 天 PCB 工期）前提下把末端精度收敛到客户规格以内，并通过现场符合性预审（具体收敛值须实测确认）。', baseScores(25, 92, 90, 88, 88), 'Medium', '软件补偿在磨损老化后可能漂移，外置安全盒不能替代量产单板设计。', '激光干涉仪全行程标定 + 外置安全继电器模块', '3~4 天', '激光干涉仪 10 次往复测量重复定位误差 + STO 故障注入切断时延抓波 + 100% 负荷热电偶温升', '若精度离散度超出规格，立即降速运行并启动 Option A 硬件投板。'),
+      mk('Option B', 'balanced', '双轨推进 (推荐)', JOINT_CONTAINMENT_STRATEGY, '利用固件反向补偿消除背隙，外设独立安全盒确保 STO 双通道电气隔离，微调加减速保护电阻。', '在不改动板卡（0 天 PCB 工期）前提下把末端精度收敛到客户规格以内，并通过现场符合性预审（具体收敛值须实测确认）。', baseScores(25, 92, 90, 88, 88), 'Medium', '软件补偿在磨损老化后可能漂移，外置安全盒不能替代量产单板设计。', '激光干涉仪全行程标定 + 外置安全继电器模块', '3~4 天', '激光干涉仪 10 次往复测量重复定位误差 + STO 故障注入切断时延抓波 + 100% 负荷热电偶温升', '若精度离散度超出规格，立即降速运行并启动 Option A 硬件投板。'),
       mk('Option C', 'schedule_priority', '高风险放行 (一票否决)', '仅在上位机单边调大目标误差容限，不对硬件与安全机制做任何整改', '直接放宽重复定位精度指标并出具免责说明申请现场免检。', '眼前不改动任何软硬件，但直接违反 ISO 13849-1 及合同技术规格。', baseScores(0, 98, 98, 20, 10), 'High', '面临客户拒收退货索赔，且 STO 单点共地共因失效触碰产品责任法规红线。', '无法通过验收', '0 天', '无法通过', '无')
     ];
   }
@@ -369,7 +371,7 @@ function buildDynamicDualTimeline(context: ProjectContext, issue: IssueInput, do
   return {
     containmentPhase: {
       phaseTag: 'T_PLUS_24H_CONTAINMENT',
-      timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+      timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
       title: containmentSrc.map((a: any) => a?.name).filter(Boolean).join(' + ') || '应急遏制措施',
       objective: '在 ' + days + ' 天节点内不改板卡地遏制「' + (issue.failurePhenomenon || issue.engineeringConcern || (domain + ' 问题')) + '」的流出风险，取得最小必要证据。',
       hardwareImpact: '样件级/固件级临时改动，不等待 PCB 改版。',
@@ -393,6 +395,8 @@ function buildDynamicDualTimeline(context: ProjectContext, issue: IssueInput, do
   };
 }
 export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context: ProjectContext, issue: IssueInput): CopilotAnalysisResult {
+  const facts = readFacts(result);
+  const risk = readRiskSnapshot(result);
   const domain = resolveEngineeringDomain(issue);
   const text = `${issue.actualMeasurement || ''} ${issue.testCondition || ''} ${issue.failurePhenomenon || ''} ${issue.requirement || ''}`;
   const measuredV = firstNum(text, [/实测[^\d]{0,18}(\d+(?:\.\d+)?)\s*V/i, /(?:峰值|peak)[^\d]{0,10}(\d+(?:\.\d+)?)\s*V/i]);
@@ -414,7 +418,8 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
   const scenarioPass = buildScenarioPassFailCriteria(issue, context);
 
   const dynamic = structuredClone(result) as CopilotAnalysisResult & { __scenarioLabel?: string };
-  dynamic.whyNotComparison = safeArray(dynamic.whyNotComparison).map((x: any) => ({
+  const editor = createSemanticAnalysisResultEditor(dynamic);
+  editor.judgment.whyNotComparison = safeArray(editor.judgment.whyNotComparison).map((x: any) => ({
     optionId: String(x?.optionId || x?.id || 'Option'),
     optionName: String(x?.optionName || x?.name || '未命名方案'),
     categoryLabel: String(x?.categoryLabel || x?.category || '方案'),
@@ -424,24 +429,24 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
     keyRiskOrPenalty: safeStringArray(x?.keyRiskOrPenalty ?? x?.closingEvidence ?? x?.keyPenalties),
     reActivationCondition: String(x?.reActivationCondition || x?.reActivation || '验证失败或边界条件变化时重新评估'),
   }));
-  dynamic.finalRecommendation = {
-    ...dynamic.finalRecommendation,
-    whyReason: safeStringArray(dynamic.finalRecommendation?.whyReason),
-    immediateSteps: safeArray(dynamic.finalRecommendation?.immediateSteps),
-    preconditions: safeStringArray(dynamic.finalRecommendation?.preconditions),
-    unacceptableActions: safeStringArray(dynamic.finalRecommendation?.unacceptableActions),
-    stopConditions: safeStringArray(dynamic.finalRecommendation?.stopConditions),
-    reEvaluationTriggers: safeStringArray(dynamic.finalRecommendation?.reEvaluationTriggers),
+  editor.judgment.recommendation = {
+    ...editor.judgment.recommendation,
+    whyReason: safeStringArray(editor.judgment.recommendation?.whyReason),
+    immediateSteps: safeArray(editor.judgment.recommendation?.immediateSteps),
+    preconditions: safeStringArray(editor.judgment.recommendation?.preconditions),
+    unacceptableActions: safeStringArray(editor.judgment.recommendation?.unacceptableActions),
+    stopConditions: safeStringArray(editor.judgment.recommendation?.stopConditions),
+    reEvaluationTriggers: safeStringArray(editor.judgment.recommendation?.reEvaluationTriggers),
   } as any;
   dynamic.__scenarioLabel = `${context.projectName}｜${context.projectPhase}｜${(issue.issueCategories || ['Other']).join(' / ')}｜${issue.failurePhenomenon || issue.engineeringConcern || '当前问题'}`;
-  dynamic.coreConclusion = {
-    ...dynamic.coreConclusion,
-    problemSummary: `${prefix} ${issue.failurePhenomenon || issue.engineeringConcern || dynamic.coreConclusion.problemSummary}`,
-    recommendedMeasure: `${prefix} ${dynamic.coreConclusion.recommendedMeasure}`,
+  editor.judgment.conclusion = {
+    ...editor.judgment.conclusion,
+    problemSummary: `${prefix} ${issue.failurePhenomenon || issue.engineeringConcern || editor.judgment.conclusion.problemSummary}`,
+    recommendedMeasure: `${prefix} ${editor.judgment.conclusion.recommendedMeasure}`,
     reasonSummary: `${prefix} ${cfg.root}`,
   };
-  dynamic.physicalMechanism = {
-    ...dynamic.physicalMechanism,
+  editor.facts.physicalMechanism = {
+    ...editor.facts.physicalMechanism,
     rootCauseAnalysis: cfg.root,
     keyPhysicalFactors: cfg.factors.map((f, i) => ({
       factor: f,
@@ -452,40 +457,40 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
       ][i]
     }))
   };
-  dynamic.knownFacts = [
+  editor.facts.knownFacts = [
     `当前工程：${context.projectName}｜${context.productType}｜${context.projectPhase}｜${context.asilLevel}`,
     `当前类别：${(issue.issueCategories || ['Other']).join(' / ')}`,
     issue.actualMeasurement || '暂无实测回填',
     issue.testCondition || '暂无测试条件回填',
-    ...(result.knownFacts || []).filter(x => !/3800rpm|37\.8V|40V|48MHz|2\.15V|BLDC/i.test(x)).slice(0, 6)
+    ...(facts?.knownFacts || []).filter(x => !/3800rpm|37\.8V|40V|48MHz|2\.15V|BLDC/i.test(x)).slice(0, 6)
   ];
-  dynamic.next24HourPlan = {
-    timeline: (result.next24HourPlan?.timeline || []).map((t, i) => ({
+  editor.action.next24HourPlan = {
+    timeline: (editor.action.next24HourPlan?.timeline || []).map((t, i) => ({
       ...t,
       task: `${cfg.verify[i % cfg.verify.length]}；${t.task}`,
       deliverable: `${t.deliverable}｜证据必须标注 MEASURED / CALCULATED / SPEC`
     })),
     passFailCriteria: scenarioPass,
   };
-  dynamic.whyNotComparison = safeArray(dynamic.whyNotComparison).map((x: any) => ({
+  editor.judgment.whyNotComparison = safeArray(editor.judgment.whyNotComparison).map((x: any) => ({
     ...x,
     coreTradeoffReason: `${prefix} ${String(x.coreTradeoffReason || '')}`,
     keyRiskOrPenalty: safeStringArray(x.keyRiskOrPenalty),
   }));
-  dynamic.candidateActions = (dynamic.candidateActions || []).map((a) => ({
+  editor.action.candidates = (editor.action.candidates || []).map((a) => ({
     ...a,
     description: `${prefix} ${a.description}`,
     expectedBenefit: `${prefix} ${a.expectedBenefit}`,
     riskBefore: `${prefix} ${issue.actualMeasurement || a.riskBefore}`,
     verificationMethod: `${cfg.verify.join('；')}。原方案：${a.verificationMethod}`,
   }));
-  dynamic.finalRecommendation = {
-    ...dynamic.finalRecommendation,
-    whyReason: [prefix, ...safeStringArray(dynamic.finalRecommendation?.whyReason)].filter(Boolean),
-    immediateSteps: safeArray(dynamic.finalRecommendation?.immediateSteps).map((step: any, idx) => ({ ...step, step: Number(step?.step) || idx + 1, action: `${cfg.verify[idx % cfg.verify.length]}：${String(step?.action || step?.title || '')}` })),
+  editor.judgment.recommendation = {
+    ...editor.judgment.recommendation,
+    whyReason: [prefix, ...safeStringArray(editor.judgment.recommendation?.whyReason)].filter(Boolean),
+    immediateSteps: safeArray(editor.judgment.recommendation?.immediateSteps).map((step: any, idx) => ({ ...step, step: Number(step?.step) || idx + 1, action: `${cfg.verify[idx % cfg.verify.length]}：${String(step?.action || step?.title || '')}` })),
   };
-  const existingDocs = (dynamic.engineeringDocs || {}) as any;
-  dynamic.engineeringDocs = {
+  const existingDocs = (editor.delivery.engineeringDocs || {}) as any;
+  editor.delivery.engineeringDocs = {
     ...existingDocs,
     pmDecisionEmail: {
       ...existingDocs.pmDecisionEmail,
@@ -493,8 +498,8 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
       technicalFact: `${issue.actualMeasurement || '暂无实测'}｜${issue.requirement || '暂无规格'}｜测试条件：${issue.testCondition || '待补充'}`,
       currentSituation: `${issue.failurePhenomenon || issue.engineeringConcern || '当前工况问题'}｜${context.nextMilestone}｜剩余${context.daysRemaining}天`,
       risk: issue.engineeringConcern || '未评估',
-      options: (dynamic.candidateActions || []).map((a: any) => a.name).join(' / ') || '待生成',
-      recommendedOption: (dynamic.candidateActions || [])[0]?.name || '待定',
+      options: (editor.action.candidates || []).map((a: any) => a.name).join(' / ') || '待生成',
+      recommendedOption: (editor.action.candidates || [])[0]?.name || '待定',
       costImpact: context.costConstraint || '待评估',
       scheduleImpact: '剩余 ' + context.daysRemaining + ' 天',
       requiredDecision: '是否放行进入下一工程门禁',
@@ -518,49 +523,49 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
       .replace(/40\s*V/g, '当前器件额定耐压')
       .replace(/48MHz/g, '当前主要噪声/谐振频点')
       .replace(/2\.15\s*V/g, '当前门极实测尖峰');
-    dynamic.candidateActions = dynamic.candidateActions.map(a => ({ ...a, description: replaceLegacy(a.description), expectedBenefit: replaceLegacy(a.expectedBenefit), riskBefore: replaceLegacy(a.riskBefore), residualRiskDetail: replaceLegacy(a.residualRiskDetail) }));
-    dynamic.coreConclusion = { ...dynamic.coreConclusion, problemSummary: replaceLegacy(dynamic.coreConclusion.problemSummary), reasonSummary: replaceLegacy(dynamic.coreConclusion.reasonSummary) };
+    editor.action.candidates = editor.action.candidates.map(a => ({ ...a, description: replaceLegacy(a.description), expectedBenefit: replaceLegacy(a.expectedBenefit), riskBefore: replaceLegacy(a.riskBefore), residualRiskDetail: replaceLegacy(a.residualRiskDetail) }));
+    editor.judgment.conclusion = { ...editor.judgment.conclusion, problemSummary: replaceLegacy(editor.judgment.conclusion.problemSummary), reasonSummary: replaceLegacy(editor.judgment.conclusion.reasonSummary) };
   }
   void overDb; void errPct;
   // [输入驱动] 供后面统一生成 raciMatrix / dfmeaItems / dualTimeline 使用
   let dynRanked: any[] = [];
   let dynBest: any = undefined;
-  let dynRiskScore = dynamic.riskRatings?.overallRiskScore ?? 60;
+  let dynRiskScore = editor.judgment.risk?.overallRiskScore ?? 60;
   // BLDC 也重建通用支柱(classifiedInfo/multiRiskBreakdown/redTeamChallenge/edrRecord/whyNotComparison/next24HourPlan)，
   // 避免 decisionPillars.getBldcPillars 里 3800rpm/48MHz/37.8V 等参考案例数字泄漏进结果。
   if (domain === 'BLDC') {
-    const riskScore = dynamic.riskRatings?.overallRiskScore ?? 60;
+    const riskScore = editor.judgment.risk?.overallRiskScore ?? 60;
     // [输入驱动] 用「当前实际触发的 P 模式」重建候选方案，替换 bldcMotorExpert 里写死的 Option A/B/C。
-    dynamic.candidateActions = buildDynamicCandidateActions(context, issue, domain, riskScore);
+    editor.action.candidates = buildDynamicCandidateActions(context, issue, domain, riskScore);
     const presentInputs = Object.entries(issue.measuredValues || {})
       .filter(([, v]) => v !== '' && v !== null && v !== undefined)
       .map(([k, v]) => k + '=' + v);
     const missingRequired = profile.measurements.filter((f) => f.required && !(issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== ''));
-    dynamic.classifiedInfo = [
+    editor.facts.classifiedInfo = [
       { id: 'FACT-01', tag: 'MEASURED', title: '当前工程事实', content: issue.actualMeasurement || issue.failurePhenomenon || '暂无实测结果', sourceOrBasis: issue.measuredValueSource === 'BENCHMARK' ? 'BENCHMARK · 示例输入' : issue.measuredValueSource === 'IMPORTED' ? 'IMPORTED · 原始数据导入' : 'USER_MEASURED · 工程师回填', confidenceLevel: issue.measuredValueSource === 'BENCHMARK' ? 40 : (issue.actualMeasurement || issue.failurePhenomenon) ? 92 : 20, verificationMethod: '保留原始报告/波形/CSV作为证据' },
       { id: 'FACT-02', tag: 'SPEC', title: '当前放行基线', content: issue.requirement || '规格尚未提供', sourceOrBasis: '客户/标准/设计规格，由工程师确认适用性', confidenceLevel: issue.requirement ? 90 : 20 },
       { id: 'FACT-03', tag: 'CALCULATED', title: '确定性领域计算', content: 'BLDC 物理链路：' + profile.chain + '；输出：' + profile.outputs.slice(0, 4).join('、'), sourceOrBasis: 'ECU Copilot 领域规则 + 当前输入', confidenceLevel: 85, verificationMethod: '用实验结果回灌并做模型-实测交叉验证' },
     ];
     const lvl = (score: number) => (score >= 82 ? 'High' : score >= 68 ? 'Medium-High' : score >= 50 ? 'Medium' : 'Low');
     const dim = (name: string, key: 'techMargin' | 'reliabilityStress' | 'scheduleDelay' | 'redesignCost' | 'verificationGap', score: number, evidence: string) => ({ name, dimensionKey: key, score, level: lvl(score) as any, evidence });
-    dynamic.multiRiskBreakdown = {
+    editor.judgment.multiRiskBreakdown = {
       techMargin: dim('技术裕量', 'techMargin', riskScore, 'BLDC：' + profile.question),
       reliabilityStress: dim('可靠性应力', 'reliabilityStress', Math.min(98, riskScore), profile.chain),
       scheduleDelay: dim('节点风险', 'scheduleDelay', Math.min(98, 50 + Math.max(0, 14 - context.daysRemaining) * 2), '剩余 ' + context.daysRemaining + ' 天 / ' + context.nextMilestone),
       redesignCost: dim('改动成本', 'redesignCost', Math.min(98, 45), context.costConstraint || '成本约束待输入'),
       verificationGap: dim('验证缺口', 'verificationGap', Math.min(98, 25 + missingRequired.length * 12), '必填数据缺口：' + (missingRequired.map((f) => f.label).join('、') || '无')),
     };
-    dynamic.redTeamChallenge = {
+    editor.judgment.redTeamChallenge = {
       auditVerdict: '当前 BLDC 结论只有在“事实—物理机理—验证”三者一致时才能进入正式放行。',
       riskGaps: ['是否把 BLDC 之外的历史案例数字误当成当前项目事实？', '是否存在未量测但被方案叙述默认通过的关键边界？', '模型是否存在相关性、温漂、装配状态或测试夹具影响的未验证假设？'],
       missingEvidenceList: missingRequired.map((f) => f.label + (f.unit ? ' (' + f.unit + ')' : '')),
       confidenceScorePct: issue.measuredValueSource === 'BENCHMARK' ? 55 : profile.measurements.filter((f) => f.required).length === 0 ? 75 : Math.round((profile.measurements.filter((f) => f.required && issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '').length / Math.max(1, profile.measurements.filter((f) => f.required).length)) * 100),
     };
-    const ranked = [...(dynamic.candidateActions || [])].sort((a: any, b: any) => (b.scores?.total || 0) - (a.scores?.total || 0));
+    const ranked = [...(editor.action.candidates || [])].sort((a: any, b: any) => (b.scores?.total || 0) - (a.scores?.total || 0));
     const best = ranked[0];
     dynRanked = ranked; dynBest = best; dynRiskScore = riskScore;
     if (best) {
-      dynamic.whyNotComparison = dynamic.candidateActions.map((a: any, idx: number) => ({
+      editor.judgment.whyNotComparison = editor.action.candidates.map((a: any, idx: number) => ({
         optionId: a.id, optionName: a.name, categoryLabel: a.categoryLabel, isRecommended: a.id === best.id,
         verdictTitle: a.id === best.id ? '为什么选它' : '为什么不选它',
         coreTradeoffReason: a.id === best.id ? '在当前 BLDC 工况下，综合 T/S/C/Q/L 后总分 ' + (a.scores?.total ?? '') + '。' : '相对首选方案的主要差异：' + (a.residualRiskDetail || a.residualRisk),
@@ -568,15 +573,15 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
         reActivationCondition: a.id === best.id ? '出现新实测证据、规格变化或验证失败时重新评估。' : ((a.planB || '') + '；验证首选方案失败时重新激活。'),
       }) as any);
       const timelineBase = cfg.verify.length ? cfg.verify : ['补齐当前工况关键实测证据', '做最小区分试验', '回填结果并重算', '执行门禁复核'];
-      dynamic.next24HourPlan = {
+      editor.action.next24HourPlan = {
         timeline: timelineBase.slice(0, 4).map((task: string, i: number) => ({
           timeWindow: ['0~2h', '2~6h', '6~12h', '12~24h'][i], phase: 'Current Scenario Closed Loop',
-          task: task + '；配套方案：' + (dynamic.candidateActions[(i) % dynamic.candidateActions.length]?.name || ''),
+          task: task + '；配套方案：' + (editor.action.candidates[(i) % editor.action.candidates.length]?.name || ''),
           owner: '硬件负责人 / 验证测试工程师', deliverable: 'MEASURED / CALCULATED 证据 + Go/No-Go结论',
         })),
         passFailCriteria: buildScenarioPassFailCriteria(issue, context),
       };
-      dynamic.edrRecord = {
+      editor.delivery.edrRecord = {
         edrId: 'EDR-BLDC-' + Date.now().toString(36).toUpperCase(),
         projectCode: context.projectName, decisionDate: new Date().toISOString().slice(0, 10), decisionMaker: 'HW Lead / 决策评审会',
         coreProblem: 'BLDC：' + (issue.failurePhenomenon || issue.engineeringConcern || '当前工程问题'),
@@ -588,13 +593,13 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
         signOffSignatures: [{ role: '硬件负责人', name: 'HW Lead', status: 'Pending', signDate: '' }, { role: '质量经理', name: 'QA Manager', status: 'Pending', signDate: '' }],
         localHashDigest: 'PENDING', decisionStatus: 'CONDITIONALLY_APPROVED', createdAt: new Date().toISOString(),
       };
-      if (dynamic.engineeringDocs) dynamic.engineeringDocs.edrRecord = dynamic.edrRecord;
+      if (editor.delivery.engineeringDocs) editor.delivery.engineeringDocs.edrRecord = editor.delivery.edrRecord;
     }
   }
   // Replace case-specific candidate tables with scenario-native actions for non-BLDC domains.
   // This prevents the legacy EMC/WCCA case library from leaking 150MHz/BLDC numbers into unrelated scenarios.
   if (domain !== 'BLDC') {
-    const riskScore = dynamic.riskRatings.overallRiskScore || 60;
+    const riskScore = editor.judgment.risk.overallRiskScore || 60;
     const scenarioDomainKey = domain === 'EMC_BCI' || /BCI|大电流注入|11452-4/i.test(`${issue.failurePhenomenon} ${issue.notes}`) ? 'EMC_BCI' : domain === 'WCCA_EOL' ? 'WCCA_EOL' : domain;
 
     // Rebuild the P0 evidence summaries from the active domain instead of keeping legacy
@@ -603,35 +608,35 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
       .filter(([, v]) => v !== '' && v !== null && v !== undefined)
       .slice(0, 8)
       .map(([k, v]) => `${k}=${v}`);
-    dynamic.knownFacts = [
+    editor.facts.knownFacts = [
       issue.actualMeasurement || '暂无实测数据',
       `测试边界：${issue.testCondition || '待补充'}`,
       presentInputs.length ? `结构化输入：${presentInputs.join('；')}` : '尚无结构化输入；禁止用案例数字替代',
     ];
-    dynamic.assumptions = [
+    editor.facts.assumptions = [
       `当前物理领域：${scenarioDomainKey}`,
       `标准/客户适用性需工程师确认：${issue.requirement || '待输入'}`,
       '未测量字段保持为 UNKNOWN，不自动生成人为实测值',
     ];
-    dynamic.unknowns = [
-      ...(Array.isArray(result.unknowns) ? result.unknowns.map(String) : []),
+    editor.facts.unknowns = [
+      ...(Array.isArray(facts?.unknowns) ? facts.unknowns.map(String) : []),
       ...profile.measurements.filter(f => f.required && !(issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '')).map(f => `${f.label}尚未录入`),
     ].slice(0, 8);
-    dynamic.classifiedInfo = [
+    editor.facts.classifiedInfo = [
       { id:'FACT-01', tag:'MEASURED', title:'当前工程事实', content: issue.actualMeasurement || '暂无实测结果', sourceOrBasis: issue.measuredValueSource === 'BENCHMARK' ? 'BENCHMARK · 示例输入' : issue.measuredValueSource === 'IMPORTED' ? 'IMPORTED · 原始数据导入' : 'USER_MEASURED · 工程师回填', confidenceLevel: issue.measuredValueSource === 'BENCHMARK' ? 40 : issue.actualMeasurement ? 92 : 20, verificationMethod: '保留原始报告/波形/CSV作为证据' },
       { id:'FACT-02', tag:'SPEC', title:'当前放行基线', content: issue.requirement || '规格尚未提供', sourceOrBasis:'客户/标准/设计规格，由工程师确认适用性', confidenceLevel: issue.requirement ? 90 : 20 },
       { id:'FACT-03', tag:'CALCULATED', title:'确定性领域计算', content: `${profile.chain}；输出：${profile.outputs.slice(0,4).join('、')}`, sourceOrBasis:'ECU Copilot 领域规则 + 当前输入', confidenceLevel: 85, verificationMethod: '用实验结果回灌并做模型-实测交叉验证' },
     ];
     const lvl = (score:number) => score >= 82 ? 'High' : score >= 68 ? 'Medium-High' : score >= 50 ? 'Medium' : 'Low';
     const dim = (name:string, key:'techMargin'|'reliabilityStress'|'scheduleDelay'|'redesignCost'|'verificationGap', score:number, evidence:string) => ({ name, dimensionKey:key, score, level:lvl(score) as any, evidence });
-    dynamic.multiRiskBreakdown = {
+    editor.judgment.multiRiskBreakdown = {
       techMargin: dim('技术裕量','techMargin',riskScore,`${scenarioDomainKey}：${profile.question}`),
       reliabilityStress: dim('可靠性应力','reliabilityStress',Math.min(98,riskScore + (domain==='THERMAL'||domain==='COMPONENT'?7:0)),profile.chain),
       scheduleDelay: dim('节点风险','scheduleDelay',Math.min(98,50 + Math.max(0,14-context.daysRemaining)*2),`剩余 ${context.daysRemaining} 天 / ${context.nextMilestone}`),
       redesignCost: dim('改动成本','redesignCost',Math.min(98,45 + (domain==='COMPONENT'||domain==='THERMAL'?12:0)),context.costConstraint || '成本约束待输入'),
       verificationGap: dim('验证缺口','verificationGap',Math.min(98,25 + profile.measurements.filter(f => f.required && !(issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '')).length*12),`必填数据缺口：${getDomainPhysics(issue).measurements.filter(f=>f.required && !(issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '')).map(f=>f.label).join('、') || '无'}`),
     };
-    dynamic.redTeamChallenge = {
+    editor.judgment.redTeamChallenge = {
       auditVerdict: `当前${scenarioDomainKey}结论只有在“事实—物理机理—验证”三者一致时才能进入正式放行。`,
       riskGaps: [
         `是否把${scenarioDomainKey}之外的历史案例数字误当成当前项目事实？`,
@@ -641,16 +646,16 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
       missingEvidenceList: profile.measurements.filter(f => f.required && !(issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '')).map(f => `${f.label}${f.unit ? ` (${f.unit})` : ''}`),
       confidenceScorePct: issue.measuredValueSource === 'BENCHMARK' ? 55 : profile.measurements.filter(f=>f.required).length === 0 ? 75 : Math.round((profile.measurements.filter(f=>f.required && issue.measuredValues?.[f.key] !== undefined && issue.measuredValues?.[f.key] !== '').length / profile.measurements.filter(f=>f.required).length)*100),
     };
-    dynamic.candidateActions = buildDynamicCandidateActions(context, issue, scenarioDomainKey, riskScore);
+    editor.action.candidates = buildDynamicCandidateActions(context, issue, scenarioDomainKey, riskScore);
     const nativeRiskScore = deriveScenarioRiskScore(issue, context, scenarioDomainKey);
     const nativeRisk = nativeRiskScore >= 82 ? 'High' : nativeRiskScore >= 68 ? 'Medium-High' : nativeRiskScore >= 50 ? 'Medium' : 'Low';
-    dynamic.riskRatings = { ...dynamic.riskRatings, overallRiskScore: nativeRiskScore, overallRisk: nativeRisk as any, technicalRisk: nativeRisk as any };
-    const ranked = [...dynamic.candidateActions].sort((a,b) => b.scores.total - a.scores.total);
+    editor.judgment.risk = { ...editor.judgment.risk, overallRiskScore: nativeRiskScore, overallRisk: nativeRisk as any, technicalRisk: nativeRisk as any };
+    const ranked = [...editor.action.candidates].sort((a,b) => b.scores.total - a.scores.total);
     const best = ranked[0];
     dynRanked = ranked; dynBest = best; dynRiskScore = nativeRiskScore;
     if (best) {
-      const bestIndex = dynamic.candidateActions.findIndex(a => a.id === best.id);
-      dynamic.finalRecommendation = {
+      const bestIndex = editor.action.candidates.findIndex(a => a.id === best.id);
+      editor.judgment.recommendation = {
         recommendedOptionId: best.id,
         recommendedOptionName: best.name,
         recommendationGrade: best.residualRisk === 'Low' ? 'Strongly Recommended' : best.residualRisk === 'Medium' ? 'Conditionally Recommended' : 'Caution',
@@ -663,7 +668,7 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
         planB: best.planB,
       };
 
-      dynamic.whyNotComparison = dynamic.candidateActions.map((a, idx) => ({
+      editor.judgment.whyNotComparison = editor.action.candidates.map((a, idx) => ({
         optionId: a.id, optionName: a.name, categoryLabel: a.categoryLabel, isRecommended: a.id === best.id,
         verdictTitle: a.id === best.id ? '为什么选它' : '为什么不选它',
         coreTradeoffReason: a.id === best.id ? `在当前 ${scenarioDomainKey} 工况下，综合 T/S/C/Q/L 后总分 ${a.scores.total}。` : `相对首选方案的主要差异：${a.residualRiskDetail}`,
@@ -671,29 +676,29 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
         reActivationCondition: a.id === best.id ? '出现新实测证据、规格变化或验证失败时重新评估。' : `${a.planB}；验证首选方案失败时重新激活。`,
       } as any));
 
-      dynamic.coreConclusion = {
-        ...dynamic.coreConclusion,
+      editor.judgment.conclusion = {
+        ...editor.judgment.conclusion,
         problemSummary: `${prefix} ${issue.failurePhenomenon || issue.engineeringConcern || '当前工程问题待确认'}`,
         recommendedMeasure: `${prefix} ${best.name}：${best.expectedBenefit}`,
         reasonSummary: `${prefix} ${cfg.root}`,
       };
 
       const timelineBase = cfg.verify.length ? cfg.verify : ['补齐当前工况关键实测证据','做最小区分试验','回填结果并重算','执行门禁复核'];
-      dynamic.next24HourPlan = {
+      editor.action.next24HourPlan = {
         timeline: timelineBase.slice(0,4).map((task, i) => ({
           timeWindow: ['0~2h','2~6h','6~12h','12~24h'][i],
           phase: 'Current Scenario Closed Loop',
-          task: `${task}${bestIndex >= 0 ? `；配套方案：${dynamic.candidateActions[(bestIndex+i)%dynamic.candidateActions.length].name}` : ''}`,
+          task: `${task}${bestIndex >= 0 ? `；配套方案：${editor.action.candidates[(bestIndex+i)%editor.action.candidates.length].name}` : ''}`,
           owner: '硬件负责人 / 验证测试工程师',
           deliverable: 'MEASURED / CALCULATED 证据 + Go/No-Go结论',
         })),
         passFailCriteria: buildScenarioPassFailCriteria(issue, context),
       };
 
-      dynamic.engineeringDocs = {
-        ...dynamic.engineeringDocs,
+      editor.delivery.engineeringDocs = {
+        ...editor.delivery.engineeringDocs,
         pmDecisionEmail: {
-          ...dynamic.engineeringDocs?.pmDecisionEmail,
+          ...editor.delivery.engineeringDocs?.pmDecisionEmail,
           subject: `【${scenarioDomainKey}】${context.projectName}｜${best.name}`,
           technicalFact: `${issue.actualMeasurement || '暂无实测'}｜${issue.requirement || '暂无规格'}｜测试条件：${issue.testCondition || '待补充'}`,
           currentSituation: `${issue.failurePhenomenon || issue.engineeringConcern || '当前工况问题'}｜${context.nextMilestone}｜剩余${context.daysRemaining}天`,
@@ -703,7 +708,7 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
           scheduleImpact: '剩余 ' + context.daysRemaining + ' 天',
         },
         meetingMinutes: {
-          ...dynamic.engineeringDocs?.meetingMinutes,
+          ...editor.delivery.engineeringDocs?.meetingMinutes,
           title: `【${scenarioDomainKey}】${context.projectName}｜闭环评审`,
           discussionSummary: `${cfg.root}；下一步：${timelineBase.slice(0,3).join('；')}。首选方案：${best.name}。`,
         },
@@ -724,7 +729,7 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
         },
       } as any;
 
-      dynamic.dfmeaView = {
+      editor.facts.dfmeaView = {
         failureMode: `${scenarioDomainKey} 异常：${(issue.failurePhenomenon || '指标超差').slice(0, 50)}`,
         failureCause: cfg.root.slice(0, 100),
         localEffect: `受测接口或单元性能未达到 [${(issue.requirement || '设计指标').slice(0, 40)}] 要求`,
@@ -739,7 +744,7 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
       };
 
       // EDR 记录也改为依据当前工况动态生成，避免 decisionPillars 里的历史示例数字(如 150MHz)泄漏进结果。
-      dynamic.edrRecord = {
+      editor.delivery.edrRecord = {
         edrId: 'EDR-' + scenarioDomainKey + '-' + Date.now().toString(36).toUpperCase(),
         projectCode: context.projectName,
         decisionDate: new Date().toISOString().slice(0, 10),
@@ -763,21 +768,21 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
         decisionStatus: 'CONDITIONALLY_APPROVED',
         createdAt: new Date().toISOString(),
       };
-      if (dynamic.engineeringDocs) {
-        dynamic.engineeringDocs.edrRecord = dynamic.edrRecord;
+      if (editor.delivery.engineeringDocs) {
+        editor.delivery.engineeringDocs.edrRecord = editor.delivery.edrRecord;
       }
     }
   }
 
   // [输入驱动] 这三块此前是死模板（同域内输入怎么变都不动），现按当前输入+候选方案排序生成。
-  dynamic.raciMatrix = buildDynamicRaciMatrix(context, issue, domain, dynBest, dynRanked, dynRiskScore);
-  dynamic.dfmeaItems = buildDynamicDfmeaItems(context, issue, domain, profile, dynRiskScore, dynBest);
-  dynamic.dualTimeline = buildDynamicDualTimeline(context, issue, domain, cfg, dynBest, dynRanked, prefix);
-  if (dynamic.dfmeaItems.length > 0) dynamic.dfmeaView = { ...dynamic.dfmeaItems[0], ...dynamic.dfmeaView, failureMode: dynamic.dfmeaItems[0].failureMode, failureCause: dynamic.dfmeaItems[0].failureCause };
+  editor.delivery.raciMatrix = buildDynamicRaciMatrix(context, issue, domain, dynBest, dynRanked, dynRiskScore);
+  editor.facts.dfmeaItems = buildDynamicDfmeaItems(context, issue, domain, profile, dynRiskScore, dynBest);
+  editor.action.dualTimeline = buildDynamicDualTimeline(context, issue, domain, cfg, dynBest, dynRanked, prefix);
+  if (editor.facts.dfmeaItems.length > 0) editor.facts.dfmeaView = { ...editor.facts.dfmeaItems[0], ...editor.facts.dfmeaView, failureMode: editor.facts.dfmeaItems[0].failureMode, failureCause: editor.facts.dfmeaItems[0].failureCause };
 
   // [输入驱动] containment / capa 此前同样是死模板。
   const missingForPlan = (profile?.measurements || []).filter((f: any) => f?.required && (issue.measuredValues?.[f.key] === undefined || issue.measuredValues?.[f.key] === ''));
-  dynamic.containment = {
+  editor.action.containment = {
     shortTermMeasure: dynBest
       ? '在受控样件上先执行「' + dynBest.name + '」的应急措施：' + String(dynBest.description || '').replace(/\s+/g, ' ').slice(0, 140)
       : '在受控样件上执行应急遏制措施，取得最小必要证据。',
@@ -785,7 +790,7 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
     responsibleParty: '硬件负责人 (HW Lead) & 验证测试工程师 (TE)',
     timeline: (context.daysRemaining ?? 14) + ' 天节点内完成改制与自检。',
   };
-  dynamic.capa = {
+  editor.action.capa = {
     rootCauseAction: '围绕 ' + domain + ' 的根因补充最小验证：' + cfg.verify.join('；') + '。',
     preventiveMeasure: '把本次判定所需的实测字段（' + (missingForPlan.map((f: any) => f.label).join('、') || '当前域必填参数') + '）固化进设计评审与 EOL 检查表，避免再次缺证据放行。',
     lessonsLearned: '不能在缺少「' + (issue.requirement || '规格门限') + '」对应实测证据时把结论写成 PASS；临时措施必须有期限与关闭条件。',
@@ -793,8 +798,8 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
   };
 
   const measuredInputs = Object.entries(issue.measuredValues || {}).filter(([,v]) => v !== '' && v !== null && v !== undefined).map(([k,v]) => `${k}=${v}`);
-  const priorAnalysisBasis = dynamic.analysisBasis;
-  dynamic.analysisBasis = {
+  const priorAnalysisBasis = editor.facts.analysisBasis;
+  editor.facts.analysisBasis = {
     ruleInputs: [
       ...(priorAnalysisBasis?.ruleInputs || []),
       `场景规则：${domain}`,
@@ -806,11 +811,11 @@ export function applyScenarioDynamicLayer(result: CopilotAnalysisResult, context
       : measuredInputs.map(x => `${issue.measuredValueSource || 'USER_MEASURED'} · ${x}`),
     calculatedOutputs: Array.from(new Set([
       ...(priorAnalysisBasis?.calculatedOutputs || []),
-      `风险评分：${dynamic.riskRatings.overallRiskScore}/100`,
-      `物理机理：${dynamic.physicalMechanism.rootCauseAnalysis.slice(0,120)}`,
-      `候选方案：${dynamic.candidateActions?.length || 0} 个`,
+      `风险评分：${editor.judgment.risk.overallRiskScore}/100`,
+      `物理机理：${editor.facts.physicalMechanism.rootCauseAnalysis.slice(0,120)}`,
+      `候选方案：${editor.action.candidates?.length || 0} 个`,
     ])),
-    assumptions: Array.from(new Set([...(priorAnalysisBasis?.assumptions || []), ...(dynamic.assumptions || [])])),
+    assumptions: Array.from(new Set([...(priorAnalysisBasis?.assumptions || []), ...(editor.facts.assumptions || [])])),
     fixedTemplateFields: Array.from(new Set([
       ...(priorAnalysisBasis?.fixedTemplateFields || []),
       '专家规则/公式骨架',

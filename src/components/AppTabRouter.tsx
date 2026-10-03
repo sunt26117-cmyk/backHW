@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { HwLeadStyle } from '../types';
 import { SeniorEngineeringWorkbenchView, MainWorkbenchTab } from './SeniorEngineeringWorkbenchView';
 import { toMainTab } from './workbenchNavigation';
@@ -18,11 +18,19 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = ({
   onLoadScenarioSection14,
 }) => {
   const { context, setContext, issue, setIssue, currentScenarioId, currentScenario, lastSavedAt } = useScenario();
-  const { result, isAnalyzing, runAnalysis } = useAnalysis();
-  const { activeTab, setActiveTab, setScenarioManageOpen } = useUI();
+  const { result, isAnalyzing, resultIsStale, runAnalysis } = useAnalysis();
+  const { activeTab, setActiveTab, setScenarioManageOpen, workflowHelpOpen, setWorkflowHelpOpen } = useUI();
   const currentScenarioTitle = currentScenario?.title;
   const isCustomScenario = currentScenario?.isCustom;
   const onOpenScenarioManage = () => setScenarioManageOpen(true);
+
+  // 兼容历史 workflow 深链接：不再进入正式二级页，而是打开帮助抽屉。
+  useEffect(() => {
+    if (activeTab === 'workflow') {
+      setWorkflowHelpOpen(true);
+      setActiveTab('overview');
+    }
+  }, [activeTab, setActiveTab, setWorkflowHelpOpen]);
 
   // activeTab 可能是新工作台 id（Navbar 直接设置），也可能是旧一级 id（历史跳转/预设）。
   // 解析必须双向完全 —— 只做"旧→新"单向映射会让 physics/decision/delivery 静默弹回总览。
@@ -41,6 +49,7 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = ({
       currentScenarioTitle={currentScenarioTitle}
       isCustomScenario={isCustomScenario}
       isAnalyzing={isAnalyzing}
+      resultIsStale={resultIsStale}
       lastSavedAt={lastSavedAt}
       hwLeadStyle={context.hwLeadStyle || 'AGILE_DELIVERY'}
       onLeadStyleChange={(style: HwLeadStyle) => setContext((prev) => ({ ...prev, hwLeadStyle: style }))}
@@ -52,6 +61,8 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = ({
       onDeleteCustomScenario={onDeleteCustomScenario}
       onLoadScenarioSection14={onLoadScenarioSection14}
       onNavigateMain={(tab) => setActiveTab(tab)}
+      workflowHelpOpen={workflowHelpOpen}
+      onWorkflowHelpChange={setWorkflowHelpOpen}
     />
   );
 };

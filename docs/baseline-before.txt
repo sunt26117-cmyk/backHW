@@ -1,0 +1,109 @@
+BASELINE 2026-10-03T07:27:03+00:00
+--- npm run lint ---
+
+> ecu-hardware-copilot@0.0.0 lint
+> tsc --noEmit
+
+lint_exit=0
+--- npm test ---
+
+> ecu-hardware-copilot@0.0.0 test
+> node scripts/verify-ai-prompt-contract.cjs && node scripts/verify-three-tail-fixes.cjs && node scripts/verify-pattern-policy.cjs && tsx scripts/verify-bldc-modular-boundary.ts && tsx scripts/verify-all-pattern-traces.ts && tsx scripts/verify-trace.ts && tsx scripts/verify-engines.ts && tsx scripts/verify-engineering-gold-cases.ts && tsx scripts/verify-system-regression.ts && tsx scripts/verify-p003-veto-robustness.ts && tsx scripts/verify-miller-assumed-vbus-paths.ts && tsx scripts/verify-waveform.ts && tsx scripts/verify_insufficient_input.ts && tsx scripts/verify-insufficient-input-guards.ts && tsx scripts/verify-device-parameter-import.ts && tsx scripts/verify-device-candidate-governance.ts && tsx scripts/verify-device-real-datasheet-mapping.ts && tsx scripts/verify-device-spec-projection.ts && tsx scripts/verify-device-import-auto-apply.ts && tsx scripts/verify-component-domain-autofill.ts && tsx scripts/verify-capacitance-single-source.ts && tsx scripts/verify-supply-pair-and-qg-alias.ts && tsx scripts/verify-prompt-physics-rules.ts && tsx scripts/verify-7-workbench-architecture.ts && tsx scripts/verify-no-duplicate-copy.ts && tsx scripts/verify-bldc-input-governance.ts && tsx scripts/smoke-decisionframe-render.tsx && tsx scripts/smoke-waveform-render.tsx && tsx scripts/smoke-fsr-supply-fill-render.tsx && tsx scripts/test-theme-contrast.ts
+
+AI prompt contract: PASS
+THREE_TAIL_FIXES_STATIC_PASS
+decisionPillars runtime isolation: PASS
+BLDC physical input governance: PASS
+multi-domain unified input rendering: PASS
+PATTERN_POLICY_STATIC_PASS
+ASSUMPTION_BASED: preserve triggered, suppress VETO, downgrade evidence
+INSUFFICIENT_INPUT: suppress triggered + VETO
+
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+Error [TransformError]: 
+You installed esbuild for another platform than the one you're currently using.
+This won't work because esbuild is written with native code and needs to
+install a platform-specific binary executable.
+
+Specifically the "@esbuild/win32-x64" package is present but this platform
+needs the "@esbuild/linux-x64" package instead. People often get into this
+situation by installing esbuild on Windows or macOS and copying "node_modules"
+into a Docker image that runs Linux, or by copying "node_modules" between
+Windows and WSL environments.
+
+If you are installing with npm, you can try not copying the "node_modules"
+directory when you copy the files over, and running "npm ci" or "npm install"
+on the destination platform after the copy. Or you could consider using yarn
+instead of npm which has built-in support for installing a package on multiple
+platforms simultaneously.
+
+If you are installing with yarn, you can try listing both this platform and the
+other platform in your ".yarnrc.yml" file using the "supportedArchitectures"
+feature: https://yarnpkg.com/configuration/yarnrc/#supportedArchitectures
+Keep in mind that this means multiple copies of esbuild will be present.
+
+Another alternative is to use the "esbuild-wasm" package instead, which works
+the same way on all platforms. But it comes with a heavy performance cost and
+can sometimes be 10x slower than the "esbuild" package, so you may also not
+want to do that.
+
+    at generateBinPath (/mnt/data/backHW-main-work/node_modules/tsx/node_modules/esbuild/lib/main.js:2033:17)
+    at esbuildCommandAndArgs (/mnt/data/backHW-main-work/node_modules/tsx/node_modules/esbuild/lib/main.js:2114:33)
+    at ensureServiceIsRunning (/mnt/data/backHW-main-work/node_modules/tsx/node_modules/esbuild/lib/main.js:2271:25)
+    at transform (/mnt/data/backHW-main-work/node_modules/tsx/node_modules/esbuild/lib/main.js:2172:37)
+    at file:///mnt/data/backHW-main-work/node_modules/tsx/dist/index-DE3OBZuV.mjs:14:4115
+    at applyTransformers (file:///mnt/data/backHW-main-work/node_modules/tsx/dist/index-DE3OBZuV.mjs:14:1220)
+    at transform (file:///mnt/data/backHW-main-work/node_modules/tsx/dist/index-DE3OBZuV.mjs:14:4062)
+    at load (file:///mnt/data/backHW-main-work/node_modules/tsx/dist/register-nyXW-TH3.mjs:2:5368)
+    at async nextLoad (node:internal/modules/esm/hooks:748:22)
+    at async Hooks.load (node:internal/modules/esm/hooks:385:20)
+
+Node.js v22.16.0
+test_exit=1
+--- npm run build ---
+
+> ecu-hardware-copilot@0.0.0 build
+> vite build && vite build --config vite.config.offline.ts && node -e "require('fs').copyFileSync('dist-offline/index.html','dist/ecu-copilot-offline.html')" && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs
+
+[31mfailed to load config from /mnt/data/backHW-main-work/vite.config.ts[39m
+[31merror during build:
+Error: 
+You installed esbuild for another platform than the one you're currently using.
+This won't work because esbuild is written with native code and needs to
+install a platform-specific binary executable.
+
+Specifically the "@esbuild/win32-x64" package is present but this platform
+needs the "@esbuild/linux-x64" package instead. People often get into this
+situation by installing esbuild on Windows or macOS and copying "node_modules"
+into a Docker image that runs Linux, or by copying "node_modules" between
+Windows and WSL environments.
+
+If you are installing with npm, you can try not copying the "node_modules"
+directory when you copy the files over, and running "npm ci" or "npm install"
+on the destination platform after the copy. Or you could consider using yarn
+instead of npm which has built-in support for installing a package on multiple
+platforms simultaneously.
+
+If you are installing with yarn, you can try listing both this platform and the
+other platform in your ".yarnrc.yml" file using the "supportedArchitectures"
+feature: https://yarnpkg.com/configuration/yarnrc/#supportedArchitectures
+Keep in mind that this means multiple copies of esbuild will be present.
+
+Another alternative is to use the "esbuild-wasm" package instead, which works
+the same way on all platforms. But it comes with a heavy performance cost and
+can sometimes be 10x slower than the "esbuild" package, so you may also not
+want to do that.
+
+    at generateBinPath (/mnt/data/backHW-main-work/node_modules/esbuild/lib/main.js:1739:17)
+    at esbuildCommandAndArgs (/mnt/data/backHW-main-work/node_modules/esbuild/lib/main.js:1820:33)
+    at ensureServiceIsRunning (/mnt/data/backHW-main-work/node_modules/esbuild/lib/main.js:1977:25)
+    at build (/mnt/data/backHW-main-work/node_modules/esbuild/lib/main.js:1876:26)
+    at bundleConfigFile (file:///mnt/data/backHW-main-work/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:49448:24)
+    at async bundleAndLoadConfigFile (file:///mnt/data/backHW-main-work/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:49432:19)
+    at async loadConfigFromFile (file:///mnt/data/backHW-main-work/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:49396:44)
+    at async resolveConfig (file:///mnt/data/backHW-main-work/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:48891:24)
+    at async createBuilder (file:///mnt/data/backHW-main-work/node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:46866:18)
+    at async CAC.<anonymous> (file:///mnt/data/backHW-main-work/node_modules/vite/dist/node/cli.js:862:23)[39m
+build_exit=1

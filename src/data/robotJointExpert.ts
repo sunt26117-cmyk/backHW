@@ -2,6 +2,7 @@ import { ProjectContext, IssueInput, CopilotAnalysisResult, CandidateAction } fr
 import type { ScenarioPillars } from '../types';
 import { recalculateStandardWeightedScore } from '../utils/scoringWeights';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
+import { JOINT_BACKLASH_CAL_STEP_DETAIL, JOINT_BACKLASH_CAL_STEP_TITLE, JOINT_BACKLASH_PATCH_DELIVERABLE, JOINT_BLEED_RELOCATE_STEP_TITLE, JOINT_BLEED_TEMP_RECORD_DELIVERABLE, JOINT_CONTAINMENT_EXIT_CRITERION, JOINT_CONTAINMENT_NO_RESPIN_NOTE, JOINT_CONTAINMENT_OWNERS, JOINT_CONTAINMENT_STRATEGY, JOINT_DUAL_ENCODER_DELIVERABLE, JOINT_DUAL_ENCODER_STEP_DETAIL, JOINT_DUAL_ENCODER_STEP_TITLE, JOINT_LAYOUT_ISOLATION_DELIVERABLE, JOINT_LAYOUT_ISOLATION_STEP_TITLE, JOINT_PERMANENT_BENEFIT, JOINT_PERMANENT_EXIT_CRITERION, JOINT_PERMANENT_PHASE_TITLE, JOINT_PERMANENT_RESPIN_SCOPE, JOINT_PERMANENT_STRATEGY, JOINT_SAFETY_RELAY_STEP_DETAIL, JOINT_SAFETY_RELAY_STEP_TITLE, JOINT_SCURVE_BLEED_STEP_TITLE, TIMELINE_CONTAINMENT_PHASE_TITLE } from '../content/robotJointText';
 
 function calculateCtsql(T: number, S: number, C: number, Q: number, L: number): number {
   return recalculateStandardWeightedScore({ T, S, C, Q, L });
@@ -251,66 +252,66 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
     dualTimeline: {
       containmentPhase: {
         phaseTag: 'T_PLUS_24H_CONTAINMENT',
-        timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
-        title: '软件反向间隙查表动态补偿 + 外挂独立双通道安全继电器箱过渡 + 加减速 S 曲线回馈削峰',
+        timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
+        title: JOINT_CONTAINMENT_STRATEGY,
         objective: '不占用 PCB 打样工期，在驱动底层注入滞环补偿算法将末端重复精度收敛（具体数值须实测确认）；外设安全盒消除 STO 共地单点失效，确保第三方现场预审通过。',
-        hardwareImpact: '无需重新制作驱动板卡，仅需测试柜加装外置安全过渡盒并刷写运动控制补丁固件。',
-        responsibilityRole: '运动控制算法负责人 (Motion Lead) & 功能安全工程师 (Safety Lead)',
+        hardwareImpact: JOINT_CONTAINMENT_NO_RESPIN_NOTE,
+        responsibilityRole: JOINT_CONTAINMENT_OWNERS,
         actions: [
           {
-            step: '1. 激光干涉仪标定与反向间隙补偿固件刷写',
-            detail: '使用激光干涉仪测量各关节正反向定位滞环，将回程死区数据烧录入固件 EEPROM，开启过零反向补偿与前馈平滑。',
+            step: JOINT_BACKLASH_CAL_STEP_TITLE,
+            detail: JOINT_BACKLASH_CAL_STEP_DETAIL,
             owner: '控制算法工程师',
             duration: '按项目排期核算',
             hardwareImpact: '纯固件算法更新',
-            deliverable: '反向补偿固件补丁 (V1.2-Backlash-Patch) 与干涉仪测试记录',
+            deliverable: JOINT_BACKLASH_PATCH_DELIVERABLE,
           },
           {
-            step: '2. 外接 TÜV 认证双通道干簧安全继电器过渡箱',
-            detail: '在测试柜控制侧临时串接双通道独立干簧安全继电器模块，将 STO 1/2 彻底物理电气隔离切断驱动板 PWM 供电。',
+            step: JOINT_SAFETY_RELAY_STEP_TITLE,
+            detail: JOINT_SAFETY_RELAY_STEP_DETAIL,
             owner: '硬件安全工程师',
             duration: '按项目排期核算',
             hardwareImpact: '外置电气过渡盒，无单板修改',
             deliverable: '安全接线过渡箱及接线图纸（数量按项目样机台账确认）',
           },
           {
-            step: '3. 优化加减速 S 曲线并测试泄放电阻热平衡',
+            step: JOINT_SCURVE_BLEED_STEP_TITLE,
             detail: '微调加减速 Jerk 限制，延长制动回馈时间，台架连续循环运转监测泄放电阻温升（具体参数与时长按项目验证计划确认）。',
             owner: '系统测试工程师',
             duration: '按项目排期核算',
             hardwareImpact: '台架验证',
-            deliverable: '《连续满载运行泄放电阻温升曲线记录》',
+            deliverable: JOINT_BLEED_TEMP_RECORD_DELIVERABLE,
           },
         ],
         verificationCriteria: '末端重复定位精度稳定在客户规格以内（具体限值按项目实测确认），STO 双通道故障注入切断时延满足 IEC 61800-5-2 要求，泄放电阻稳态温度满足器件降额规范（模板不预填）。',
-        exitCriteria: '第三方机构出具现场符合性预审合格备忘录，DVT 样机具备装车试运行放行资格。',
+        exitCriteria: JOINT_CONTAINMENT_EXIT_CRITERION,
       },
       permanentPhase: {
         phaseTag: 'NEXT_PHASE_PERMANENT',
-        timeWindow: '下一批次 PCB 改版 / 量产定型阶段',
-        title: '驱动板 Layout 双通道绝对物理隔离 (STO PLd) + 双编码器全闭环 + 功率泄放电阻外壳导热优化',
-        objective: '从单板硬件物理架构与机械传动链彻底消除背隙、共因失效及热过载隐患，顺利通过正式 TÜV 认证并支撑大规模量产。',
-        hardwareImpact: 'PCB 重新 Layout 投板，升级光耦器件并重划隔离地岛；关节输出端加装第二编码器。',
+        timeWindow: JOINT_PERMANENT_PHASE_TITLE,
+        title: JOINT_PERMANENT_STRATEGY,
+        objective: JOINT_PERMANENT_BENEFIT,
+        hardwareImpact: JOINT_PERMANENT_RESPIN_SCOPE,
         responsibilityRole: '硬件架构师 & 机械系统总工',
         actions: [
           {
-            step: '1. PCB 驱动控制板双通道绝对物理隔离 Layout',
+            step: JOINT_LAYOUT_ISOLATION_STEP_TITLE,
             detail: 'STO 1 与 STO 2 走线爬电间距严格按标准安规要求核算，采用独立车规光耦及隔离 DC/DC 电源，通过第三方实验室全项故障注入测试。',
             owner: 'PCB Layout 工程师',
             duration: '按项目排期核算',
             hardwareImpact: 'PCB 投板打样 (Rev B)',
-            deliverable: '新版 Gerber 文件与安规绝缘仿真分析报告',
+            deliverable: JOINT_LAYOUT_ISOLATION_DELIVERABLE,
           },
           {
-            step: '2. 关节输出侧集成 19-bit 绝对值双编码器全闭环',
-            detail: '在谐波减速器输出法兰加装高精度第二码盘，驱动器形成电机高速端与负载低速端双闭环控制，物理消除机械背隙与扭转柔性。',
+            step: JOINT_DUAL_ENCODER_STEP_TITLE,
+            detail: JOINT_DUAL_ENCODER_STEP_DETAIL,
             owner: '机械与传感器工程师',
             duration: '按项目排期核算',
             hardwareImpact: '机械结构微调与新传感器导入',
-            deliverable: '双码盘集成图纸与首件全闭环精度测试报告',
+            deliverable: JOINT_DUAL_ENCODER_DELIVERABLE,
           },
           {
-            step: '3. 制动泄放电阻外移贴附铝合金外壳强化散热',
+            step: JOINT_BLEED_RELOCATE_STEP_TITLE,
             detail: '将泄放电阻由板载改为金属外壳封装，通过高导热绝缘导热垫直接贴合至关节铝合金压铸外壳，稳态散热能力显著提升（具体倍率须按本项目热仿真/实测确认）。',
             owner: '结构与热设计工程师',
             duration: '按项目排期核算',
@@ -319,7 +320,7 @@ export function generateRobotJointAnalysis(context: ProjectContext, issue: Issue
           },
         ],
         verificationCriteria: '无需算法补偿下自然定位精度满足客户规格（具体限值须实测确认），板载 STO 通过 TÜV 正式 Cat 3 PLd 证书，连续高速满载温升满足器件降额规范（模板不预填）。',
-        exitCriteria: '取得正式 PLd 功能安全证书，通过客户 SOP PPAP 签收。',
+        exitCriteria: JOINT_PERMANENT_EXIT_CRITERION,
       },
       strategicTradeoff: `为什么必须双层时间轴协同？
 距离当前 DVT 评审里程碑的剩余工期须按项目节点核算。如果现在强行重新设计驱动板 PCB、等待制板贴片打样并重装机械，其工期将超出当前 DVT 窗口，节点将直接违约瘫痪；

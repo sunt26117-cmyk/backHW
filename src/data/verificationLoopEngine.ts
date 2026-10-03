@@ -3,6 +3,8 @@
  * 严格遵照 V4 升级任务书：NOW/WHY/EXPECTED/PASS/FAIL/OWNER/DUE，VOI 性价比排序，闭环驱动风险与置信度重算
  */
 
+import { readRecommendedAction, readRiskSnapshot } from '../adapters/analysisResultAdapter';
+
 import {
   NextBestActionItem,
   ProjectContext,
@@ -25,8 +27,8 @@ export function generateNextBestAction(
 ): NextBestActionItem {
   const problem = issue?.failurePhenomenon || issue?.engineeringConcern || '当前工程问题';
   const requirement = issue?.requirement || '当前需求门限';
-  const rec = result?.finalRecommendation?.recommendedOptionName || '当前推荐方案';
-  const risk = result?.riskRatings?.overallRisk || 'Medium';
+  const rec = readRecommendedAction(result)?.name || '当前推荐方案';
+  const risk = readRiskSnapshot(result)?.overallRisk || 'Medium';
   const category = issue?.issueCategories?.[0] || '工程验证';
   const project = context?.projectName || '当前工程';
   return {

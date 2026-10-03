@@ -1,4 +1,6 @@
-import { ProjectContext, IssueInput, CopilotAnalysisResult, ComponentChangeImpactItem } from '../types';
+import { ProjectContext, IssueInput, ComponentChangeImpactItem } from '../types';
+import type { CopilotAnalysisResult } from '../types';
+import { readFacts, readRiskSnapshot } from '../adapters/analysisResultAdapter';
 import { BldcEvaluationInput } from '../domains/bldc';
 import { FmedaRow, FtaNode, SafetyTraceabilityNode, PhaseCheckItem, WorstCaseCombination } from '../types';
 import { SAMPLE_FMEDA_ROWS, SAMPLE_FTA_TREE, SAMPLE_SAFETY_TRACEABILITY_CHAIN } from '../data/safetyReliabilityEngine';
@@ -460,21 +462,23 @@ export function deriveBldcEvaluationInput(context: ProjectContext, issue: IssueI
 }
 
 export function deriveVerificationRisk(context: ProjectContext, issue: IssueInput, result?: CopilotAnalysisResult | null) {
-  const overall = result?.riskRatings.overallRiskScore ?? 60;
-  const level = result?.riskRatings.overallRisk ?? 'Medium';
-  const mainRisk = result?.physicalMechanism.rootCauseAnalysis || issue.engineeringConcern || issue.failurePhenomenon;
-  const confidence = result?.unknowns?.length && result.unknowns.length <= 1 ? 'MEDIUM' : 'LOW';
+  const facts = readFacts(result as any);
+  const risk = readRiskSnapshot(result as any);
+  const overall = risk?.overallRiskScore ?? 60;
+  const level = risk?.overallRisk ?? 'Medium';
+  const mainRisk = facts?.physicalMechanism.rootCauseAnalysis || issue.engineeringConcern || issue.failurePhenomenon;
+  const confidence = facts?.unknowns?.length && facts.unknowns.length <= 1 ? 'MEDIUM' : 'LOW';
   return {
     overallScore: overall,
     overallRiskLevel: level,
-    technicalRisk: result?.riskRatings.technicalRisk ?? level,
-    thermalRisk: result?.riskRatings.reliabilityRisk ?? level,
-    emcRisk: result?.riskRatings.qualityRisk ?? level,
-    reliabilityRisk: result?.riskRatings.reliabilityRisk ?? level,
-    safetyRisk: result?.riskRatings.functionalSafetyRisk ?? 'Medium',
-    scheduleRisk: result?.riskRatings.scheduleRisk ?? (context.daysRemaining <= 14 ? 'High' : 'Medium'),
-    verificationGap: result?.unknowns?.length ? 'HIGH' : 'MEDIUM',
-    uncertainty: result?.unknowns?.length ? 'HIGH' : 'MEDIUM',
+    technicalRisk: risk?.technicalRisk ?? level,
+    thermalRisk: risk?.reliabilityRisk ?? level,
+    emcRisk: risk?.qualityRisk ?? level,
+    reliabilityRisk: risk?.reliabilityRisk ?? level,
+    safetyRisk: risk?.functionalSafetyRisk ?? 'Medium',
+    scheduleRisk: risk?.scheduleRisk ?? (context.daysRemaining <= 14 ? 'High' : 'Medium'),
+    verificationGap: facts?.unknowns?.length ? 'HIGH' : 'MEDIUM',
+    uncertainty: facts?.unknowns?.length ? 'HIGH' : 'MEDIUM',
     majorRiskDriver: mainRisk,
     secondaryRiskDriver: issue.engineeringConcern || context.nextMilestone || '暂无次要风险驱动项',
     confidence,
@@ -482,8 +486,10 @@ export function deriveVerificationRisk(context: ProjectContext, issue: IssueInpu
 }
 
 export function deriveSafetyTraceability(context: ProjectContext, issue: IssueInput, result?: CopilotAnalysisResult | null): SafetyTraceabilityNode[] {
-  const failure = issue.failurePhenomenon || result?.dfmeaView.failureMode || '当前工况失效现象待确认';
-  const mechanism = result?.physicalMechanism.rootCauseAnalysis || issue.engineeringConcern || '需要通过工程验证确定主要物理机制';
+  const facts = readFacts(result as any);
+  const risk = readRiskSnapshot(result as any);
+  const failure = issue.failurePhenomenon || facts?.dfmea?.[0].failureMode || '当前工况失效现象待确认';
+  const mechanism = facts?.physicalMechanism.rootCauseAnalysis || issue.engineeringConcern || '需要通过工程验证确定主要物理机制';
   const requirement = issue.requirement || '当前工况关键安全需求待确认';
   const asil = context.asilLevel;
   const domain = resolveEngineeringDomain(issue);
@@ -513,15 +519,17 @@ export function deriveSafetyTraceability(context: ProjectContext, issue: IssueIn
     failureMode: i === 0 ? failure : `${failure.slice(0, 60)}｜${mechanism.slice(0, 55)}`,
     hardwareComponent: component,
     detectionMechanism: `当前工况证据链：${mechanism.slice(0, 80)}；使用实测/计算证据完成确认`,
-    diagnosticCoveragePct: Math.max(80, Math.min(99.5, n.diagnosticCoveragePct + (result?.riskRatings.overallRiskScore ?? 60) / 25 - 2 * i)),
+    diagnosticCoveragePct: Math.max(80, Math.min(99.5, n.diagnosticCoveragePct + (risk?.overallRiskScore ?? 60) / 25 - 2 * i)),
     safeState,
     faultHandlingTimeIntervalMs: Math.max(5, Math.round((n.faultHandlingTimeIntervalMs * (context.asilLevel === 'ASIL D' ? 0.75 : 1)) * 10) / 10),
-    evidence: result?.knownFacts?.length ? 'CALCULATED' : i === 0 ? 'SPECIFICATION' : n.evidence,
+    evidence: facts?.knownFacts?.length ? 'CALCULATED' : i === 0 ? 'SPECIFICATION' : n.evidence,
   }));
 }
 
 export function deriveFmedaRows(context: ProjectContext, issue: IssueInput, result?: CopilotAnalysisResult | null): FmedaRow[] {
-  const score = result?.riskRatings.overallRiskScore ?? 60;
+  const facts = readFacts(result as any);
+  const risk = readRiskSnapshot(result as any);
+  const score = risk?.overallRiskScore ?? 60;
   const multiplier = 0.85 + score / 100 * 0.45;
   const category = issue.issueCategories?.[0] || 'Other';
   const adjusted = SAMPLE_FMEDA_ROWS.map((r, idx) => {
@@ -556,12 +564,16 @@ function cloneFta(node: FtaNode, failure: string, mechanism: string, rootName: s
 }
 
 export function deriveFtaTree(context: ProjectContext, issue: IssueInput, result?: CopilotAnalysisResult | null): FtaNode {
+  const facts = readFacts(result as any);
+  const risk = readRiskSnapshot(result as any);
   const failure = issue.failurePhenomenon || '当前工况关键失效模式';
   const rootName = `${context.productType} 在【${context.projectPhase}】${failure.slice(0, 55)}`;
-  return cloneFta(SAMPLE_FTA_TREE, failure, result?.physicalMechanism.rootCauseAnalysis || issue.engineeringConcern, rootName);
+  return cloneFta(SAMPLE_FTA_TREE, failure, facts?.physicalMechanism.rootCauseAnalysis || issue.engineeringConcern, rootName);
 }
 
 export function deriveSafetyCollateral(context: ProjectContext, issue: IssueInput, result?: CopilotAnalysisResult | null) {
+  const facts = readFacts(result as any);
+  const risk = readRiskSnapshot(result as any);
   const category = issue.issueCategories?.[0] || 'Other';
   const domain = resolveEngineeringDomain(issue);
   const text = `${issue.testCondition} ${issue.environment} ${issue.actualMeasurement} ${issue.requirement}`;
@@ -574,7 +586,7 @@ export function deriveSafetyCollateral(context: ProjectContext, issue: IssueInpu
   const hot = Number.isFinite(explicitHot) ? explicitHot : (hotValues.length ? Math.max(...hotValues) : NaN);
   const primary = domain === 'COMPONENT' ? '当前原器件（主供）' : `${context.productType} 主关键器件`;
   const secondary = domain === 'COMPONENT' ? '当前推荐替代器件（二供）' : `${context.productType} 备用料号/二供`;
-  const rdsDelta = Number((2 + (result?.riskRatings.overallRiskScore ?? 60) / 18).toFixed(1));
+  const rdsDelta = Number((2 + (risk?.overallRiskScore ?? 60) / 18).toFixed(1));
   return {
     capacitor: {
       nominalHours: 5000,
@@ -592,7 +604,7 @@ export function deriveSafetyCollateral(context: ProjectContext, issue: IssueInpu
       tvsModel: Number.isFinite(voltage) && voltage >= 200 ? '高压输入级 TVS / 放电回路（按当前器件规格确认）' : '车规级 TVS（按当前输入标称电压选择）',
       clampingVoltageV: Number.isFinite(voltage) ? Number((voltage * 2.9).toFixed(1)) : NaN,
       chassisCapacitancePf: domain.startsWith('EMC_') ? 2200 : 1800,
-      status: result?.riskRatings.qualityRisk === 'High' ? 'ATTENTION' : 'PASS',
+      status: risk?.qualityRisk === 'High' ? 'ATTENTION' : 'PASS',
     },
     bci: {
       harnessCouplingLoopCm2: Number.isFinite(current) ? Number((30 + Math.min(80, current * 0.8)).toFixed(1)) : NaN,
@@ -608,6 +620,8 @@ export function deriveComponentChangeImpact(
   result?: CopilotAnalysisResult | null,
   forcedCategory?: ComponentChangeImpactItem['componentCategory']
 ): ComponentChangeImpactItem {
+  const facts = readFacts(result as any);
+  const risk = readRiskSnapshot(result as any);
   const domain = resolveEngineeringDomain(issue);
   const category = forcedCategory || (domain === 'COMPONENT' ? 'MOSFET'
     : domain === 'BLDC' ? 'GATE_DRIVER'
@@ -616,7 +630,7 @@ export function deriveComponentChangeImpact(
     : domain === 'THERMAL' || domain === 'POWER' || domain === 'POWER_TRANSIENT' ? 'MOSFET'
     : 'MCU');
   const base = generateComponentImpact(category as any);
-  const score = result?.riskRatings.overallRiskScore ?? 60;
+  const score = risk?.overallRiskScore ?? 60;
   const problem = issue.failurePhenomenon || issue.engineeringConcern || '当前工况关键工程问题';
   const currentCondition = issue.testCondition || issue.environment || '当前典型工况';
   return {
@@ -657,13 +671,15 @@ function evaluateComponentChangeImpactInternal(category: ComponentChangeImpactIt
 }
 
 export function derivePhaseChecklist(phase: 'Concept' | 'EVT' | 'DVT' | 'PVT' | 'SOP', context: ProjectContext, issue: IssueInput, result?: CopilotAnalysisResult | null): PhaseCheckItem[] {
+  const facts = readFacts(result as any);
+  const risk = readRiskSnapshot(result as any);
   // 不再把 designReviewEngine 中的历史案例 checklist 当作当前工程事实。
   // 这里只借用条目数量/阶段结构，所有 checkpoint 与 notes 必须由当前场景重新生成。
   const base = getPhaseReviewChecklist(phase).map((item) => ({
     ...item,
     notes: '模板结构：当前工程证据待确认，不代表当前项目已完成该检查项。',
   }));
-  const score = result?.riskRatings.overallRiskScore ?? 60;
+  const score = risk?.overallRiskScore ?? 60;
   const domain = resolveEngineeringDomain(issue);
   const category = issue.issueCategories?.[0] || 'Other';
   const problem = issue.failurePhenomenon || issue.engineeringConcern || '当前工况关键问题';
@@ -715,12 +731,14 @@ export function derivePhaseChecklist(phase: 'Concept' | 'EVT' | 'DVT' | 'PVT' | 
     standardClause: keepTemplateLabels ? item.standardClause : clause,
     checkpoint: `${points[idx % points.length]}（${context.productType}）`,
     status: idx === 0 ? riskTone : (score >= 65 ? 'NEEDS_ATTENTION' : 'COMPLIANT'),
-    notes: `当前工程 ${context.projectName}｜${context.projectPhase}｜${context.asilLevel}｜剩余 ${context.daysRemaining} 天。问题：${problem.slice(0, 90)}。${result?.unknowns?.[0] ? `首要未知项：${result.unknowns[0].slice(0, 70)}。` : ''}`,
+    notes: `当前工程 ${context.projectName}｜${context.projectPhase}｜${context.asilLevel}｜剩余 ${context.daysRemaining} 天。问题：${problem.slice(0, 90)}。${facts?.unknowns?.[0] ? `首要未知项：${facts.unknowns[0].slice(0, 70)}。` : ''}`,
   }));
 }
 
 export function deriveWorstCases(context: ProjectContext, issue: IssueInput, result?: CopilotAnalysisResult | null): WorstCaseCombination[] {
-  const score = result?.riskRatings.overallRiskScore ?? 60;
+  const facts = readFacts(result as any);
+  const risk = readRiskSnapshot(result as any);
+  const score = risk?.overallRiskScore ?? 60;
   const problem = issue.failurePhenomenon || issue.engineeringConcern || '当前工况关键风险';
   const env = issue.environment || issue.testCondition || '目标验证环境';
   const deadline = `${context.projectPhase} / 剩余 ${context.daysRemaining} 天`;
@@ -743,11 +761,11 @@ export function deriveWorstCases(context: ProjectContext, issue: IssueInput, res
     tag: 'CANDIDATE_UNVERIFIED',
     vbusCondition: issue.requirement || '当前工程需求边界待确认',
     ambientTempCondition: env,
-    currentCondition: `风险维度：${result?.riskRatings.technicalRisk || 'Medium'} / ${result?.riskRatings.reliabilityRisk || 'Medium'}`,
+    currentCondition: `风险维度：${risk?.technicalRisk || 'Medium'} / ${risk?.reliabilityRisk || 'Medium'}`,
     rpmCondition: context.nextMilestone || '下一里程碑前完成验证',
     componentToleranceCondition: issue.notes || '器件初始容差、温漂、老化与装配变异需纳入验证',
     combinedPeakStress: `场景化边界：${context.projectPhase}、${context.asilLevel}、${context.customer}；核心现象：${problem.slice(0, 95)}`,
-    marginToAbsoluteMax: `当前工程尚未闭环的证据：${result?.unknowns?.[0] || '请补充关键实测数据'}`,
+    marginToAbsoluteMax: `当前工程尚未闭环的证据：${facts?.unknowns?.[0] || '请补充关键实测数据'}`,
     verificationRequired: `以 ${context.nextMilestone} 为门禁，针对当前工况完成实测与回归。`,
   };
   return [baseA, baseB];

@@ -1,5 +1,7 @@
-import { CopilotAnalysisResult, DualTimelineActionPlan, IssueInput, ProjectContext } from '../types';
+import { CandidateAction, CopilotAnalysisResult, DualTimelineActionPlan, IssueInput, ProjectContext } from '../types';
+import { readCandidateActions, readDualTimeline } from '../adapters/analysisResultAdapter';
 import { resolveEngineeringDomain } from './scenarioDomainEngine';
+import { JOINT_BACKLASH_CAL_STEP_DETAIL, JOINT_BACKLASH_CAL_STEP_TITLE, JOINT_BACKLASH_PATCH_DELIVERABLE, JOINT_BLEED_RELOCATE_STEP_TITLE, JOINT_BLEED_TEMP_RECORD_DELIVERABLE, JOINT_CONTAINMENT_EXIT_CRITERION, JOINT_CONTAINMENT_NO_RESPIN_NOTE, JOINT_CONTAINMENT_OWNERS, JOINT_CONTAINMENT_STRATEGY, JOINT_DUAL_ENCODER_DELIVERABLE, JOINT_DUAL_ENCODER_STEP_DETAIL, JOINT_DUAL_ENCODER_STEP_TITLE, JOINT_LAYOUT_ISOLATION_DELIVERABLE, JOINT_LAYOUT_ISOLATION_STEP_TITLE, JOINT_PERMANENT_BENEFIT, JOINT_PERMANENT_EXIT_CRITERION, JOINT_PERMANENT_PHASE_TITLE, JOINT_PERMANENT_RESPIN_SCOPE, JOINT_PERMANENT_STRATEGY, JOINT_SAFETY_RELAY_STEP_DETAIL, JOINT_SAFETY_RELAY_STEP_TITLE, JOINT_SCURVE_BLEED_STEP_TITLE, TIMELINE_CONTAINMENT_PHASE_TITLE } from '../content/robotJointText';
 
 /**
  * 车规硬件双层工程时间轴生成引擎 (Dual-Timeline Action Engine)
@@ -7,29 +9,171 @@ import { resolveEngineeringDomain } from './scenarioDomainEngine';
  * 1. T+24h 应急临时遏制 (Containment Phase)：0天板卡改版工期，快速闭环，遏制故障流出，满足节点装车与交样；
  * 2. 下一版本永久纠正 (Permanent Action Phase)：SOP 质量防错，重新投板/改模，彻底根除物理机理根因。
  */
+/**
+ * WP4d：保留 A/B 测试开关，同时按已完成代码快照回归的域默认启用派生。
+ * 未在 allowlist 的域仍保持 legacy fallback；任何候选项不足时也自动回落。
+ */
+/**
+ * WP4d：只对已经完成 preset 对比、且 candidateActions 能稳定同时形成
+ * containment + permanent 两条轨道的域默认启用派生。BLDC / ROBOT_JOINT
+ * 继续保留 legacy fallback，直到有逐域工程师复核快照。
+ */
+export const DERIVED_TIMELINE_ENABLED_DOMAINS = Object.freeze([
+  'EMC_RE_CE', 'EMC_BCI', 'EMC_ESD', 'POWER_TRANSIENT',
+  'COMPONENT', 'THERMAL', 'WCCA_EOL', 'SIGNAL', 'CUSTOMER',
+] as const);
+type DerivedTimelineDomain = typeof DERIVED_TIMELINE_ENABLED_DOMAINS[number];
+
+// null = production/default domain gating；boolean = tests force all-domain on/off for A/B snapshots.
+let USE_DERIVED_TIMELINE: boolean | null = null;
+
+export function setDerivedTimelineEnabledForTest(enabled: boolean): void {
+  USE_DERIVED_TIMELINE = enabled;
+}
+
+export function resetDerivedTimelineModeForTest(): void {
+  USE_DERIVED_TIMELINE = null;
+}
+
+function isDerivedTimelineDefaultEnabled(domain: string): domain is DerivedTimelineDomain {
+  return (DERIVED_TIMELINE_ENABLED_DOMAINS as readonly string[]).includes(domain);
+}
+
+function textHasHardwareChangeSignal(text: string): boolean {
+  return /(PCB|BOM|器件|结构|改板|布局|投板|改模|物料|硬件|电阻|电容|磁珠|MOSFET|共模|导热)/i.test(text);
+}
+
+function actionRequiresHardwareChange(action: CandidateAction): boolean {
+  const impact = action.changeImpact;
+  if (impact) {
+    if (impact.dvRequalificationRequired === true || impact.bomCostDeltaUsd != null || impact.toolingLeadTimeWeeks != null) {
+      return true;
+    }
+    const impactText = [impact.costChange, impact.scheduleLeadTime, impact.impedanceOrSignalImpact, impact.emcThermalRipple]
+      .filter(Boolean)
+      .join(' ');
+    if (textHasHardwareChangeSignal(impactText)) return true;
+  }
+
+  const actionText = [action.name, action.description, action.preconditions].filter(Boolean).join(' ');
+  if (textHasHardwareChangeSignal(actionText)) return true;
+
+  // Dynamic candidateActions use a stable category contract. When the action copy is intentionally generic
+  // (e.g. "按当前物理根因直接做设计修正"), category itself is the only remaining source of phase semantics:
+  // conservative = permanent design correction; schedule_priority = containment-only; balanced remains evidence/validation.
+  // This fallback does not invent a measure or numeric value; it only interprets an existing typed category.
+  return action.category === 'conservative' || action.category === 'alternative';
+}
+
+/**
+ * 从当前分析结果候选方案派生双时间轴。
+ * 铁律：不创建新的工程措施或数值；步骤文字只能来自 candidateActions 已有字段。
+ * VETO 方案永不进入时间轴。若无法同时形成非硬件遏制项与硬件永久项，则返回 null 交给旧逻辑兜底。
+ */
+export function deriveTimelineFromActions(
+  analysis: Partial<CopilotAnalysisResult>,
+  context: ProjectContext,
+  issue: IssueInput,
+): DualTimelineActionPlan | null {
+  const actions = readCandidateActions(analysis as CopilotAnalysisResult).filter((a): a is CandidateAction => Boolean(a && a.name));
+  const eligible = actions.filter((a) => !a.veto?.rejection_veto);
+  if (!eligible.length) return null;
+
+  const containment = eligible.filter((a) => !actionRequiresHardwareChange(a)).slice(0, 3);
+  const permanent = eligible.filter((a) => actionRequiresHardwareChange(a)).slice(0, 3);
+  if (!containment.length || !permanent.length) return null;
+
+  const issueLabel = (issue.failurePhenomenon || issue.engineeringConcern || '当前工程问题').slice(0, 100);
+  const verifyText = (a: CandidateAction): string => String(a.verificationMethod || a.expectedBenefit || '').trim();
+  const toStep = (a: CandidateAction, index: number): {
+    step: string;
+    detail: string;
+    owner: string;
+    duration: string;
+    hardwareImpact: string;
+    deliverable: string;
+  } => {
+    const detailParts = [a.description, verifyText(a)].filter(Boolean);
+    return {
+      step: `${index + 1}. ${a.name}`,
+      detail: detailParts.join('｜').replace(/\s+/g, ' ').slice(0, 360),
+      owner: actionRequiresHardwareChange(a) ? '硬件负责人 / 系统负责人' : '硬件负责人 / 验证测试工程师',
+      duration: a.timeCost || a.changeImpact?.scheduleLeadTime || '按当前项目排期核算',
+      hardwareImpact: actionRequiresHardwareChange(a)
+        ? '涉及硬件/BOM/结构变更；具体范围以候选方案现有字段为准'
+        : '不等待 PCB 改版；具体是否需要局部改制以候选方案现有字段为准',
+      deliverable: verifyText(a) || '按候选方案既有验证方法形成证据记录',
+    };
+  };
+
+  const containmentSteps = containment.map((a, i) => toStep(a, i));
+  const permanentSteps = permanent.map((a, i) => toStep(a, i));
+  const days = context?.daysRemaining ?? 'UNKNOWN';
+  const phase = context?.projectPhase || 'UNKNOWN';
+  const verifyAll = [...containment, ...permanent].map(verifyText).filter(Boolean);
+
+  return {
+    containmentPhase: {
+      phaseTag: 'T_PLUS_24H_CONTAINMENT',
+      timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
+      title: containment.map((a) => a.name).join(' + '),
+      objective: `针对「${issueLabel}」在当前节点窗口内先形成不等待硬件改版的受控路径；当前剩余 ${days} 天。`,
+      hardwareImpact: '以候选方案既有字段判断为准，不新增措施或数值。',
+      actions: containmentSteps,
+      verificationCriteria: verifyAll.slice(0, 6).join('；') || '按候选方案既有验证方法完成证据闭环。',
+      exitCriteria: '候选方案验证完成并取得对应 MEASURED / CALCULATED / SPEC 证据后，才可关闭当前遏制阶段。',
+      responsibilityRole: '硬件负责人 / 验证测试工程师',
+    },
+    permanentPhase: {
+      phaseTag: 'NEXT_PHASE_PERMANENT',
+      timeWindow: phase === 'DV' ? '下一轮 C 样改版 / PV 模具样件' : '下一代硬件改版 / SOP 封样',
+      title: permanent.map((a) => a.name).join(' + '),
+      objective: `基于当前候选方案中明确需要硬件变化的措施，针对「${issueLabel}」建立永久纠正路径。`,
+      hardwareImpact: '涉及硬件/BOM/结构变化的候选方案按其现有 changeImpact 与验证字段执行。',
+      actions: permanentSteps,
+      verificationCriteria: verifyAll.slice(0, 6).join('；') || '按候选方案既有验证方法完成全回归证据闭环。',
+      exitCriteria: '完成候选方案既有验证方法与对应工程变更归档后，关闭当前永久纠正项。',
+      responsibilityRole: '硬件架构师 / 质量负责人',
+    },
+    strategicTradeoff: `当前 ${phase} 阶段、剩余 ${days} 天：先用非硬件变更候选项形成受控遏制，再将需要硬件变化的候选项纳入永久纠正；两阶段共用同一候选方案证据，不跨域复制其他工况文字。`,
+    provenance: 'DERIVED_FROM_CANDIDATES',
+  };
+}
+
 export function buildDualTimelinePlan(
   analysis: Partial<CopilotAnalysisResult>,
   context: ProjectContext,
   issue: IssueInput
 ): DualTimelineActionPlan {
-  // 如果分析结果中已经包含完整的 dualTimeline，则优先直接采用
-  if (
-    analysis?.dualTimeline?.containmentPhase?.actions?.length &&
-    analysis?.dualTimeline?.permanentPhase?.actions?.length
-  ) {
-    return analysis.dualTimeline;
+  const domain = resolveEngineeringDomain(issue);
+  // WP4d：生产默认仅对已完成逐域对比的 allowlist 启用；测试开关可强制 A/B。
+  const derivedRequested = USE_DERIVED_TIMELINE === true || (USE_DERIVED_TIMELINE === null && isDerivedTimelineDefaultEnabled(domain));
+  if (derivedRequested) {
+    const derived = deriveTimelineFromActions(analysis, context, issue);
+    if (derived) return derived;
   }
 
-  const domain = resolveEngineeringDomain(issue);
-  const days = context?.daysRemaining ?? 14;
-  const phase = context?.projectPhase ?? 'DV';
+  // 兼容现有 AI / 动态层结果：如果分析结果已经包含完整 dualTimeline，则继续直接采用。
+  const existingTimeline = readDualTimeline(analysis as CopilotAnalysisResult);
+  if (existingTimeline?.containmentPhase?.actions?.length && existingTimeline?.permanentPhase?.actions?.length) {
+    return { ...existingTimeline, provenance: existingTimeline.provenance || 'AI_GENERATED' };
+  }
+
+  // WP4e：legacy 分支中的固定工程数字属于知识基线，不得被解释成当前项目实测/规格事实。
+  const days = context.daysRemaining;
+  const phase = context.projectPhase;
+  const decorateLegacyTimeline = (plan: DualTimelineActionPlan): DualTimelineActionPlan => ({
+    ...plan,
+    provenance: 'LEGACY_KNOWLEDGE_BASELINE',
+    strategicTradeoff: `【知识基线｜非当前项目事实】${plan.strategicTradeoff}`,
+  });
 
   switch (domain) {
     case 'EMC_RE_CE':
-      return {
+      return decorateLegacyTimeline({
         containmentPhase: {
           phaseTag: 'T_PLUS_24H_CONTAINMENT',
-          timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+          timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
           title: 'BOM 原位磁珠强化 + 线束共模磁扣 + 底层软件展频 (SSCG)',
           objective: '0 天板卡改版工期，立竿见影衰减高频骚扰 8~12dB，确保当前样件装车不发生无线电干扰，顺利通过当前交付节点。',
           hardwareImpact: '无需改版 PCB (0 天改版工期)，仅涉及样机外设线束夹扣与贴片原位物料替换。',
@@ -119,13 +263,13 @@ export function buildDualTimelinePlan(
 距离交付节点仅剩【${days}天】。如果仅选择【永久纠正方案 (PCB 改版)】，重新投板打样、贴片调试需要至少 18~25 天，将导致当前交样里程碑直接延误并触发主机厂停线索赔；
 反之，如果仅选择【临时应急围堵 (套磁环/展频)】，虽然能在 24h 内快速让样机跑起来，但外挂磁环会增加产线装配工时且无法通过主机厂正式 PPAP 审计，量产有重大质量隐患。
 因此，必须以『T+24h 应急围堵保当前交付，下一版改版永久根治保量产质量』双轨闭环推进！`,
-      };
+      });
 
     case 'SIGNAL':
-      return {
+      return decorateLegacyTimeline({
         containmentPhase: {
           phaseTag: 'T_PLUS_24H_CONTAINMENT',
-          timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+          timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
           title: '终端电阻改制为分裂终端 (Split Termination) + 优化采样点至 70%',
           objective: '0 天 PCB 工期，通过原位阻容改制与软件寄存器微调，消除 5Mbps 数据段共模振铃，使 CRC 错误帧降为 0。',
           hardwareImpact: '无需重新制板，仅在终端节点焊盘原位更换 2 颗电阻并飞线中点滤波电容。',
@@ -200,14 +344,14 @@ export function buildDualTimelinePlan(
 当前离路试仅剩【${days}天】，若重新开版投板打样必须消耗 20 天以上，项目路试节点将彻底瘫痪；
 因此 T+24h 内必须依靠“原位分裂终端阻容 + 采样点软件移位”在 8 小时内稳住总线；
 下一阶段改版再通过 PCB 差分阻抗控制和车规扼流圈从硬件物理层彻底固化，形成量产无死角的质量防线。`,
-      };
+      });
 
     case 'WCCA':
     case 'WCCA_EOL':
-      return {
+      return decorateLegacyTimeline({
         containmentPhase: {
           phaseTag: 'T_PLUS_24H_CONTAINMENT',
-          timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+          timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
           title: 'EOL 产线单点增益标定 + 软件 NTC 多项式温度查表补偿',
           objective: '0 天硬件改版工期，通过产线校准系数注入与板载软件温度补偿算法，将全温采样误差从 +3.8% 强行收敛至 ±1.2% 以内。',
           hardwareImpact: '无 PCB 改版，仅需产线测试脚本与固件算法参数更新。',
@@ -281,13 +425,13 @@ export function buildDualTimelinePlan(
 如果现在去等 15ppm 超低温漂开尔文电阻和改版打样，采购订货周期至少需要 6~8 周，当前交样节点（剩余【${days}天】）将直接爆雷；
 所以当前 T+24h 内必须用“EOL 校准 + 软件查表补偿”立竿见影将误差压入合格限；
 但软件算法无法完全补偿元器件在 15 年后的物理老化退化，量产阶段必须换装高精合金开尔文电阻以确保 100% 免除召回风险。`,
-      };
+      });
 
     case 'THERMAL':
-      return {
+      return decorateLegacyTimeline({
         containmentPhase: {
           phaseTag: 'T_PLUS_24H_CONTAINMENT',
-          timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+          timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
           title: '原位换装 5.0W/mK 绝缘导热垫 + 固件多级动态限流降额',
           objective: '0 天 PCB 打样工期，改善传热热阻并将瞬态功率分段打折，确保台架极端高温下器件结温绝不超过 140℃。',
           hardwareImpact: '无需开模或制板，仅在组装工位改用高导热衬垫并刷写温控保护固件。',
@@ -361,72 +505,72 @@ export function buildDualTimelinePlan(
 模具修模与 PCB 厚铜制板耗时至少 3 周，远超当前剩余【${days}天】交样窗口；
 T+24h 内利用“5.0W/mK 绝缘垫 + 软件动态限流降额”可以在不花一天板卡工期的前提下保障装车样机不烧毁；
 但在后续 SOP 阶段，必须通过散热筋与 PCB 散热过孔消除总热阻，彻底解除软件功率限额，才能向客户交付具备完整额定功率性能的合格产品。`,
-      };
+      });
 
     case 'ROBOT_JOINT':
-      return {
+      return decorateLegacyTimeline({
         containmentPhase: {
           phaseTag: 'T_PLUS_24H_CONTAINMENT',
-          timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
-          title: '软件反向间隙查表动态补偿 + 外挂独立双通道安全继电器箱过渡 + 加减速 S 曲线回馈削峰',
+          timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
+          title: JOINT_CONTAINMENT_STRATEGY,
           objective: '0 天 PCB 改版工期，在驱动底层注入滞环补偿算法将末端重复精度压入 2.5 arcmin 以内；外设安全盒消除 STO 共地单点失效，确保第三方现场预审通过。',
-          hardwareImpact: '无需重新制作驱动板卡，仅需测试柜加装外置安全过渡盒并刷写运动控制补丁固件。',
-          responsibilityRole: '运动控制算法负责人 (Motion Lead) & 功能安全工程师 (Safety Lead)',
+          hardwareImpact: JOINT_CONTAINMENT_NO_RESPIN_NOTE,
+          responsibilityRole: JOINT_CONTAINMENT_OWNERS,
           actions: [
             {
-              step: '1. 激光干涉仪标定与反向间隙补偿固件刷写',
-              detail: '使用激光干涉仪测量各关节正反向定位滞环，将回程死区数据烧录入固件 EEPROM，开启过零反向补偿与前馈平滑。',
+              step: JOINT_BACKLASH_CAL_STEP_TITLE,
+              detail: JOINT_BACKLASH_CAL_STEP_DETAIL,
               owner: '控制算法工程师',
               duration: '6 小时',
               hardwareImpact: '纯固件算法更新',
-              deliverable: '反向补偿固件补丁 (V1.2-Backlash-Patch) 与干涉仪测试记录',
+              deliverable: JOINT_BACKLASH_PATCH_DELIVERABLE,
             },
             {
-              step: '2. 外接 TÜV 认证双通道干簧安全继电器过渡箱',
-              detail: '在测试柜控制侧临时串接双通道独立干簧安全继电器模块，将 STO 1/2 彻底物理电气隔离切断驱动板 PWM 供电。',
+              step: JOINT_SAFETY_RELAY_STEP_TITLE,
+              detail: JOINT_SAFETY_RELAY_STEP_DETAIL,
               owner: '硬件安全工程师',
               duration: '4 小时',
               hardwareImpact: '外置电气过渡盒，无单板修改',
               deliverable: '安全接线过渡箱 3 套及接线图纸',
             },
             {
-              step: '3. 优化加减速 S 曲线并测试泄放电阻热平衡',
+              step: JOINT_SCURVE_BLEED_STEP_TITLE,
               detail: '将加减速 Jerk 限制微调增加 15%，延长制动回馈时间 80ms，台架连续循环运转 2 小时监测泄放电阻温升。',
               owner: '系统测试工程师',
               duration: '8 小时',
               hardwareImpact: '台架验证',
-              deliverable: '《连续满载运行泄放电阻温升曲线记录》',
+              deliverable: JOINT_BLEED_TEMP_RECORD_DELIVERABLE,
             },
           ],
           verificationCriteria: '末端重复定位精度稳定在 ≤ 2.4 arcmin，STO 双通道故障注入切断时延 ≤ 25ms，泄放电阻稳态温度 ≤ 85℃。',
-          exitCriteria: '第三方机构出具现场符合性预审合格备忘录，DVT 样机具备装车试运行放行资格。',
+          exitCriteria: JOINT_CONTAINMENT_EXIT_CRITERION,
         },
         permanentPhase: {
           phaseTag: 'NEXT_PHASE_PERMANENT',
-          timeWindow: '下一批次 PCB 改版 / 量产定型阶段',
-          title: '驱动板 Layout 双通道绝对物理隔离 (STO PLd) + 双编码器全闭环 + 功率泄放电阻外壳导热优化',
-          objective: '从单板硬件物理架构与机械传动链彻底消除背隙、共因失效及热过载隐患，顺利通过正式 TÜV 认证并支撑大规模量产。',
-          hardwareImpact: 'PCB 重新 Layout 投板，升级光耦器件并重划隔离地岛；关节输出端加装第二编码器。',
+          timeWindow: JOINT_PERMANENT_PHASE_TITLE,
+          title: JOINT_PERMANENT_STRATEGY,
+          objective: JOINT_PERMANENT_BENEFIT,
+          hardwareImpact: JOINT_PERMANENT_RESPIN_SCOPE,
           responsibilityRole: '硬件架构师 & 机械系统总工',
           actions: [
             {
-              step: '1. PCB 驱动控制板双通道绝对物理隔离 Layout',
+              step: JOINT_LAYOUT_ISOLATION_STEP_TITLE,
               detail: 'STO 1 与 STO 2 走线爬电间距严格保持 ≥ 6.3mm，采用 2 颗独立车规光耦及隔离 DC/DC 电源，通过第三方实验室全项故障注入测试。',
               owner: 'PCB Layout 工程师',
               duration: '8 天',
               hardwareImpact: 'PCB 投板打样 (Rev B)',
-              deliverable: '新版 Gerber 文件与安规绝缘仿真分析报告',
+              deliverable: JOINT_LAYOUT_ISOLATION_DELIVERABLE,
             },
             {
-              step: '2. 关节输出侧集成 19-bit 绝对值双编码器全闭环',
-              detail: '在谐波减速器输出法兰加装高精度第二码盘，驱动器形成电机高速端与负载低速端双闭环控制，物理消除机械背隙与扭转柔性。',
+              step: JOINT_DUAL_ENCODER_STEP_TITLE,
+              detail: JOINT_DUAL_ENCODER_STEP_DETAIL,
               owner: '机械与传感器工程师',
               duration: '14 天',
               hardwareImpact: '机械结构微调与新传感器导入',
-              deliverable: '双码盘集成图纸与首件全闭环精度测试报告',
+              deliverable: JOINT_DUAL_ENCODER_DELIVERABLE,
             },
             {
-              step: '3. 制动泄放电阻外移贴附铝合金外壳强化散热',
+              step: JOINT_BLEED_RELOCATE_STEP_TITLE,
               detail: '将泄放电阻由板载改为金属外壳封装，通过 3.0W/mK 绝缘导热垫直接贴合至关节铝合金压铸外壳，稳态散热能力提升 3 倍。',
               owner: '结构与热设计工程师',
               duration: '10 天',
@@ -435,19 +579,19 @@ T+24h 内利用“5.0W/mK 绝缘垫 + 软件动态限流降额”可以在不花
             },
           ],
           verificationCriteria: '无需算法补偿下自然定位精度 ≤ 1.5 arcmin，板载 STO 通过 TÜV 正式 Cat 3 PLd 证书，100% 连续高速满载温升 ≤ 55℃。',
-          exitCriteria: '取得正式 PLd 功能安全证书，通过客户 SOP PPAP 签收。',
+          exitCriteria: JOINT_PERMANENT_EXIT_CRITERION,
         },
         strategicTradeoff: `为什么必须双层时间轴协同？
 距离当前 DVT 评审里程碑仅剩【${days}天】。如果现在强行重新设计驱动板 PCB、等待制板贴片打样并重装机械，至少需要耗时 22~25 天以上，DVT 节点将直接违约瘫痪；
 因此在 T+24h 内必须果断采取“软件反向间隙动态补偿 + 外置独立安全继电器过渡箱 + 加减速 S 曲线回馈削峰”，在 4 天内将末端精度压入 2.3 arcmin 并消除 STO 现场违约风险；
 在随后的 SOP 准备期，再通过 PCB 物理双通道隔离、双码盘全闭环及外壳导热优化从物理硬件源头彻底固化，形成量产无死角的高可靠性产品。`,
-      };
+      });
 
     case 'BLDC':
-      return {
+      return decorateLegacyTimeline({
         containmentPhase: {
           phaseTag: 'T_PLUS_24H_CONTAINMENT',
-          timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+          timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
           title: '母线原位贴装 6600W 高能 TVS + 固件全下桥主动短路 (ASC) 刹车',
           objective: '0 天 PCB 改版工期，通过原位高能 TVS 吸收管和软件电机制动算法注入，将反电动势泵升电压钳制在 46V 以内，杜绝 MOSFET 击穿。',
           hardwareImpact: '无需重新制板，母线预留焊盘原位贴片 1 颗 DO-218AB TVS，固件刷写刹车补丁。',
@@ -521,16 +665,16 @@ T+24h 内利用“5.0W/mK 绝缘垫 + 软件动态限流降额”可以在不花
 当前距离交付里程碑仅剩【${days}天】。重新设计 PCB、出图制板、SMT 贴片调试至少需 18~22 天，如果坚持改版后再交样，项目必将严重延期并面临巨额索赔；
 因此 T+24h 内利用“原位并联高能 TVS + 软件全下桥 ASC 刹车”是 24 小时内保住交付节点的唯一解；
 但在后续量产改版中，必须重构 DC-Link 降低寄生电感并固化米勒钳位电路，才能形成不受软件 Bug 影响的硬件本质安全防线。`,
-      };
+      });
 
     default:
       // 完全动态的领域时间轴生成器：根据实际 issue 动态提取，杜绝跨域名词污染
       const issueName = (issue.failurePhenomenon || issue.engineeringConcern || '当前现场工程异常').slice(0, 40);
       const specReq = (issue.requirement || '规格指标要求').slice(0, 40);
-      return {
+      return decorateLegacyTimeline({
         containmentPhase: {
           phaseTag: 'T_PLUS_24H_CONTAINMENT',
-          timeWindow: 'T + 24h 紧急应急围堵 (Containment)',
+          timeWindow: TIMELINE_CONTAINMENT_PHASE_TITLE,
           title: `针对 [${issueName}] 的零打板应急旁路与软件参数临时约束`,
           objective: `在不重新制作硬件板卡 (0 天工期) 的前提下，通过原位参数调整与外部工装辅助，使样件在当前测试中达到 [${specReq}] 临时受控标准。`,
           hardwareImpact: '0 天 PCB 打样工期，仅限原位阻容微调、外接辅助滤波治具或软件参数标定。',
@@ -604,7 +748,7 @@ T+24h 内利用“5.0W/mK 绝缘垫 + 软件动态限流降额”可以在不花
 当前距离关键里程碑仅剩【${days}天】。如果强行等待下一轮硬件改版打样，周期漫长必然导致交付严重逾期；
 因此必须在 T+24h 内采取针对性的应急围堵方案，先保证样机能安全受控地进入当前测试；
 随后在量产准备周期内，严格执行物理源头改版与全温验证，彻底根治问题，避免把工程隐患带入量产。`,
-      };
+      });
 
   }
 }

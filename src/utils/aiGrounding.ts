@@ -1,6 +1,7 @@
 import { CopilotAnalysisResult, IssueInput } from '../types';
 import { PrecomputedFact } from './deterministicPrecomputation';
 import { ENGINEERING_GOLD_CASES, runEngineeringGoldCaseRegression } from '../data/engineeringGoldCases';
+import { readAnalysisBasis } from '../adapters/analysisResultAdapter';
 
 function normalize(text: string): string {
   return text
@@ -157,11 +158,12 @@ export function buildGroundingText(
   precomputedFacts: PrecomputedFact[],
   similarGoldCases: ReturnType<typeof findSimilarGoldCases>
 ): { baselineText: string; precomputedText: string; goldCaseText: string } {
-  const baselineOutputs = baseline.analysisBasis?.calculatedOutputs || [];
-  const evidenceByKey = new Map((baseline.analysisBasis?.calculatedOutputEvidence || []).map((item) => [item.key, item]));
+  const baselineBasis = readAnalysisBasis(baseline);
+  const baselineOutputs = baselineBasis?.calculatedOutputs || [];
+  const evidenceByKey = new Map((baselineBasis?.calculatedOutputEvidence || []).map((item) => [item.key, item]));
   const baselineText = baselineOutputs.length
     ? baselineOutputs
-        .map((value) => `- baseline.analysisBasis.calculatedOutputs:${value}`)
+        .map((value) => `- baselineBasis.calculatedOutputs:${value}`)
         .join('\n')
     : '（本地专家基线未生成额外结构化计算输出）';
 

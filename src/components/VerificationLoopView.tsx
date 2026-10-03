@@ -9,6 +9,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import {
   CheckCircle2,
   XCircle,
@@ -71,6 +72,8 @@ export const VerificationLoopView: React.FC<VerificationLoopViewProps> = ({
   const nextBestAction = generateNextBestAction(daysRemaining, context, issue, result);
   const voiTests = calculateVoiTestPriorities(context, issue, result);
   const verificationPlan = generateStructuredVerificationPlan(context, issue, result);
+  const contract = selectAnalysisResultContract(result);
+  const verificationDecision = contract.verification;
 
   // 当前透明风险状态
   const [currentRisk, setCurrentRisk] = useState<TransparentRiskScore>({
@@ -102,6 +105,8 @@ export const VerificationLoopView: React.FC<VerificationLoopViewProps> = ({
   } | null>(null);
 
   // 决策履历必须从当前工况生成；禁止把历史 BLDC 案例的方案/人员带入新场景。
+  const recommendedAction = contract.action?.recommendedAction || null;
+
   const scenarioOptions = useMemo(() => {
     const category = issue.issueCategories?.[0] || '当前场景';
     const domain = `${category} ${issue.failurePhenomenon || ''} ${issue.engineeringConcern || ''}`.toLowerCase();
@@ -121,17 +126,17 @@ export const VerificationLoopView: React.FC<VerificationLoopViewProps> = ({
       timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
       problemSummary: `${issue.failurePhenomenon || issue.engineeringConcern || '当前工况问题'}｜${context.projectName}`,
       optionsConsidered: scenarioOptions,
-      chosenOption: result?.finalRecommendation?.recommendedOptionName || '待当前工况分析结果确定',
-      justification: result?.finalRecommendation?.reasonSummary || result?.coreConclusion?.reasonSummary || issue.engineeringConcern || '等待当前工况的分析理由',
+      chosenOption: verificationDecision.chosenOption,
+      justification: verificationDecision.justification,
       rejectedOptionsReason: {
         '方案 A': `必须依据当前 ${issue.issueCategories?.[0] || '场景'} 的实测证据和需求门限验证，不预设历史案例结论。`,
         '方案 C': `当前里程碑为 ${context.nextMilestone || '未设置'}，剩余 ${context.daysRemaining ?? '未知'} 天；执行窗口需按当前项目重新核算。`,
       },
-      verificationPlan: result?.finalRecommendation?.immediateSteps?.[0]?.action || `针对当前工况验证：${issue.requirement || '当前需求门限'}`,
+      verificationPlan: verificationDecision.verificationPlan,
       owner: '当前项目责任人（待项目数据确认）',
       status: 'OPEN',
     }]);
-  }, [context.projectName, context.nextMilestone, context.daysRemaining, context.projectPhase, issue.failurePhenomenon, issue.engineeringConcern, issue.requirement, issue.issueCategories, result?.finalRecommendation?.recommendedOptionName, result?.finalRecommendation?.reasonSummary, result?.coreConclusion?.reasonSummary, scenarioOptions]);
+  }, [context.projectName, context.nextMilestone, context.daysRemaining, context.projectPhase, issue.failurePhenomenon, issue.engineeringConcern, issue.requirement, issue.issueCategories, verificationDecision.chosenOption, verificationDecision.justification, verificationDecision.verificationPlan, scenarioOptions]);
 
   const handleApplyTestFeedback = () => {
     const feedback = executeTestFeedbackLoop(currentRisk, testForm);

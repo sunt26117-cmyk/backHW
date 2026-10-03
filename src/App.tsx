@@ -9,7 +9,10 @@ import { ScenarioProvider, useScenario } from './contexts/ScenarioContext';
 import { AnalysisProvider, useAnalysis } from './contexts/AnalysisContext';
 import { UIProvider, useUI } from './contexts/UIContext';
 import { exportBackupJson, importBackupJson, exportMarkdownReport, exportHtmlReport } from './utils/backupRestore';
-import { loadAnalysisResult, saveAnalysisResult } from './utils/analysisStorage';
+import { saveAnalysisResult } from './utils/analysisStorage';
+import { readAnalysisResultMetadata, withAnalysisInputFingerprint } from './adapters/analysisResultAdapter';
+import { buildAnalysisInputFingerprint } from './utils/analysisInputFingerprint';
+import { isCurrentAnalysisResultRecord } from './adapters/analysisResultRecordAdapter';
 import { PresetScenario } from './types';
 
 function AppContent() {
@@ -38,9 +41,10 @@ function AppContent() {
   const handleSelectScenario = (id: string, customScenario?: PresetScenario) => {
     const found = scenario.selectScenario(id, customScenario);
     if (!found) return;
-    const saved = loadAnalysisResult(id);
-    if (saved) { analysis.setResult(saved); ui.showToast(`已恢复工程案例及上次分析结果：${found.title}`, 'info'); }
-    else { void analysis.runAnalysis(found.context, customScenario ? found.issue : { ...found.issue, measuredValueSource: found.issue.measuredValueSource || 'BENCHMARK' }, id); ui.showToast(`已成功载入工程案例：${found.title}`, 'info'); }
+    // 工况切换后的恢复/计算统一交给 AnalysisProvider[currentScenarioId] effect。
+    // 这里先清掉旧 result，避免旧工况结论在新工况首帧短暂残留，也避免重复启动第二次分析。
+    analysis.setResult(null);
+    ui.showToast(`已切换工程案例：${found.title}，正在恢复/生成当前工况分析`, 'info');
   };
 
   const handleDeleteScenario = (id: string) => {
@@ -55,10 +59,20 @@ function AppContent() {
   const handleLoadSection14 = () => {
     const bldc = scenario.presetScenarios.find((s) => s.id === 'bldc-motor-drive') || scenario.presetScenarios[0];
     if (!bldc) return;
+    const sameScenario = scenario.currentScenarioId === bldc.id;
     scenario.selectScenario(bldc.id);
-    void analysis.runAnalysis(bldc.context, { ...bldc.issue, measuredValueSource: bldc.issue.measuredValueSource || 'BENCHMARK' }, bldc.id);
+    // 同一 scenario 重载时 currentScenarioId 不会变化，因此由这里执行唯一一次显式分析；
+    // 同时先清空旧结果，避免“同工况重载”时旧结论继续显示。
+    analysis.setResult(null);
+    if (sameScenario) {
+      void analysis.runAnalysis(
+        bldc.context,
+        { ...bldc.issue, measuredValueSource: bldc.issue.measuredValueSource || 'BENCHMARK' },
+        bldc.id
+      );
+    }
     ui.setActiveTab('overview');
-    ui.showToast('已载入 Section 14 验收工况 (3800rpm BLDC 急停母线泵升 37.8V ｜ 15天)', 'success');
+    ui.showToast(`已载入验收工况：${bldc.title} · ${bldc.context.projectPhase} · 剩余 ${bldc.context.daysRemaining} 天`, 'success');
   };
 
   const handleExportBackup = () => { exportBackupJson(scenario.context, scenario.issue, analysis.result); ui.showToast('本地完整工程备份已成功导出为 JSON 文件', 'success'); };
@@ -67,9 +81,27 @@ function AppContent() {
       const imported = await importBackupJson(file);
       if (imported.context) scenario.setContext(imported.context);
       if (imported.issue) scenario.setIssue(imported.issue);
-      if (imported.result) { analysis.setResult(imported.result); saveAnalysisResult(scenario.currentScenarioId, imported.result); }
-      else if (imported.context && imported.issue) void analysis.runAnalysis(imported.context, imported.issue, scenario.currentScenarioId);
-      ui.showToast(`已成功从本地备份文件恢复 (${file.name})`, 'success');
+      if (imported.result) {
+        const importedRecord = readAnalysisResultMetadata(imported.result).analysisRecord;
+        const expectedHash = imported.resultRecord?.inputHash || '';
+        if (isCurrentAnalysisResultRecord(importedRecord, expectedHash)) {
+          analysis.setResult(imported.result);
+          saveAnalysisResult(scenario.currentScenarioId, imported.result);
+          ui.showToast(`已成功从本地备份文件恢复当前分析结果 (${file.name})`, 'success');
+        } else {
+          analysis.setResult(null);
+          if (imported.context && imported.issue) void analysis.runAnalysis(imported.context, imported.issue, scenario.currentScenarioId);
+          ui.showToast(`备份中的结果来自旧分析引擎或旧输入，工程数据已恢复并已按当前引擎重新计算 (${file.name})`, 'info');
+        }
+      }
+      else if (imported.context && imported.issue) {
+        analysis.setResult(null);
+        void analysis.runAnalysis(imported.context, imported.issue, scenario.currentScenarioId);
+        ui.showToast(`工程输入已从本地备份恢复，正在生成当前引擎结果 (${file.name})`, 'info');
+      }
+      else {
+        ui.showToast(`已恢复备份，但没有可用于当前分析的结果 (${file.name})`, 'info');
+      }
     } catch (err: any) { ui.showToast(`恢复失败: ${err.message || '文件格式不正确'}`, 'error'); }
   };
   const handleExportMarkdown = () => { if (!analysis.result) { ui.showToast('请先生成工程分析结果后再导出评审纪要', 'info'); return; } exportMarkdownReport(scenario.context, scenario.issue, analysis.result); ui.showToast('工程决策评审纪要 (CDR) 已导出为 Markdown 文件', 'success'); };
@@ -79,14 +111,12 @@ function AppContent() {
     if (isCustom) scenario.saveCurrentCustomScenario();
     else {
       const title = scenario.context.projectName ? `${scenario.context.projectName} (自建工程)` : '我的自建工程';
-      const id = scenario.saveAsCustomScenario(title, scenario.context, scenario.issue);
-      void analysis.runAnalysis(scenario.context, scenario.issue, id);
+      scenario.saveAsCustomScenario(title, scenario.context, scenario.issue);
       ui.showToast(`已成功保存并切换为自定义工况【${title}】`, 'success');
     }
   };
   const handleSaveAsCustom = (title: string, ctx: typeof scenario.context, iss: typeof scenario.issue) => {
-    const id = scenario.saveAsCustomScenario(title, ctx, iss);
-    void analysis.runAnalysis(ctx, iss, id);
+    scenario.saveAsCustomScenario(title, ctx, iss);
     ui.showToast(`已成功保存并切换为自定义工况【${title}】`, 'success');
   };
 
@@ -116,7 +146,7 @@ function AppContent() {
 
       <GlobalTraceAuditOverlay />
 
-      <AppModals onSelectScenario={handleSelectScenario} onSaveAsCustomScenario={handleSaveAsCustom} onApplyAiResult={(r) => { analysis.setResult(r); saveAnalysisResult(scenario.currentScenarioId, r); ui.setActiveTab('facts'); ui.showToast('已导入免费 AI 结果并完成审计渲染', 'success'); }} />
+      <AppModals onSelectScenario={handleSelectScenario} onSaveAsCustomScenario={handleSaveAsCustom} onApplyAiResult={(r) => { const stamped = withAnalysisInputFingerprint(r, buildAnalysisInputFingerprint(scenario.context, scenario.issue)); analysis.setResult(stamped); saveAnalysisResult(scenario.currentScenarioId, stamped); ui.setActiveTab('facts'); ui.showToast('已导入免费 AI 结果并完成审计渲染', 'success'); }} />
     </div>
   );
 }

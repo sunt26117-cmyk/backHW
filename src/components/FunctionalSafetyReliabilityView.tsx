@@ -32,6 +32,7 @@ import {
   evaluateBciImmunity,
 } from '../data/safetyReliabilityEngine';
 import { ProjectContext, IssueInput, CopilotAnalysisResult } from '../types';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import { deriveSafetyTraceability, deriveFmedaRows, deriveFtaTree, deriveSafetyCollateral } from '../utils/scenarioDerived';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
@@ -75,6 +76,8 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
 
   const safetyTraceabilityChain = useMemo(() => deriveSafetyTraceability(context, issue, result), [context, issue, result]);
   const fmedaRows = useMemo(() => deriveFmedaRows(context, issue, result), [context, issue, result]);
+  const contract = selectAnalysisResultContract(result);
+  const riskSnapshot = contract.risk;
   const ftaTree = useMemo(() => deriveFtaTree(context, issue, result), [context, issue, result]);
   const collateral = useMemo(() => deriveSafetyCollateral(context, issue, result), [context, issue, result]);
 
@@ -234,7 +237,7 @@ export const FunctionalSafetyReliabilityView: React.FC<FunctionalSafetyReliabili
           <span className="text-slate-400">{context.asilLevel} · {context.projectPhase} · {context.customer}</span>
         </div>
         <div className="mt-1 text-slate-400 line-clamp-2">{issue.failurePhenomenon || issue.engineeringConcern}</div>
-        <div className="mt-1 text-slate-500">当前分析风险：{result?.riskRatings.overallRisk || '待生成'} {result?.riskRatings.overallRiskScore ?? ''}</div>
+        <div className="mt-1 text-slate-500">当前分析风险：{riskSnapshot?.overallRisk || '待生成'} {riskSnapshot?.overallRiskScore ?? ''}</div>
       </div>
 
       {/* 子导航 */}

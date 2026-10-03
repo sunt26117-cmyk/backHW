@@ -48,12 +48,12 @@ export function getDomainAdaptivePromptGuidance(
         crossDisciplinaryImpact: `
 - 软件协同: 确认能否通过底层 MCU 寄存器开启主控开关时钟展频 (SSCG, ±2.5% 调制深度)，或修改 PWM 开关频率将谐波避开敏感无线电广播/通讯频段；
 - 结构协同: 评估壳体搭铁阻抗 (要求 ECU 外壳到整车车身接地电阻 < 2mΩ)，屏蔽罩卡扣接触阻抗；
-- PM 汇报: 改版 PCB 调整地回路通常需 20 天，若工期仅剩少于 14 天，优先通过线束磁环套管或贴片原位加大磁珠阻抗 + 软件展频联合闭环。
+- PM 汇报: 当前项目剩余 ${context.daysRemaining} 天；PCB 改版周期必须用项目实际供应链/制造排期核实。经验基线可参考约 20 天，但不得把该经验值当作当前项目工期事实。若实际余量不足以覆盖真实改版周期，应优先评估原位磁性器件/软件展频等不改板路径。
         `.trim(),
         prohibitedVagueness: [
           '严禁只写“加滤波电容/加磁珠”，必须写清容值、感量、封装及在超标频段的阻抗；',
           '严禁忽视 DC 偏置下的磁珠阻抗跌落事实；',
-          '严禁在交付时间不足 14 天时直接建议 PCB 重新打样改版而未设工期一票否决。',
+          '严禁把 14 天经验基线当作当前项目门禁；必须使用 context.daysRemaining 与项目实际 lead time 判断 PCB 改版是否可行。',
         ],
       };
 
@@ -417,7 +417,7 @@ export function getDomainAdaptivePromptGuidance(
         `.trim(),
         crossDisciplinaryImpact: `
 - 软件控制标定: 协同电机算法工程师标定全下桥 ASC (Active Short Circuit) 刹车或采用斜坡减速 (Ramp-down braking)，将制动动能转化为电机定子铜损耗，避免回灌母线；
-- 硬件工期决策: PCB 改版打样需 18~25 天，若离 DV 装车仅剩不足 14 天，优先通过原位并联高能 TVS + 软件注入减速算法闭环。
+- 硬件工期决策: 当前项目剩余 ${context.daysRemaining} 天；PCB 改版打样的 18~25 天属于历史经验范围，必须用当前供应链/制造排期验证后才能作为计划依据。若真实 lead time 超过剩余工期，应优先评估原位 TVS 与软件减速等不改板路径。
         `.trim(),
         prohibitedVagueness: [
           '严禁只写“加吸收电路”，必须写出 TVS 峰值功率、击穿电压区间及具体封装料号；',

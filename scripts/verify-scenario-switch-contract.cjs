@@ -1,0 +1,14 @@
+const fs = require('fs');
+const path = require('path');
+const root = path.resolve(__dirname, '..');
+const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8');
+const context = fs.readFileSync(path.join(root, 'src/contexts/AnalysisContext.tsx'), 'utf8');
+const selectStart = app.indexOf('const handleSelectScenario');
+if (selectStart < 0) throw new Error('handleSelectScenario not found');
+const selectEnd = app.indexOf('\n  const handleDeleteScenario', selectStart);
+if (selectEnd < 0) throw new Error('handleSelectScenario boundary not found');
+const block = app.slice(selectStart, selectEnd);
+if (/runAnalysis\s*\(/.test(block)) throw new Error('scenario switch still starts a duplicate analysis in App.tsx');
+if (!/analysis\.setResult\(null\)/.test(block)) throw new Error('scenario switch must clear stale result before AnalysisProvider restores/runs');
+if (!/\[currentScenarioId\]/.test(context) || !/loadAnalysisResult\(currentScenarioId\)/.test(context)) throw new Error('AnalysisProvider is no longer the single scenario restore/analysis owner');
+console.log('SCENARIO_SWITCH_CONTRACT_PASS');

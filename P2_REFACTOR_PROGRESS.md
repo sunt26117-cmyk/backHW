@@ -61,3 +61,43 @@ App
 
 ## Phase 4.2 — 已完成；Phase 5 — 交接给下一个执行者
 示波器波形显示与指标算法修正已完成（见 P2_PHASE4_SCENARIO_PURITY.md）。结论可追溯 + 判断流程图尚未开始，交接文档：`P2_PHASE5_TRACE_AND_DIAGRAM_HANDOFF.md`。
+
+## Phase 5 — WP9 Semantic Analysis Result Contract — 已完成
+
+`CopilotAnalysisResult` 的核心消费面已从多个 slice selector 收敛为统一 `selectAnalysisResultContract()`；兼容层仍由 `analysisResultAdapter.ts` 持有。
+
+当前核心结果消费分层：
+```text
+Legacy CopilotAnalysisResult
+        │
+        ▼
+analysisResultAdapter
+        │
+        ▼
+AnalysisResultContract
+ ├─ decision / risk
+ ├─ facts / judgment
+ ├─ action / delivery
+ ├─ safety / verification
+ ├─ trace / basis
+ └─ templateNotice
+        │
+        ▼
+8 个核心工作台
+```
+
+WP9 门禁要求：核心工作台不得重新直接导入或调用旧 slice selector。
+
+
+## Phase 5.1 — WP10 Result Lifecycle Governance — 已完成
+
+分析结果在运行时、localStorage、JSON 备份恢复之间统一使用 `analysisId + inputHash + engineVersion` 记录元数据。
+
+- `CopilotAnalysisResult.analysisRecord` 成为当前结果身份元数据。
+- 恢复必须同时满足当前输入 hash 与当前分析引擎版本。
+- localStorage 新格式升级为 v2 envelope；v1 只读兼容。
+- JSON 备份升级到 `1.4-automotive`，并记录 `resultRecord`。
+- 旧备份不会被标记成当前引擎结果；缺少版本记录的历史结果标记为 `LEGACY_IMPORT_UNKNOWN`，随后重新计算。
+- 备份 payload 与 context/issue 不一致时拒绝恢复。
+
+WP10 门禁：结果记录、持久化 envelope、备份恢复三套 contract；本轮 30 个 CJS 门禁全部通过，并完成 3 组反向违规测试。

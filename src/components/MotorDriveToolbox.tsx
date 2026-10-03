@@ -4,7 +4,6 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
-  Sliders,
   ShieldAlert,
   ArrowDownCircle,
   HelpCircle,
@@ -26,10 +25,12 @@ import {
   BusPumpingResult,
   MillerRiskResult,
   SnubberCalcResult,
-  ActuatorArchetype,
 } from '../types/motorDrive';
 import { IssueInput } from '../types';
 import { readMeasuredNumber } from '../utils/unifiedStateExtractor';
+import { getMotorDriveInputSummary, getMotorDriveSourceLabel, MOTOR_DRIVE_INPUTS, type MotorDriveInputDescriptor, type MotorDriveInputSource } from '../utils/motorDriveInputGovernance';
+import { MOTOR_DRIVE_WHAT_IF_DEFAULTS } from '../utils/motorDriveWhatIfDefaults';
+import { writeMotorDriveWhatIfToIssue, getMotorDriveField, type MotorDriveInputGroup } from '../domains/bldc/motorDriveInputSchema';
 
 interface MotorDriveToolboxProps {
   issue?: IssueInput;
@@ -38,117 +39,88 @@ interface MotorDriveToolboxProps {
 
 export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onIssueChange }) => {
   // 1. 急停母线泵升能量计算状态
-  const [pumpingParams, setPumpingParams] = useState({
-    V_bus_nom: 13.5,
-    V_bus_max_rating: 40.0,
-    C_dc_uF: 470,
-    J_kg_m2: 0.00015,
-    n_rpm: 3800,
-    regenEfficiency: 0.8,
-    L_harness_uH: 2.0,
-    I_phase_A: 22.0,
-  });
+  const [pumpingParams, setPumpingParams] = useState({ ...MOTOR_DRIVE_WHAT_IF_DEFAULTS.busPumping });
   const [pumpingResult, setPumpingResult] = useState<BusPumpingResult | null>(null);
 
   // 2. 米勒感应直通风险核算状态
-  const [millerParams, setMillerParams] = useState({
-    V_th_min: 2.0,
-    C_gd_pF: 45,
-    C_gs_pF: 1800,
-    R_g_pulldown_ohm: 4.5,
-    dv_dt_V_per_ns: 8.5,
-    hasActiveMillerClamp: false,
-  });
+  const [millerParams, setMillerParams] = useState({ ...MOTOR_DRIVE_WHAT_IF_DEFAULTS.miller });
   const [millerResult, setMillerResult] = useState<MillerRiskResult | null>(null);
 
   // 3. RC Snubber 最佳阻尼自动推荐计算器状态
-  const [snubberParams, setSnubberParams] = useState({
-    f_ring_MHz: 48.0,
-    C_oss_pF: 680,
-    V_bus_V: 13.5,
-    f_sw_kHz: 20,
-  });
+  const [snubberParams, setSnubberParams] = useState({ ...MOTOR_DRIVE_WHAT_IF_DEFAULTS.snubber });
   const [snubberResult, setSnubberResult] = useState<SnubberCalcResult | null>(null);
 
   // 4. 堵转瞬态脉冲结温计算状态 (集成 Foster 4阶)
-  const [stallParams, setStallParams] = useState({
-    ambientTempC: 85,
-    biasPowerW: 0.8,
-    stallCurrentA: 28,
-    rdson25mOhm: 3.2,
-    stallDurationMs: 1500,
-    tjMaxC: 175,
-    tjDeratedLimitC: 140,
-    packageType: 'POWERPAK56' as 'POWERPAK56' | 'D2PAK' | 'POWERSSO36',
-  });
+  const [stallParams, setStallParams] = useState({ ...MOTOR_DRIVE_WHAT_IF_DEFAULTS.stallThermal });
   const [stallResult, setStallResult] = useState<StallThermalResult | null>(null);
 
   // 5. 换相角误差与失步转矩纹波评估状态
-  const [commutationParams, setCommutationParams] = useState({
-    controlMode: 'hall_six_step' as 'sensorless_bemf' | 'hall_six_step' | 'foc_vector',
-    speedMinRpm: 800,
-    speedMaxRpm: 3800,
-    angleOffsetDeg: 6.5,
-    torqueFluctuationPct: 15,
-  });
+  const [commutationParams, setCommutationParams] = useState({ ...MOTOR_DRIVE_WHAT_IF_DEFAULTS.commutation });
   const [commutationResult, setCommutationResult] = useState<ReturnType<typeof calculateCommutationRisk> | null>(null);
 
   // 6. 转子位置传感器失效降级与 2-Hall 容错评估状态
-  const [sensorParams, setSensorParams] = useState({
-    sensorType: 'hall_triple' as 'hall_triple' | 'hall_single' | 'optical_encoder' | 'sensorless',
-  });
+  const [sensorParams, setSensorParams] = useState({ ...MOTOR_DRIVE_WHAT_IF_DEFAULTS.sensorDegradation });
   const [sensorResult, setSensorResult] = useState<ReturnType<typeof evaluatePositionSensorDegradation> | null>(null);
 
   // 7. 功能安全链 FHTI 与看门狗/双通道电流核验时序
-  const [safetyChainParams, setSafetyChainParams] = useState({
-    fhtiBudgetMs: 10.0,
-    wdgTimeoutWindowMs: 4.0,
-    safeStateTransitionMs: 2.2,
-    currentSenseDeviationPct: 3.2,
-  });
+  const [safetyChainParams, setSafetyChainParams] = useState({ ...MOTOR_DRIVE_WHAT_IF_DEFAULTS.safetyChain });
   const [safetyChainResult, setSafetyChainResult] = useState<ReturnType<typeof evaluateSafetyChainTiming> | null>(null);
+  const [dirtyFields, setDirtyFields] = useState<Record<string, string[]>>({});
+
+  const markDirty = (group: MotorDriveInputGroup, key: string) => {
+    setDirtyFields((prev) => {
+      const current = prev[group] || [];
+      return current.includes(key) ? prev : { ...prev, [group]: [...current, key] };
+    });
+  };
 
   // 统一读数：''/null 不再被当成 0，否则工具会拿 0 参与计算并给出一个假的结论。
   const issueNumber = (key: string): number | undefined => readMeasuredNumber(issue?.measuredValues, key);
 
-  const updateIssueMeasuredValue = (key: string, rawValue: string) => {
+  const applyGroupToIssue = (group: MotorDriveInputGroup, values: Record<string, unknown>) => {
     if (!issue || !onIssueChange) return;
-    const text = String(rawValue ?? '').trim();
-    if (text === '') {
-      // 清空输入 = 「未提供」：必须把这个 key 删掉，绝不能落成 Number('') === 0。
-      // 真实面板上曾出现 Cgd / Cgs = 0 pF（来源不明的 0），而 0 pF 会让米勒判据算出
-      // 0 V 感应尖峰 —— 米勒风险静默失效。这是与"空串被读成 0"同一类错误的写入端。
-      const nextValues = { ...(issue.measuredValues || {}) };
-      const nextProvenance = { ...(issue.measurementProvenance || {}) };
-      delete nextValues[key];
-      delete nextProvenance[key];
-      onIssueChange({ ...issue, measuredValues: nextValues, measurementProvenance: nextProvenance });
-      return;
-    }
-    const value = Number(text);
-    if (!Number.isFinite(value)) return;
-    const source = new Set(['vdsRatingV', 'cBusUf', 'rotorInertiaKgm2', 'rgOffOhm', 'cgdPf', 'vthMinV']).has(key)
-      ? 'SPEC'
-      : key === 'busVoltageNominalV'
-      ? 'CONTEXT'
-      : 'USER_MEASURED';
-    onIssueChange({
-      ...issue,
-      measuredValues: { ...(issue.measuredValues || {}), [key]: value },
-      measurementProvenance: {
-        ...(issue.measurementProvenance || {}),
-        [key]: {
-          ...(issue.measurementProvenance?.[key] || {}),
-          source,
-          sourceLabel: `MotorDriveToolbox 手动输入 · ${source}`,
-          enteredAt: new Date().toISOString(),
-        },
-      },
-    });
+    const result = writeMotorDriveWhatIfToIssue(issue, group, values, dirtyFields[group] || []);
+    if (result.writtenKeys.length === 0) return;
+    onIssueChange(result.issue);
+    setDirtyFields((prev) => ({ ...prev, [group]: [] }));
+  };
+
+
+  const InputBoundary: React.FC<{ group: MotorDriveInputGroup; values: Record<string, unknown> }> = ({ group, values }) => {
+    const summary = getMotorDriveInputSummary(issue, group);
+    const format = (items: ReadonlyArray<MotorDriveInputDescriptor>) => items.map((item) => {
+      const source = getMotorDriveSourceLabel(issue, item);
+      return `${item.label}[${source}]`;
+    }).join('、') || '无';
+    const dirty = dirtyFields[group] || [];
+    const writableDirty = dirty.filter((key) => getMotorDriveField(group, key)?.binding === 'CURRENT_ISSUE');
+    return (
+      <div className="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-[10px] leading-relaxed">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="font-semibold text-emerald-300">当前工程绑定：{format(summary.current)}</span>
+            <span className="font-semibold text-amber-300">独立 What-if：{format(summary.whatIf)}</span>
+          </div>
+          {issue && onIssueChange && (
+            <button
+              type="button"
+              disabled={writableDirty.length === 0}
+              onClick={() => applyGroupToIssue(group, values)}
+              className="rounded border border-cyan-700/70 px-2 py-1 font-semibold text-cyan-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600"
+              title="只把具有明确 IssueInput 归属的、刚刚修改的字段写入当前工程；What-if-only 字段不会写入。"
+            >
+              写入当前工程{writableDirty.length ? ` (${writableDirty.length})` : ''}
+            </button>
+          )}
+        </div>
+        <div className="mt-1 text-slate-500">What-if 起始值只用于独立核算；必须由工程师显式点击“写入当前工程”后，且仅限有正式 schema 归属的字段，才进入当前 IssueInput。默认新写入来源按 schema 标记为假设，不冒充实测。</div>
+      </div>
+    );
   };
 
   // issue 切换后回填工具箱输入；缺失字段保留本地编辑值，但不会被写回 issue，更不会作为确定性 Grounding 输入。
   useEffect(() => {
+    setDirtyFields({});
     if (!issue) return;
     const vbus = issueNumber('busVoltageNominalV');
     const vds = issueNumber('vdsRatingV');
@@ -185,106 +157,14 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
   const linkedPumpingReady = !issue || ['busVoltageNominalV', 'vdsRatingV', 'cBusUf', 'rotorInertiaKgm2', 'rpm'].every((key) => issueNumber(key) !== undefined);
   const linkedMillerReady = !issue || ['dvdtVns', 'cgdPf', 'rgOffOhm', 'vthMinV'].every((key) => issueNumber(key) !== undefined);
 
-  // 一键加载典型电机应用场景预设
-  const applyPreset = (preset: ActuatorArchetype) => {
-    if (preset === 'SEAT_HEAVY_TILT') {
-      setPumpingParams({
-        V_bus_nom: 13.5,
-        V_bus_max_rating: 40.0,
-        C_dc_uF: 470,
-        J_kg_m2: 0.00035, // 大扭矩重载
-        n_rpm: 3200,
-        regenEfficiency: 0.82,
-        L_harness_uH: 1.5,
-        I_phase_A: 28.0,
-      });
-      setStallParams((prev) => ({
-        ...prev,
-        ambientTempC: 85, // 座椅密闭发泡海绵内
-        stallCurrentA: 32,
-        stallDurationMs: 2000,
-        rdson25mOhm: 2.8,
-      }));
-    } else if (preset === 'DISPLAY_SLIDER') {
-      setPumpingParams({
-        V_bus_nom: 13.5,
-        V_bus_max_rating: 40.0,
-        C_dc_uF: 330,
-        J_kg_m2: 0.00012,
-        n_rpm: 4500,
-        regenEfficiency: 0.85,
-        L_harness_uH: 4.5, // 贯穿滑轨的长线束寄生电感大
-        I_phase_A: 16.0,
-      });
-      setMillerParams((prev) => ({
-        ...prev,
-        dv_dt_V_per_ns: 12.0, // 高 dv/dt
-        R_g_pulldown_ohm: 5.5,
-      }));
-      setSnubberParams((prev) => ({
-        ...prev,
-        f_ring_MHz: 62.0,
-      }));
-    } else if (preset === 'SEAT_MASSAGE_PUMP') {
-      setPumpingParams({
-        V_bus_nom: 13.5,
-        V_bus_max_rating: 40.0,
-        C_dc_uF: 220,
-        J_kg_m2: 0.00004,
-        n_rpm: 6000,
-        regenEfficiency: 0.7,
-        L_harness_uH: 1.0,
-        I_phase_A: 8.5,
-      });
-      setSnubberParams((prev) => ({
-        ...prev,
-        f_sw_kHz: 25, // 高频PWM
-        f_ring_MHz: 45.0,
-      }));
-    } else if (preset === 'ROBOT_JOINT') {
-      setPumpingParams({
-        V_bus_nom: 48.0, // 48V 机器人总线
-        V_bus_max_rating: 80.0,
-        C_dc_uF: 680,
-        J_kg_m2: 0.0005,
-        n_rpm: 5500,
-        regenEfficiency: 0.9,
-        L_harness_uH: 0.8,
-        I_phase_A: 35.0,
-      });
-      setMillerParams((prev) => ({
-        ...prev,
-        dv_dt_V_per_ns: 15.0,
-        R_g_pulldown_ohm: 2.5,
-        hasActiveMillerClamp: true,
-      }));
-      setStallParams((prev) => ({
-        ...prev,
-        ambientTempC: 65,
-        stallCurrentA: 40,
-        stallDurationMs: 800,
-        rdson25mOhm: 1.5,
-        packageType: 'POWERPAK56',
-      }));
-    }
-  };
-
   // 运行计算
   useEffect(() => {
     if (!linkedPumpingReady) {
       setPumpingResult(null);
       return;
     }
-    const p = issue ? {
-      ...pumpingParams,
-      V_bus_nom: issueNumber('busVoltageNominalV')!,
-      V_bus_max_rating: issueNumber('vdsRatingV')!,
-      C_dc_uF: issueNumber('cBusUf')!,
-      J_kg_m2: issueNumber('rotorInertiaKgm2')!,
-      n_rpm: issueNumber('rpm')!,
-      I_phase_A: issueNumber('currentPeakA') ?? pumpingParams.I_phase_A,
-    } : pumpingParams;
-    setPumpingResult(calculateBusPumping(p));
+    // 计算始终使用当前工具草稿；只有显式“写入当前工程”后，这些值才进入 IssueInput / AI 当前事实层。
+    setPumpingResult(calculateBusPumping(pumpingParams));
   }, [pumpingParams, issue, linkedPumpingReady]);
 
   useEffect(() => {
@@ -292,19 +172,13 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
       setMillerResult(null);
       return;
     }
-    const p = issue ? {
-      ...millerParams,
-      V_th_min: issueNumber('vthMinV')!,
-      C_gd_pF: issueNumber('cgdPf')!,
-      R_g_pulldown_ohm: issueNumber('rgOffOhm')!,
-      dv_dt_V_per_ns: issueNumber('dvdtVns')!,
-    } : millerParams;
+    // What-if 草稿可以立即用于局部计算，但不会自动改变当前工程事实。
     const mRes = checkMillerRisk({
-      V_th_min: p.V_th_min,
-      C_gd_pF: p.C_gd_pF,
-      R_g_pulldown_ohm: p.R_g_pulldown_ohm,
-      dv_dt_V_per_ns: p.dv_dt_V_per_ns,
-      hasActiveMillerClamp: p.hasActiveMillerClamp,
+      V_th_min: millerParams.V_th_min,
+      C_gd_pF: millerParams.C_gd_pF,
+      R_g_pulldown_ohm: millerParams.R_g_pulldown_ohm,
+      dv_dt_V_per_ns: millerParams.dv_dt_V_per_ns,
+      hasActiveMillerClamp: millerParams.hasActiveMillerClamp,
     });
     setMillerResult(mRes);
   }, [millerParams, issue, linkedMillerReady]);
@@ -351,39 +225,16 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
 
   return (
     <div className="space-y-6">
-      {/* 顶部典型应用快捷预设切换 */}
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="flex items-center space-x-2">
-          <Sliders className="w-4 h-4 text-blue-400" />
-          <span className="text-xs font-bold text-slate-200">
-            BLDC 执行机构一键工况预设：
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => applyPreset('SEAT_HEAVY_TILT')}
-            className="px-2.5 py-1 text-xs rounded bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-700 transition cursor-pointer"
-          >
-            座椅水平/倾角大扭矩 (13.5V/重载堵转)
-          </button>
-          <button
-            onClick={() => applyPreset('DISPLAY_SLIDER')}
-            className="px-2.5 py-1 text-xs rounded bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-700 transition cursor-pointer"
-          >
-            中控滑屏机构 (长线束/急停高回馈)
-          </button>
-          <button
-            onClick={() => applyPreset('SEAT_MASSAGE_PUMP')}
-            className="px-2.5 py-1 text-xs rounded bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-700 transition cursor-pointer"
-          >
-            座椅气动脉冲泵 (高频PWM/发热)
-          </button>
-          <button
-            onClick={() => applyPreset('ROBOT_JOINT')}
-            className="px-2.5 py-1 text-xs rounded bg-blue-950/40 hover:bg-blue-900/50 text-blue-300 border border-blue-700/60 transition cursor-pointer"
-          >
-            机器人灵巧关节 (48V/高频双向制动)
-          </button>
+      {/* WP5：典型工况只从全局 Scenario Manager 进入，专项工具不再维护第二套预设。 */}
+      <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+        <div className="flex items-start gap-3">
+          <HelpCircle className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" />
+          <div>
+            <div className="text-xs font-bold text-slate-200">专项工具输入边界</div>
+            <p className="mt-1 text-[11px] text-slate-400 leading-relaxed">
+              典型工况只能在全局工况管理器选择；这里不再提供座椅、滑屏、按摩泵、机器人等第二套预设。已绑定到当前工程的字段优先从 issue 读取，未绑定字段只作为独立 What-if 计算输入，不写成当前工程事实。
+            </p>
+          </div>
         </div>
       </div>
 
@@ -416,7 +267,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               </span>
             )}
           </div>
+          <InputBoundary group="busPumping" values={pumpingParams} />
 
+
+          <InputBoundary group="snubber" values={snubberParams} />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
             <div>
               <label className="text-slate-400 block mb-1">标称母线 (V)</label>
@@ -425,7 +279,7 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={pumpingParams.V_bus_nom}
                 onChange={(e) => {
                   setPumpingParams({ ...pumpingParams, V_bus_nom: parseFloat(e.target.value) || 0 });
-                  updateIssueMeasuredValue('busVoltageNominalV', e.target.value);
+                  markDirty('busPumping', 'V_bus_nom');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
@@ -437,7 +291,7 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={pumpingParams.V_bus_max_rating}
                 onChange={(e) => {
                   setPumpingParams({ ...pumpingParams, V_bus_max_rating: parseFloat(e.target.value) || 0 });
-                  updateIssueMeasuredValue('vdsRatingV', e.target.value);
+                  markDirty('busPumping', 'V_bus_max_rating');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
@@ -449,7 +303,7 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={pumpingParams.C_dc_uF}
                 onChange={(e) => {
                   setPumpingParams({ ...pumpingParams, C_dc_uF: parseFloat(e.target.value) || 1 });
-                  updateIssueMeasuredValue('cBusUf', e.target.value);
+                  markDirty('busPumping', 'C_dc_uF');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
@@ -461,7 +315,7 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={pumpingParams.n_rpm}
                 onChange={(e) => {
                   setPumpingParams({ ...pumpingParams, n_rpm: parseFloat(e.target.value) || 0 });
-                  updateIssueMeasuredValue('rpm', e.target.value);
+                  markDirty('busPumping', 'n_rpm');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
@@ -474,20 +328,21 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={pumpingParams.J_kg_m2}
                 onChange={(e) => {
                   setPumpingParams({ ...pumpingParams, J_kg_m2: parseFloat(e.target.value) || 0 });
-                  updateIssueMeasuredValue('rotorInertiaKgm2', e.target.value);
+                  markDirty('busPumping', 'J_kg_m2');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
             <div>
-              <label className="text-slate-400 block mb-1">线束电感 (μH)</label>
+              <label className="text-slate-400 block mb-1">线束电感 (μH) · What-if</label>
               <input
                 type="number"
                 step="0.5"
                 value={pumpingParams.L_harness_uH}
-                onChange={(e) =>
-                  setPumpingParams({ ...pumpingParams, L_harness_uH: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(e) => {
+                  setPumpingParams({ ...pumpingParams, L_harness_uH: parseFloat(e.target.value) || 0 });
+                  markDirty('busPumping', 'L_harness_uH');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -498,7 +353,7 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={pumpingParams.I_phase_A}
                 onChange={(e) => {
                   setPumpingParams({ ...pumpingParams, I_phase_A: parseFloat(e.target.value) || 0 });
-                  updateIssueMeasuredValue('currentPeakA', e.target.value);
+                  markDirty('busPumping', 'I_phase_A');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
@@ -511,9 +366,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 min="0.1"
                 max="1.0"
                 value={pumpingParams.regenEfficiency}
-                onChange={(e) =>
-                  setPumpingParams({ ...pumpingParams, regenEfficiency: parseFloat(e.target.value) || 0.8 })
-                }
+                onChange={(e) => {
+                  setPumpingParams({ ...pumpingParams, regenEfficiency: parseFloat(e.target.value) || 0.8 });
+                  markDirty('busPumping', 'regenEfficiency');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -590,6 +446,8 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               </span>
             )}
           </div>
+          <InputBoundary group="miller" values={millerParams} />
+
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
             <div>
@@ -600,7 +458,7 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={millerParams.V_th_min}
                 onChange={(e) => {
                   setMillerParams({ ...millerParams, V_th_min: parseFloat(e.target.value) || 2.0 });
-                  updateIssueMeasuredValue('vthMinV', e.target.value);
+                  markDirty('miller', 'V_th_min');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
@@ -612,7 +470,7 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={millerParams.C_gd_pF}
                 onChange={(e) => {
                   setMillerParams({ ...millerParams, C_gd_pF: parseFloat(e.target.value) || 10 });
-                  updateIssueMeasuredValue('cgdPf', e.target.value);
+                  markDirty('miller', 'C_gd_pF');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
@@ -625,7 +483,7 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={millerParams.R_g_pulldown_ohm}
                 onChange={(e) => {
                   setMillerParams({ ...millerParams, R_g_pulldown_ohm: parseFloat(e.target.value) || 1 });
-                  updateIssueMeasuredValue('rgOffOhm', e.target.value);
+                  markDirty('miller', 'R_g_pulldown_ohm');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
@@ -638,7 +496,7 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 value={millerParams.dv_dt_V_per_ns}
                 onChange={(e) => {
                   setMillerParams({ ...millerParams, dv_dt_V_per_ns: parseFloat(e.target.value) || 1 });
-                  updateIssueMeasuredValue('dvdtVns', e.target.value);
+                  markDirty('miller', 'dv_dt_V_per_ns');
                 }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
@@ -648,9 +506,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 <input
                   type="checkbox"
                   checked={millerParams.hasActiveMillerClamp}
-                  onChange={(e) =>
-                    setMillerParams({ ...millerParams, hasActiveMillerClamp: e.target.checked })
-                  }
+                  onChange={(e) => {
+                    setMillerParams({ ...millerParams, hasActiveMillerClamp: e.target.checked });
+                    markDirty('miller', 'hasActiveMillerClamp');
+                  }}
                   className="rounded bg-slate-900 border-slate-700 text-blue-600 focus:ring-0"
                 />
                 <span>启用驱动器硬件有源米勒钳位 (Active Clamp)</span>
@@ -722,9 +581,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               <input
                 type="number"
                 value={snubberParams.f_ring_MHz}
-                onChange={(e) =>
-                  setSnubberParams({ ...snubberParams, f_ring_MHz: parseFloat(e.target.value) || 10 })
-                }
+                onChange={(e) => {
+                  setSnubberParams({ ...snubberParams, f_ring_MHz: parseFloat(e.target.value) || 10 });
+                  markDirty('snubber', 'f_ring_MHz');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -733,9 +593,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               <input
                 type="number"
                 value={snubberParams.C_oss_pF}
-                onChange={(e) =>
-                  setSnubberParams({ ...snubberParams, C_oss_pF: parseFloat(e.target.value) || 100 })
-                }
+                onChange={(e) => {
+                  setSnubberParams({ ...snubberParams, C_oss_pF: parseFloat(e.target.value) || 100 });
+                  markDirty('snubber', 'C_oss_pF');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -744,9 +605,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               <input
                 type="number"
                 value={snubberParams.V_bus_V}
-                onChange={(e) =>
-                  setSnubberParams({ ...snubberParams, V_bus_V: parseFloat(e.target.value) || 13.5 })
-                }
+                onChange={(e) => {
+                  setSnubberParams({ ...snubberParams, V_bus_V: parseFloat(e.target.value) || 13.5 });
+                  markDirty('snubber', 'V_bus_V');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -755,9 +617,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               <input
                 type="number"
                 value={snubberParams.f_sw_kHz}
-                onChange={(e) =>
-                  setSnubberParams({ ...snubberParams, f_sw_kHz: parseFloat(e.target.value) || 20 })
-                }
+                onChange={(e) => {
+                  setSnubberParams({ ...snubberParams, f_sw_kHz: parseFloat(e.target.value) || 20 });
+                  markDirty('snubber', 'f_sw_kHz');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -828,6 +691,8 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               </span>
             )}
           </div>
+          <InputBoundary group="stallThermal" values={stallParams} />
+
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
             <div>
@@ -835,9 +700,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               <input
                 type="number"
                 value={stallParams.ambientTempC}
-                onChange={(e) =>
-                  setStallParams({ ...stallParams, ambientTempC: parseFloat(e.target.value) || 25 })
-                }
+                onChange={(e) => {
+                  setStallParams({ ...stallParams, ambientTempC: parseFloat(e.target.value) || 25 });
+                  markDirty('stallThermal', 'ambientTempC');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -846,9 +712,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               <input
                 type="number"
                 value={stallParams.stallCurrentA}
-                onChange={(e) =>
-                  setStallParams({ ...stallParams, stallCurrentA: parseFloat(e.target.value) || 10 })
-                }
+                onChange={(e) => {
+                  setStallParams({ ...stallParams, stallCurrentA: parseFloat(e.target.value) || 10 });
+                  markDirty('stallThermal', 'stallCurrentA');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -858,9 +725,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 type="number"
                 step="100"
                 value={stallParams.stallDurationMs}
-                onChange={(e) =>
-                  setStallParams({ ...stallParams, stallDurationMs: parseFloat(e.target.value) || 500 })
-                }
+                onChange={(e) => {
+                  setStallParams({ ...stallParams, stallDurationMs: parseFloat(e.target.value) || 500 });
+                  markDirty('stallThermal', 'stallDurationMs');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -870,9 +738,10 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 type="number"
                 step="0.2"
                 value={stallParams.rdson25mOhm}
-                onChange={(e) =>
-                  setStallParams({ ...stallParams, rdson25mOhm: parseFloat(e.target.value) || 2.0 })
-                }
+                onChange={(e) => {
+                  setStallParams({ ...stallParams, rdson25mOhm: parseFloat(e.target.value) || 2.0 });
+                  markDirty('stallThermal', 'rdson25mOhm');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -934,18 +803,21 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               FOC / 6-Step Dynamics
             </span>
           </div>
+          <InputBoundary group="commutation" values={commutationParams} />
+
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div>
               <label className="text-slate-400 block mb-1">控制算法模式</label>
               <select
                 value={commutationParams.controlMode}
-                onChange={(e) =>
+                onChange={(e) => {
                   setCommutationParams({
                     ...commutationParams,
                     controlMode: e.target.value as 'sensorless_bemf' | 'hall_six_step' | 'foc_vector',
-                  })
-                }
+                  });
+                  markDirty('commutation', 'controlMode');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-medium"
               >
                 <option value="hall_six_step">三霍尔六步方波 (Hall 6-Step)</option>
@@ -961,12 +833,13 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 min="0"
                 max="35"
                 value={commutationParams.angleOffsetDeg}
-                onChange={(e) =>
+                onChange={(e) => {
                   setCommutationParams({
                     ...commutationParams,
                     angleOffsetDeg: parseFloat(e.target.value) || 0,
-                  })
-                }
+                  });
+                  markDirty('commutation', 'angleOffsetDeg');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -976,12 +849,13 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 <input
                   type="number"
                   value={commutationParams.speedMinRpm}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setCommutationParams({
                       ...commutationParams,
                       speedMinRpm: parseFloat(e.target.value) || 100,
-                    })
-                  }
+                    });
+                  markDirty('commutation', 'speedMinRpm');
+                  }}
                   className="w-1/2 bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-100 font-mono text-xs"
                   placeholder="Min"
                 />
@@ -989,12 +863,13 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 <input
                   type="number"
                   value={commutationParams.speedMaxRpm}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setCommutationParams({
                       ...commutationParams,
                       speedMaxRpm: parseFloat(e.target.value) || 3000,
-                    })
-                  }
+                    });
+                  markDirty('commutation', 'speedMaxRpm');
+                  }}
                   className="w-1/2 bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-100 font-mono text-xs"
                   placeholder="Max"
                 />
@@ -1005,12 +880,13 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               <input
                 type="number"
                 value={commutationParams.torqueFluctuationPct}
-                onChange={(e) =>
+                onChange={(e) => {
                   setCommutationParams({
                     ...commutationParams,
                     torqueFluctuationPct: parseFloat(e.target.value) || 0,
-                  })
-                }
+                  });
+                  markDirty('commutation', 'torqueFluctuationPct');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -1077,16 +953,19 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               ISO 26262 Limp-Home
             </span>
           </div>
+          <InputBoundary group="sensorDegradation" values={sensorParams} />
+
 
           <div className="text-xs">
             <label className="text-slate-400 block mb-1">传感器硬件架构类型</label>
             <select
               value={sensorParams.sensorType}
-              onChange={(e) =>
+              onChange={(e) => {
                 setSensorParams({
                   sensorType: e.target.value as 'hall_triple' | 'hall_single' | 'optical_encoder' | 'sensorless',
-                })
-              }
+                });
+                markDirty('sensorDegradation', 'sensorType');
+              }}
               className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-medium"
             >
               <option value="hall_triple">三霍尔传感器 (120° 空间分布，具备 2-Hall 容错)</option>
@@ -1145,6 +1024,8 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
               FHTI & ASIL B Timing
             </span>
           </div>
+          <InputBoundary group="safetyChain" values={safetyChainParams} />
+
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
             <div>
@@ -1153,12 +1034,13 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 type="number"
                 step="0.5"
                 value={safetyChainParams.fhtiBudgetMs}
-                onChange={(e) =>
+                onChange={(e) => {
                   setSafetyChainParams({
                     ...safetyChainParams,
                     fhtiBudgetMs: parseFloat(e.target.value) || 10,
-                  })
-                }
+                  });
+                    markDirty('safetyChain', 'fhtiBudgetMs');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -1168,12 +1050,13 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 type="number"
                 step="0.5"
                 value={safetyChainParams.wdgTimeoutWindowMs}
-                onChange={(e) =>
+                onChange={(e) => {
                   setSafetyChainParams({
                     ...safetyChainParams,
                     wdgTimeoutWindowMs: parseFloat(e.target.value) || 4,
-                  })
-                }
+                  });
+                    markDirty('safetyChain', 'wdgTimeoutWindowMs');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -1183,12 +1066,13 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 type="number"
                 step="0.1"
                 value={safetyChainParams.safeStateTransitionMs}
-                onChange={(e) =>
+                onChange={(e) => {
                   setSafetyChainParams({
                     ...safetyChainParams,
                     safeStateTransitionMs: parseFloat(e.target.value) || 2.2,
-                  })
-                }
+                  });
+                    markDirty('safetyChain', 'safeStateTransitionMs');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>
@@ -1198,12 +1082,13 @@ export const MotorDriveToolbox: React.FC<MotorDriveToolboxProps> = ({ issue, onI
                 type="number"
                 step="0.2"
                 value={safetyChainParams.currentSenseDeviationPct}
-                onChange={(e) =>
+                onChange={(e) => {
                   setSafetyChainParams({
                     ...safetyChainParams,
                     currentSenseDeviationPct: parseFloat(e.target.value) || 0,
-                  })
-                }
+                  });
+                    markDirty('safetyChain', 'currentSenseDeviationPct');
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 font-mono"
               />
             </div>

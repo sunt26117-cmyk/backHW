@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CopilotAnalysisResult, ProjectContext, IssueInput } from '../types';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import {
   FileText,
   Copy,
@@ -22,7 +23,6 @@ import {
   generateDigitalFingerprint,
   DigitalFingerprintResult,
 } from '../utils/cryptoTraceability';
-import { TemplateContentNotice } from './TemplateContentNotice';
 
 interface EngineeringDocsViewProps {
   result: CopilotAnalysisResult | null;
@@ -31,7 +31,13 @@ interface EngineeringDocsViewProps {
 }
 
 export const EngineeringDocsView: React.FC<EngineeringDocsViewProps> = ({ result, context, issue }) => {
-  const engineeringDocs = result?.engineeringDocs;
+  const contract = selectAnalysisResultContract(result);
+  const action = contract.action;
+  const judgment = contract.judgment;
+  const facts = contract.facts;
+  const engineeringDocs = action?.engineeringDocs;
+  const classifiedInfo = facts?.classifiedInfo || [];
+  const resultContext = context;
   const asArray = <T,>(v: T[] | T | null | undefined): T[] => Array.isArray(v) ? v : (v == null ? [] : [v]);
   const toText = (v: unknown, fallback = '—'): string => {
     if (v == null) return fallback;
@@ -40,8 +46,9 @@ export const EngineeringDocsView: React.FC<EngineeringDocsViewProps> = ({ result
     if (typeof v === 'object') { const o = v as any; return [o.standard, o.clause].filter(Boolean).join(' ') || o.relevance || JSON.stringify(o); }
     return fallback;
   };
-  const finalRecommendation = result?.finalRecommendation;
-  const raciMatrix = result?.raciMatrix ?? [];
+  const deliverySnapshot = contract.delivery;
+  const finalRecommendation = judgment?.finalRecommendation;
+  const raciMatrix = action?.raciMatrix ?? [];
   const [activeDoc, setActiveDoc] = useState<
     | 'edr'
     | 'email'
@@ -61,7 +68,8 @@ export const EngineeringDocsView: React.FC<EngineeringDocsViewProps> = ({ result
 
   // 这些受控文档会引用 result 里的通用模板区块（EDR/为什么不选/24小时计划等），
   // 复制或导出时必须在正文开头带上来源提示，避免模板示例数字被当成项目实测证据对外提交。
-  const templateWarningHeader = result?.templateContentNotice
+  const templateNotice = contract.templateNotice;
+  const templateWarningHeader = templateNotice
     ? '> 通用模板内容提示：本文档含内置工程域模板生成的区块（多维度风险分解、方案为什么不选、24小时验证计划、EDR 记录、红队挑战）。其中的具体数值/工期/样本数/器件参数为模板示例，不是当前 case 的实测或计算结果；对外提交前必须逐条替换为本项目实测/计算证据。\n\n'
     : '';
 
@@ -88,8 +96,10 @@ export const EngineeringDocsView: React.FC<EngineeringDocsViewProps> = ({ result
       return;
     }
     // strict 模式：把已判空的局部量固化下来，因为 TS 不会把 narrowing 带进下面的 async 闭包。
-    const resultSafe = result;
+    const riskSnapshot = contract.judgment?.risk;
     const finalRecommendationSafe = finalRecommendation;
+    if (!riskSnapshot) { setFingerprint(null); return; }
+    const riskSnapshotSafe = riskSnapshot;
     async function computeHash() {
       const owners = raciMatrix.map((r) => `${r.role}:${r.owner}(${r.raciType})`);
       const fp = await generateDigitalFingerprint({
@@ -102,8 +112,8 @@ export const EngineeringDocsView: React.FC<EngineeringDocsViewProps> = ({ result
         recommendationGrade: finalRecommendationSafe.recommendationGrade,
         raciSignOffs: owners,
         keyRisks: [
-          resultSafe.riskRatings.overallRisk,
-          `Score:${resultSafe.riskRatings.overallRiskScore}`,
+          riskSnapshotSafe.overallRisk,
+          `Score:${riskSnapshotSafe.overallRiskScore}`,
         ],
       });
       setFingerprint(fp);
@@ -408,15 +418,15 @@ ${cdr.safetyAndEmcAssessment}
   };
 
   const generateEdrText = () => {
-    const edr = result.edrRecord || engineeringDocs.edrRecord;
-    const rec = result.finalRecommendation;
-    const whyNot = result.whyNotComparison;
-    const p24 = result.next24HourPlan;
+    const edr = action?.edrRecord || engineeringDocs?.edrRecord;
+    const rec = judgment?.finalRecommendation;
+    const whyNot = judgment?.whyNotComparison;
+    const p24 = action?.next24HourPlan;
     const passCriteria = Array.isArray(p24?.passFailCriteria) ? p24.passFailCriteria : [];
     const greenPass = passCriteria.map((x) => x?.greenCriteria).filter(Boolean).join('；') || '实测指标满足当前工况的客户/标准限值与降额裕量';
     const yellowConditional = passCriteria.map((x) => x?.yellowCriteria).filter(Boolean).join('；') || '需追加样本或受控措施后再放行';
     const redHardStop = passCriteria.map((x) => x?.redCriteria).filter(Boolean).join('；') || '实测越界立即停止放行并启动 Plan B / ECR';
-    const info = result.classifiedInfo || [];
+    const info = classifiedInfo;
     const fp = fingerprint;
     const asStringArray = (value: unknown, fallback: string[] = []): string[] => {
       if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
@@ -436,8 +446,8 @@ ${cdr.safetyAndEmcAssessment}
 - 决策状态: ${edr?.decisionStatus === 'APPROVED' ? '正式批准 (APPROVED)' : edr?.decisionStatus === 'VETOED' ? '一票否决 (VETOED)' : '受控批准 (CONDITIONALLY_APPROVED)'}
 - 生成时间: ${edr?.createdAt || (fp ? fp.timestampFormatted : new Date().toLocaleString())}
 - 数字存证 SHA-256: ${fp?.sha256Hex || 'PENDING'}
-- 关联项目代号: ${result.context?.projectName || '汽车电子核心域控'} | 研发阶段: ${result.context?.projectPhase || 'DV阶段'}
-- 核心问题综述: ${edr?.problemStatement || result.coreConclusion.problemSummary}
+- 关联项目代号: ${resultContext.projectName || '项目'} | 研发阶段: ${resultContext.projectPhase || '当前阶段'}
+- 核心问题综述: ${edr?.problemStatement || judgment?.coreConclusion?.problemSummary || issue.failurePhenomenon || issue.engineeringConcern || '当前工程问题'}
 
 ----------------------------------------------------------------------
 【第一部分：五类信息分类与事实边界 (P0-1 Information Classification)】
@@ -451,7 +461,7 @@ ${info.map((item) => `[${item.tag}] ${item.title} (置信度: ${item.confidenceL
 【第二部分：措施决策理由显性化与一票否决记录 (P0-2 & P0-3 Why-Not Matrix)】
 ----------------------------------------------------------------------
 1. 最终推荐方案: ${rec.recommendedOptionName} (${rec.recommendedOptionId})
-   - 权衡选定逻辑: ${safeWhyNot?.tradeoffRationale || rec?.strategicSignificance || '达成性能、周期与责任平衡的最优工程解'}
+   - 权衡选定逻辑: ${safeWhyNot?.tradeoffRationale || rec?.strategicSignificance || '当前候选未返回结构化权衡理由'}
    - 闭环支撑证据链:
 ${asStringArray(safeWhyNot?.closingEvidence ?? (safeWhyNot as any)?.keyRiskOrPenalty, ['满足台架验证与降额裕量']).map((e) => `     * ${e}`).join('\n')}
 
@@ -489,7 +499,7 @@ ${(Array.isArray(p24?.timeline) ? p24.timeline : []).map((t) => `[${t.timeWindow
 【第五部分：跨职能会签与不可否认责任链 (RACI & Sign-Off)】
 ----------------------------------------------------------------------
 会签矩阵 (RACI Matrix):
-${(result.raciMatrix || []).map((r) => `  * [${r.raciType}] ${r.role}: ${r.owner} - 职责: ${r.action}；交付物: ${r.output}`).join('\n')}
+${raciMatrix.map((r) => `  * [${r.raciType}] ${r.role}: ${r.owner} - 职责: ${r.action}；交付物: ${r.output}`).join('\n')}
 
 会签声明与法律效力：
 参与会签人员已充分知悉本方案的技术代价、残余风险及三色门禁放行阈值，所有测试数据及物理推导已完成交叉核验。数字存证 SHA-256 防伪水印不可伪造与篡改。
@@ -561,9 +571,6 @@ ${(result.raciMatrix || []).map((r) => `  * [${r.raciType}] ${r.role}: ${r.owner
 
   return (
     <div className="space-y-6">
-      {result.templateContentNotice && (
-        <TemplateContentNotice blocks={result.templateContentNotice.blocks} message={result.templateContentNotice.message} />
-      )}
       <div className="bg-slate-900 border border-cyan-500/30 rounded-xl p-3 text-xs">
         <span className="text-cyan-300 font-semibold">当前工况受控文档：</span>
         <span className="text-white ml-2">{scenarioHeader}</span>
@@ -678,7 +685,7 @@ ${(result.raciMatrix || []).map((r) => `  * [${r.raciType}] ${r.role}: ${r.owner
                   onClick={() =>
                     handleDownloadDoc(
                       generateEdrText(),
-                      `EDR-${result.context?.projectName || 'HW'}-${new Date().toISOString().slice(0, 10)}.md`
+                      `EDR-${resultContext.projectName || 'HW'}-${new Date().toISOString().slice(0, 10)}.md`
                     )
                   }
                   className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition cursor-pointer flex items-center space-x-1.5 font-medium shadow-sm"
@@ -694,19 +701,19 @@ ${(result.raciMatrix || []).map((r) => `  * [${r.raciType}] ${r.role}: ${r.owner
               <div>
                 <span className="text-slate-400 block">档案编号:</span>
                 <span className="font-mono text-cyan-300 font-bold">
-                  {result.edrRecord?.edrId || 'EDR-HW-2026-001'}
+                  {deliverySnapshot?.edrId || action?.edrRecord?.edrId || 'EDR-HW-2026-001'}
                 </span>
               </div>
               <div>
                 <span className="text-slate-400 block">决策判定:</span>
                 <span className="font-bold text-emerald-300">
-                  {result.edrRecord?.decisionStatus === 'APPROVED' ? '正式批准 (APPROVED)' : '受控批准'}
+                  {action?.edrRecord?.decisionStatus === 'APPROVED' ? '正式批准 (APPROVED)' : '受控批准'}
                 </span>
               </div>
               <div>
                 <span className="text-slate-400 block">推荐方案:</span>
                 <span className="font-semibold text-white truncate block">
-                  {result.finalRecommendation.recommendedOptionName}
+                  {deliverySnapshot?.recommendedOptionName || judgment?.finalRecommendation.recommendedOptionName}
                 </span>
               </div>
               <div>

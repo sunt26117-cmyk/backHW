@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CopilotAnalysisResult, RaciItem, IssueInput, ProjectContext } from '../types';
+import { selectAnalysisResultContract } from '../utils/analysisResultSelectors';
 import { resolveEngineeringDomain } from '../utils/scenarioDomainEngine';
 import { toStringArray } from '../utils/decisionFrame';
 import {
@@ -46,7 +47,7 @@ import { buildDualTimelinePlan } from '../utils/dualTimelineEngine';
 
 interface RecommendationRaciViewProps {
   result: CopilotAnalysisResult | null;
-  context?: ProjectContext;
+  context: ProjectContext;
   issue: IssueInput; // 必填：组件起始处即调用 resolveEngineeringDomain(issue)，缺了会直接崩
   onGoToDocs: () => void;
 }
@@ -84,12 +85,19 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
     return <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-sm text-slate-400">当前典型工况分析结果尚未生成，请稍候。</div>;
   }
 
-  const { finalRecommendation, raciMatrix, containment, capa, riskRatings } = result;
+  const contract = selectAnalysisResultContract(result);
+  const judgment = contract.judgment;
+  const action = contract.action;
+  if (!judgment || !action || !judgment.finalRecommendation || !judgment.risk) return null;
+  const finalRecommendation = judgment.finalRecommendation;
+  const { raciMatrix, containment, capa } = action;
+  const riskRatings = judgment.risk;
   // [健壮性] 这几个字段可能被 AI / 离线导入 JSON 写成字符串或对象，直接 .filter/.map 会崩，先收口成数组
-  const rawCalculatedEvidence = result.analysisBasis?.calculatedOutputEvidence;
+  const selectedActions = action.candidateActions;
+  const rawCalculatedEvidence = contract.trace.calculatedEvidence;
   const calculatedEvidence = Array.isArray(rawCalculatedEvidence) ? rawCalculatedEvidence : [];
-  const unknownsBlockingDecision = toStringArray(result.decisionFrame?.unknownsBlockingDecision);
-  const rawDomainAssessments = result.multiDomainAnalysis?.domainAssessments;
+  const unknownsBlockingDecision = toStringArray(judgment.decisionFrame?.unknownsBlockingDecision);
+  const rawDomainAssessments = judgment.multiDomainAnalysis?.domainAssessments;
   const domainAssessments = Array.isArray(rawDomainAssessments) ? rawDomainAssessments : [];
   const insufficientEvidenceCount = calculatedEvidence.filter((e) => e.status === 'INSUFFICIENT_INPUT').length;
   const lowEvidenceDomains = domainAssessments.filter((d) => /LOW|低|不足/i.test(d.evidenceLevel || ''));
@@ -98,9 +106,14 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
   const safeUnacceptableActions = Array.isArray(finalRecommendation?.unacceptableActions) ? finalRecommendation.unacceptableActions : [];
   const safeStopConditions = Array.isArray(finalRecommendation?.stopConditions) ? finalRecommendation.stopConditions : [];
   const optionByCategory = { RECOMMENDED: finalRecommendation.recommendedOptionId, RE_SPIN: 'Option A', CONCESSION: 'Option C' } as const;
-  const getWargameAction = () => result.candidateActions?.find(a => a.id === optionByCategory[wargameOption]) || result.candidateActions?.[0];
+  const getWargameAction = () => action.candidateActions.find(a => a.id === optionByCategory[wargameOption]) || action.candidateActions[0];
   const wargameAction = getWargameAction();
   const wargameSummary = wargameAction ? `${wargameAction.name}｜${wargameAction.timeCost}｜${wargameAction.verificationCost}` : '当前工况候选方案';
+  const wargameTiming = wargameAction?.timeCost || '实施周期待核算';
+  const wargameVerification = wargameAction?.verificationCost || '验证成本待核算';
+  const decisionEvidenceText = insufficientEvidenceCount > 0
+    ? `当前仍有 ${insufficientEvidenceCount} 项计算/输入证据处于 INSUFFICIENT_INPUT，需要补齐后再形成正式放行结论。`
+    : `当前候选方案已有计算/输入证据 ${calculatedEvidence.length} 项，仍需按对应验证方法闭环。`;
 
   // 判定所选方案是否涉及降额违规、临界或高风险
   const isSafetyOrDeratingCritical =
@@ -427,7 +440,7 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                   >
                     <div className="font-bold text-blue-300">首选推荐 ({finalRecommendation.recommendedOptionId})</div>
                     <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">{finalRecommendation.recommendedOptionName}</div>
-                    <div className="text-[9px] text-emerald-400 mt-1 font-mono">{result.candidateActions?.find(a => a.id === finalRecommendation.recommendedOptionId)?.timeCost || '按当前工况计算'} · {result.candidateActions?.find(a => a.id === finalRecommendation.recommendedOptionId)?.verificationCost || '按验证计划核算'}</div>
+                    <div className="text-[9px] text-emerald-400 mt-1 font-mono">{selectedActions.find(a => a.id === finalRecommendation.recommendedOptionId)?.timeCost || '按当前工况计算'} · {selectedActions.find(a => a.id === finalRecommendation.recommendedOptionId)?.verificationCost || '按验证计划核算'}</div>
                   </button>
 
                   <button
@@ -442,8 +455,8 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                     }`}
                   >
                     <div className="font-bold text-purple-300">保守候选 (Option A)</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">{result.candidateActions?.find(a => a.id === 'Option A')?.name || 'Option A'}</div>
-                    <div className="text-[9px] text-amber-400 mt-1 font-mono">{result.candidateActions?.find(a => a.id === 'Option A')?.timeCost || '按当前工况计算'} · {result.candidateActions?.find(a => a.id === 'Option A')?.verificationCost || '按验证计划核算'}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">{selectedActions.find(a => a.id === 'Option A')?.name || 'Option A'}</div>
+                    <div className="text-[9px] text-amber-400 mt-1 font-mono">{selectedActions.find(a => a.id === 'Option A')?.timeCost || '按当前工况计算'} · {selectedActions.find(a => a.id === 'Option A')?.verificationCost || '按验证计划核算'}</div>
                   </button>
 
                   <button
@@ -558,7 +571,7 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                       <p className="text-slate-200 leading-relaxed">
                         {wargameOption === 'RECOMMENDED' && (
                           <>
-                            “当前典型工况为【${wargameAction?.name || '候选方案'}】。工程问题：${result.coreConclusion.problemSummary}；实施周期：${wargameAction?.timeCost || '待核算'}；验证成本：${wargameAction?.verificationCost || '待核算'}。请按当前门禁与客户红线评审。”
+                            `“当前工况候选为【${wargameAction?.name || '当前方案'}】。工程问题：${judgment?.coreConclusion?.problemSummary || issue.failurePhenomenon || issue.engineeringConcern || '当前工程问题'}；实施周期：${wargameTiming}；验证成本：${wargameVerification}。请按当前门禁与客户红线评审。”`
                           </>
                         )}
                         {wargameOption === 'RE_SPIN' && (
@@ -568,7 +581,7 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                         )}
                         {wargameOption === 'CONCESSION' && (
                           <>
-                            “当前工况下节点优先候选为【${wargameAction?.name || 'Option C'}】。时间窗口剩余 ${result?.context?.daysRemaining ?? '—'} 天；但必须同时审查其 VETO、残余风险与验证缺口，不能用节点压力替代工程证据。”
+                            “当前工况下节点优先候选为【${wargameAction?.name || 'Option C'}】。时间窗口剩余 ${(context?.daysRemaining ?? '—')} 天；但必须同时审查其 VETO、残余风险与验证缺口，不能用节点压力替代工程证据。”
                           </>
                         )}
                       </p>
@@ -601,9 +614,9 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                       </div>
                       <p className="text-slate-300 text-[11px] leading-relaxed">
                         {wargameOption === 'RE_SPIN' &&
-                          '“推迟 4 周？！你知道车厂对 DV 延期的索赔是按天计算的吗？向高层汇报时亮红灯，整个项目的年终奖全部泡汤！改版坚决不同意！”'}
+                          `“当前候选方案的周期是 ${wargameTiming}，但距 ${context?.nextMilestone || '当前里程碑'} 只剩 ${context?.daysRemaining ?? (context?.daysRemaining ?? '—')} 天；需要先确认是否真的会击穿节点，再决定是否改版。”`}
                         {wargameOption === 'RECOMMENDED' &&
-                          '“3 天真能搞定？如果 3 天后台架测出来还是超标怎么办？必须立下军令状，绝不能出现二次返工！”'}
+                          `“当前候选方案周期标注为 ${wargameTiming}；如果验证后仍未闭环怎么办？必须把退出条件和复测责任写清楚，不能把未验证结果当成绿灯。”`}
                         {wargameOption === 'CONCESSION' &&
                           '“只要能保住本周五送检，我没意见。但质量和领导必须在特批单签字，责任不能落在项目组头上。”'}
                       </p>
@@ -664,10 +677,10 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                           `“【一票否决】当前 ${domain} 工况仍存在未关闭的关键门禁。${riskRatings.overallRisk === 'High' ? '当前综合风险为 High，不能用节点压力替代工程证据。' : '仍需完成当前工况的关键实测与门禁复核。'} PSCR / 质量代表在证据未闭环前不得签署正式放行。”`}
                         {wargameOption === 'RECOMMENDED' &&
                           (wargameLeadStyle === 'CONSERVATIVE'
-                            ? '“必须给出严格的数学机理推导和原厂书面保证，确认 RC 吸收不影响正常 PWM 开关效率，否则我不能签字。”'
+                            ? `“必须给出严格的 ${domain} 机理证据，并确认候选方案 ${wargameAction?.name || '当前方案'} 的验证边界与变更影响，否则我不能签字。”`
                             : wargameLeadStyle === 'PROCESS_DEFENSIVE'
                             ? '“软件要改标定参数？必须先让软件负责人提变更申请，把责任划分清楚。”'
-                            : '“只要 3 天内能拿出示波器压降实测报告，且结温在 SOA 裕量内，我同意按此方案推进！”')}
+                            : `“只要按当前候选方案的周期 ${wargameTiming} 完成验证，并取得对应证据，我同意继续推进。”`)}
                         {wargameOption === 'RE_SPIN' &&
                           '“虽然稳妥，但改版时间太长，大老板会直接找我问责。必须评估有没有原位救急的 Plan B。”'}
                       </p>
@@ -700,7 +713,7 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                             防御 2: 软件零风险标定打消推诿
                           </span>
                           <p className="text-slate-200">
-                            反驳软件中断风险：无需修改核心控制环路算法，仅需配置驱动芯片寄存器 <code>0x04 = 0x03</code>（急停刹车自动切入全下桥模式），硬件工程师已在台架打桩验证通过，无代码冻结风险。
+                            {decisionEvidenceText} 不把未从当前工程输入推导出的寄存器地址、验证通过状态或代码冻结结论写成既定事实；具体实现与验证以当前候选方案的证据字段为准。
                           </p>
                         </div>
                         <div className="flex items-start gap-2">
@@ -741,10 +754,10 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                     <div className="bg-emerald-950/30 border border-emerald-500/50 p-4 rounded-xl space-y-3 text-xs">
                       <div className="flex items-center justify-between border-b border-emerald-900/60 pb-2">
                         <span className="font-bold text-emerald-300 text-sm">
-                          🎉 全员达成会签共识：方案 B 获批准进入实施闭环！
+                          推演状态：当前候选方案进入角色会签模拟（不等同于真实批准）
                         </span>
                         <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-[10px]">
-                          通关指数: 96%
+                          当前证据：{insufficientEvidenceCount > 0 ? `${insufficientEvidenceCount}项待补齐` : '已形成可评审链路'}
                         </span>
                       </div>
 
@@ -757,7 +770,7 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                         <div className="p-2 rounded bg-slate-900/80 border border-slate-800">
                           <span className="text-emerald-300 font-semibold block">⏱️ 项目经理 (A/C)</span>
                           <span className="text-emerald-400 font-bold">✔ 窗口放行</span>
-                          <p className="text-slate-400 text-[10px] mt-0.5">3天完成，15天节点绿灯保住</p>
+                          <p className="text-slate-400 text-[10px] mt-0.5">当前候选周期：{wargameTiming}；里程碑剩余：{context?.daysRemaining ?? (context?.daysRemaining ?? '—')} 天</p>
                         </div>
                         <div className="p-2 rounded bg-slate-900/80 border border-slate-800">
                           <span className="text-purple-300 font-semibold block">💻 底层软件 (R)</span>
@@ -767,7 +780,7 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                         <div className="p-2 rounded bg-slate-900/80 border border-slate-800">
                           <span className="text-red-300 font-semibold block">⚖️ PSCR / 质量 (C)</span>
                           <span className="text-emerald-400 font-bold">✔ 解除卡点</span>
-                          <p className="text-slate-400 text-[10px] mt-0.5">降额回至42%，安全机制达标</p>
+                          <p className="text-slate-400 text-[10px] mt-0.5">综合风险：{riskRatings.overallRisk}；{isSafetyOrDeratingCritical ? '需要安全/降额门禁复核' : '按当前安全证据闭环'}</p>
                         </div>
                       </div>
                     </div>
@@ -778,9 +791,9 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
                       </div>
                       <p className="text-slate-300 text-[11px] leading-relaxed">
                         {wargameOption === 'RE_SPIN' &&
-                          '因 28 天工期导致 15 天 DV 节点严重击穿，PM 与直属领导坚决拒签。请切换至【方案 B】推演最优均衡解。'}
+                          `当前候选方案周期为 ${wargameTiming}，距 ${context?.nextMilestone || '当前里程碑'} 剩余 ${context?.daysRemaining ?? (context?.daysRemaining ?? '—')} 天；先确认是否构成实际节点冲突，再决定是否需要重新方案。`}
                         {wargameOption === 'CONCESSION' &&
-                          '因 94.5% 极端降额违约，PSCR 与质量部行使一票否决权，出库通道被锁死。请切换至【方案 B】推演最优均衡解。'}
+                          `当前综合风险为 ${riskRatings.overallRisk}，且${isSafetyOrDeratingCritical ? '存在安全/降额门禁需要复核' : '暂未识别为高风险门禁'}。正式放行必须以当前证据链和责任签署为准。`}
                       </p>
                     </div>
                   )}
@@ -1333,33 +1346,11 @@ export const RecommendationRaciView: React.FC<RecommendationRaciViewProps> = ({
 
       {/* 3. 双层工程时间轴机制：T+24h 应急临时遏制 vs 下一阶段永久纠正 (Upgrade 2) */}
       {(() => {
-        const effectiveContext: ProjectContext = context || (result?.context as ProjectContext) || {
-          projectName: '车载ECU项目',
-          productType: '车载域控制器',
-          ecuType: 'ECU',
-          projectPhase: 'DV',
-          asilLevel: 'ASIL B',
-          customer: '主机厂',
-          sopDate: '2026-12-31',
-          nextMilestone: 'DV 准入',
-          daysRemaining: 14,
-          costConstraint: '中等敏感',
-          sampleStatus: 'B样件',
-        };
+        const effectiveContext: ProjectContext = context;
 
-        const effectiveIssue: IssueInput = issue || {
-          issueCategories: ['EMC'],
-          requirement: '',
-          actualMeasurement: '',
-          testCondition: '',
-          environment: '',
-          failurePhenomenon: '',
-          engineeringConcern: '',
-          notes: '',
-          attachments: [],
-        };
+        const effectiveIssue: IssueInput = issue;
 
-        const dualTimeline = result.dualTimeline || buildDualTimelinePlan(result, effectiveContext, effectiveIssue);
+        const dualTimeline = action.dualTimeline || buildDualTimelinePlan(result, effectiveContext, effectiveIssue);
 
         const handleCopyTimeline = () => {
           if (!dualTimeline) return;
@@ -1391,6 +1382,7 @@ ${dualTimeline.permanentPhase.actions.map((a, i) => `  ${i + 1}. [${a.duration}]
 - 正式结案门禁：${dualTimeline.permanentPhase.exitCriteria}
 
 =========================================
+【时间轴来源】：${dualTimeline.provenance || 'AI_GENERATED'}
 【战略协同权衡】：
 ${dualTimeline.strategicTradeoff}`;
 
@@ -1495,10 +1487,23 @@ ${dualTimeline.strategicTradeoff}`;
                     <div className="flex items-start gap-2.5">
                       <Scale className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
                       <div className="space-y-1.5 text-slate-300">
-                        <div className="font-semibold text-slate-200 flex items-center gap-2">
+                        <div className="font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
                           <span>双层时间轴协同逻辑与工程权衡 (Strategic Trade-off)</span>
                           <span className="text-[10px] px-2 py-0.2 rounded bg-blue-500/20 text-blue-300 font-mono">
                             车规质量与进度博弈平衡
+                          </span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded border font-mono ${
+                            dualTimeline.provenance === 'DERIVED_FROM_CANDIDATES'
+                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-600/40'
+                              : dualTimeline.provenance === 'LEGACY_KNOWLEDGE_BASELINE'
+                              ? 'bg-amber-500/10 text-amber-300 border-amber-600/40'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}>
+                            {dualTimeline.provenance === 'DERIVED_FROM_CANDIDATES'
+                              ? '当前候选方案派生'
+                              : dualTimeline.provenance === 'LEGACY_KNOWLEDGE_BASELINE'
+                              ? '知识基线 · 非当前事实'
+                              : 'AI 时间轴 · 需审计'}
                           </span>
                         </div>
                         <p className="leading-relaxed text-slate-300 whitespace-pre-line text-[11px]">

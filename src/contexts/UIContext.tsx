@@ -12,6 +12,7 @@ type UIValue = {
   aiOfflineOpen: boolean; setAiOfflineOpen: (v: boolean) => void;
   oscilloscopeOpen: boolean; setOscilloscopeOpen: (v: boolean) => void;
   traceAuditOpen: boolean; setTraceAuditOpen: (v: boolean) => void;
+  workflowHelpOpen: boolean; setWorkflowHelpOpen: (v: boolean) => void;
   toast: Toast; showToast: (text: string, type?: 'success' | 'info' | 'error') => void; clearToast: () => void;
   theme: AppTheme; setTheme: (theme: AppTheme) => void;
   modelConfig: ModelApiConfig; setModelConfig: (config: ModelApiConfig) => void;
@@ -27,6 +28,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [aiOfflineOpen, setAiOfflineOpen] = useState(false);
   const [oscilloscopeOpen, setOscilloscopeOpen] = useState(false);
   const [traceAuditOpen, setTraceAuditOpen] = useState(false);
+  const [workflowHelpOpen, setWorkflowHelpOpen] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
   const [themeState, setThemeState] = useState<AppTheme>(() => {
     try { const s = localStorage.getItem('ecu_copilot_theme'); if (s === 'light' || s === 'eyecare' || s === 'warm' || s === 'dark') return s; } catch {}
@@ -45,6 +47,6 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const setModelConfig = (config: ModelApiConfig) => { setModelConfigState(config); try { localStorage.setItem('ecu_copilot_model_config', JSON.stringify(config)); } catch {} };
   useEffect(() => { document.documentElement.setAttribute('data-theme', themeState); }, [themeState]);
 
-  return <UIContext.Provider value={{ activeTab, setActiveTab, modelModalOpen, setModelModalOpen, scenarioManageOpen, setScenarioManageOpen, sourceDownloadOpen, setSourceDownloadOpen, deviceLibraryOpen, setDeviceLibraryOpen, aiOfflineOpen, setAiOfflineOpen, oscilloscopeOpen, setOscilloscopeOpen, traceAuditOpen, setTraceAuditOpen, toast, showToast, clearToast: () => setToast(null), theme: themeState, setTheme, modelConfig, setModelConfig }}>{children}</UIContext.Provider>;
+  return <UIContext.Provider value={{ activeTab, setActiveTab, modelModalOpen, setModelModalOpen, scenarioManageOpen, setScenarioManageOpen, sourceDownloadOpen, setSourceDownloadOpen, deviceLibraryOpen, setDeviceLibraryOpen, aiOfflineOpen, setAiOfflineOpen, oscilloscopeOpen, setOscilloscopeOpen, traceAuditOpen, setTraceAuditOpen, workflowHelpOpen, setWorkflowHelpOpen, toast, showToast, clearToast: () => setToast(null), theme: themeState, setTheme, modelConfig, setModelConfig }}>{children}</UIContext.Provider>;
 }
 export function useUI() { const value = useContext(UIContext); if (!value) throw new Error('useUI must be used inside UIProvider'); return value; }

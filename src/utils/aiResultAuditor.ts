@@ -7,6 +7,7 @@ import {
   AiAuditFlag,
   CandidateAction,
 } from '../types';
+import { createSemanticAnalysisResultEditor, readAction, readAnalysisBasis, readFacts, readJudgment, readTraceSummary } from '../adapters/analysisResultAdapter';
 import { buildDualTimelinePlan } from './dualTimelineEngine';
 import { generateCouplingCheckTemplates } from './crossDomainCouplingMatrix';
 import { resolveEngineeringDomains } from './scenarioDomainEngine';
@@ -111,22 +112,28 @@ export function auditAiResult(
   const flags: AiAuditFlag[] = [];
   const autoFixSummary: string[] = [];
   const sanitized: CopilotAnalysisResult = { ...aiData };
+  const baselineFacts = readFacts(baseline);
+  const baselineJudgment = readJudgment(baseline);
+  const baselineAction = readAction(baseline);
+  const baselineBasis = readAnalysisBasis(baseline);
+  const baselineTrace = readTraceSummary(baseline);
+  const sanitizedEditor = createSemanticAnalysisResultEditor(sanitized);
 
   // 1. 结构兜底保障
-  if (!sanitized.coreConclusion || typeof sanitized.coreConclusion !== 'object') {
-    sanitized.coreConclusion = baseline.coreConclusion;
+  if ((!sanitizedEditor.judgment.conclusion || typeof sanitizedEditor.judgment.conclusion !== 'object') && baselineJudgment?.coreConclusion) {
+    sanitizedEditor.judgment.conclusion = baselineJudgment.coreConclusion;
     autoFixSummary.push('核心结论缺失，已从确定性基线自动补齐');
   }
-  if (!sanitized.physicalMechanism || typeof sanitized.physicalMechanism !== 'object') {
-    sanitized.physicalMechanism = baseline.physicalMechanism;
+  if ((!sanitizedEditor.facts.physicalMechanism || typeof sanitizedEditor.facts.physicalMechanism !== 'object') && baselineFacts?.physicalMechanism) {
+    sanitizedEditor.facts.physicalMechanism = baselineFacts.physicalMechanism;
     autoFixSummary.push('物理机理缺失，已从确定性基线自动补齐');
   }
-  if (!Array.isArray(sanitized.candidateActions) || sanitized.candidateActions.length === 0) {
-    sanitized.candidateActions = baseline.candidateActions;
+  if ((!Array.isArray(sanitizedEditor.action.candidates) || sanitizedEditor.action.candidates.length === 0) && baselineAction?.candidateActions) {
+    sanitizedEditor.action.candidates = baselineAction.candidateActions;
     autoFixSummary.push('候选行动方案列表为空，已从确定性基线自动补齐');
   }
-  if (!sanitized.finalRecommendation || typeof sanitized.finalRecommendation !== 'object') {
-    sanitized.finalRecommendation = baseline.finalRecommendation;
+  if ((!sanitizedEditor.judgment.recommendation || typeof sanitizedEditor.judgment.recommendation !== 'object') && baselineJudgment?.finalRecommendation) {
+    sanitizedEditor.judgment.recommendation = baselineJudgment.finalRecommendation;
     autoFixSummary.push('最终推荐方案缺失，已从确定性基线自动补齐');
   }
 
@@ -138,13 +145,13 @@ export function auditAiResult(
   for (const key of Object.keys(issue?.measuredValues || {})) {
     validCitationKeys.add(`measuredValues.${key}`);
   }
-  const calculatedEvidence = baseline.analysisBasis?.calculatedOutputEvidence || [];
+  const calculatedEvidence = baselineBasis?.calculatedOutputEvidence || [];
   const calculatedByKey = new Map(calculatedEvidence.map((item) => [item.key, item]));
   const calculatedById = new Map(calculatedEvidence.map((item) => [item.id, item]));
-  for (const output of baseline.analysisBasis?.calculatedOutputs || []) {
+  for (const output of baselineBasis?.calculatedOutputs || []) {
     validCitationKeys.add(`baseline.analysisBasis.calculatedOutputs:${output}`);
-    const idx = (baseline.analysisBasis?.calculatedOutputs || []).indexOf(output);
-    validCitationKeys.add(`baseline.analysisBasis.calculatedOutputs[${idx}]`);
+    const idx = (baselineBasis?.calculatedOutputs || []).indexOf(output);
+    validCitationKeys.add(`baselineBasis.calculatedOutputs[${idx}]`);
   }
   for (const item of calculatedEvidence) {
     validCitationKeys.add(`baseline.analysisBasis.calculatedOutputs:${item.key}`);
@@ -180,8 +187,8 @@ export function auditAiResult(
 
     const indexed = citation.match(/^baseline\.analysisBasis\.calculatedOutputs\[(\d+)\]$/);
     if (indexed) {
-      const output = baseline.analysisBasis?.calculatedOutputs?.[Number(indexed[1])];
-      const item = calculatedEvidence.find((candidate) => output?.startsWith(`${candidate.key}=`));
+      const output = baselineBasis?.calculatedOutputs?.[Number(indexed[1])];
+      const item = typeof output === 'string' ? calculatedEvidence.find((candidate) => output.startsWith(`${candidate.key}=`)) : undefined;
       if (item?.status === 'CALCULATED' && item.value !== undefined) {
         return { value: item.value, unit: item.unit, source: citation };
       }
@@ -205,7 +212,7 @@ export function auditAiResult(
     for (const citation of citations) {
       const isPrecomputed = /^precomputed\.[^\s]+$/.test(citation) && calculatedById.has(citation.slice('precomputed.'.length));
       const isBaselineIndexed = /^baseline\.analysisBasis\.calculatedOutputs\[\d+\]$/.test(citation) &&
-        Number(citation.match(/\[(\d+)\]$/)?.[1] || -1) < (baseline.analysisBasis?.calculatedOutputs || []).length;
+        Number(citation.match(/\[(\d+)\]$/)?.[1] || -1) < (baselineBasis?.calculatedOutputs || []).length;
       const isBaselineNamed = citation.startsWith('baseline.analysisBasis.calculatedOutputs:') && (validCitationKeys.has(citation) || calculatedByKey.has(citation.slice('baseline.analysisBasis.calculatedOutputs:'.length)));
       if (!validCitationKeys.has(citation) && !isPrecomputed && !isBaselineIndexed && !isBaselineNamed) {
         flags.push({
@@ -238,12 +245,12 @@ export function auditAiResult(
   };
 
   // 2. 审计候选方案
-  const actions: CandidateAction[] = sanitized.candidateActions || [];
-  auditCitations('result', sanitized.citedFields, JSON.stringify({
-    coreConclusion: sanitized.coreConclusion,
-    knownFacts: sanitized.knownFacts,
-    physicalMechanism: sanitized.physicalMechanism,
-    finalRecommendation: sanitized.finalRecommendation,
+  const actions: CandidateAction[] = sanitizedEditor.action.candidates || [];
+  auditCitations('result', sanitizedEditor.facts.citedFields, JSON.stringify({
+    coreConclusion: sanitizedEditor.judgment.conclusion,
+    knownFacts: sanitizedEditor.facts.knownFacts,
+    physicalMechanism: sanitizedEditor.facts.physicalMechanism,
+    finalRecommendation: sanitizedEditor.judgment.recommendation,
   }));
   const detectedDomains = issue ? resolveEngineeringDomains(issue) : [];
   const primaryDomain = detectedDomains[0] || 'BLDC';
@@ -381,8 +388,8 @@ export function auditAiResult(
   });
 
   // 3. 审计一票否决与推荐方案冲突 (RULE_06_VETO_ENFORCEMENT)
-  const recOptionId = sanitized.finalRecommendation?.recommendedOptionId;
-  const recommendedAction = actions.find((a) => a.id === recOptionId || a.name === sanitized.finalRecommendation?.recommendedOptionName);
+  const recOptionId = sanitizedEditor.judgment.recommendation?.recommendedOptionId;
+  const recommendedAction = actions.find((a) => a.id === recOptionId || a.name === sanitizedEditor.judgment.recommendation?.recommendedOptionName);
 
   if (recommendedAction && recommendedAction.veto?.rejection_veto) {
     flags.push({
@@ -397,12 +404,12 @@ export function auditAiResult(
     const validAlternatives = actions.filter((a) => !a.veto?.rejection_veto);
     if (validAlternatives.length > 0) {
       const bestAlternative = [...validAlternatives].sort((a, b) => (b.scores?.total || 0) - (a.scores?.total || 0))[0];
-      sanitized.finalRecommendation.recommendedOptionId = bestAlternative.id;
-      sanitized.finalRecommendation.recommendedOptionName = bestAlternative.name;
-      sanitized.finalRecommendation.recommendationGrade = 'Conditionally Recommended';
-      sanitized.finalRecommendation.whyReason = [
+      sanitizedEditor.judgment.recommendation.recommendedOptionId = bestAlternative.id;
+      sanitizedEditor.judgment.recommendation.recommendedOptionName = bestAlternative.name;
+      sanitizedEditor.judgment.recommendation.recommendationGrade = 'Conditionally Recommended';
+      sanitizedEditor.judgment.recommendation.whyReason = [
         `原推荐方案 [${recommendedAction.id}] 触发车规一票否决 (${recommendedAction.veto.veto_reason})，系统审计强制切换至合规替代方案。`,
-        ...(sanitized.finalRecommendation.whyReason || []),
+        ...(sanitizedEditor.judgment.recommendation.whyReason || []),
       ];
       autoFixSummary.push(`推荐方案已从被否决的 [${recommendedAction.id}] 自动更正为合规方案 [${bestAlternative.id}]`);
     }
@@ -413,7 +420,7 @@ export function auditAiResult(
   if (typeof daysRemaining === 'number' && daysRemaining <= 14 && recommendedAction) {
     const timeCostStr = (recommendedAction.timeCost || '').toLowerCase();
     const needsPcbRedesign = timeCostStr.includes('周') || timeCostStr.includes('改版') || timeCostStr.includes('开模') || timeCostStr.includes('月');
-    if (needsPcbRedesign && !sanitized.dualTimeline?.containmentPhase) {
+    if (needsPcbRedesign && !sanitizedEditor.action.dualTimeline?.containmentPhase) {
       flags.push({
         level: 'WARNING',
         ruleId: 'RULE_03_SCHEDULE_COLLAPSE_RISK',
@@ -423,7 +430,7 @@ export function auditAiResult(
         autoFixApplied: true,
       });
 
-      sanitized.dualTimeline = buildDualTimelinePlan(sanitized, context ?? ({} as ProjectContext), issue ?? ({} as IssueInput));
+      sanitizedEditor.action.dualTimeline = buildDualTimelinePlan(sanitized, context ?? ({} as ProjectContext), issue ?? ({} as IssueInput));
       autoFixSummary.push(`已自动为倒计时紧迫工况生成 T+24h 应急临时遏制 (Containment) 协同时间轴`);
     }
   }
@@ -447,9 +454,9 @@ export function auditAiResult(
   // 6. 审计虚构缺失实测值 (RULE_01_HALLUCINATED_PARAMS)
   if (integrityAssessment && integrityAssessment.missingRequiredFields.length > 0) {
     const missingKeys = integrityAssessment.missingRequiredFields;
-    if (Array.isArray(sanitized.knownFacts)) {
+    if (Array.isArray(sanitizedEditor.facts.knownFacts)) {
       const falsifiedFacts: string[] = [];
-      sanitized.knownFacts = sanitized.knownFacts.filter((fact) => {
+      sanitizedEditor.facts.knownFacts = sanitizedEditor.facts.knownFacts.filter((fact) => {
         const isFalsified = missingKeys.some((k) => fact.includes(k.split(' ')[0]) && fact.includes('实测为'));
         if (isFalsified) {
           falsifiedFacts.push(fact);
@@ -467,7 +474,7 @@ export function auditAiResult(
           fieldPath: 'knownFacts',
           autoFixApplied: true,
         });
-        sanitized.assumptions = [...(sanitized.assumptions || []), ...falsifiedFacts.map((f) => `[审计降级为假设] ${f}`)];
+        sanitizedEditor.facts.assumptions = [...(sanitizedEditor.facts.assumptions || []), ...falsifiedFacts.map((f) => `[审计降级为假设] ${f}`)];
         autoFixSummary.push(`将 ${falsifiedFacts.length} 条虚构实测事实自动降级为待证实假设`);
       }
     }
@@ -475,9 +482,9 @@ export function auditAiResult(
 
   // 7. 审计证据等级越级 (RULE_10_EVIDENCE_LEVEL_OVERRIDE)
   // 若输入体检评分是 GRADE_C 或 GRADE_D，不允许多域自评为 HIGH_DIRECT_EVIDENCE
-  if (sanitized.multiDomainAnalysis?.domainAssessments && integrityAssessment) {
+  if (sanitizedEditor.judgment.multiDomainAnalysis?.domainAssessments && integrityAssessment) {
     const isLowIntegrity = integrityAssessment.grade === 'GRADE_C_INSUFFICIENT' || integrityAssessment.grade === 'GRADE_D_BLOCKING';
-    sanitized.multiDomainAnalysis.domainAssessments.forEach((da) => {
+    sanitizedEditor.judgment.multiDomainAnalysis.domainAssessments.forEach((da) => {
       if (isLowIntegrity && (da.evidenceLevel === 'HIGH_DIRECT_EVIDENCE' || da.evidenceLevel === 'HIGH')) {
         flags.push({
           level: 'NOTICE',
@@ -494,32 +501,32 @@ export function auditAiResult(
   }
 
   // 8. 双层时间轴完整性兜底
-  if (!sanitized.dualTimeline || !sanitized.dualTimeline.containmentPhase) {
-    sanitized.dualTimeline = baseline.dualTimeline || buildDualTimelinePlan(sanitized, context ?? ({} as ProjectContext), issue ?? ({} as IssueInput));
+  if (!sanitizedEditor.action.dualTimeline || !sanitizedEditor.action.dualTimeline.containmentPhase) {
+    sanitizedEditor.action.dualTimeline = baselineAction?.dualTimeline || buildDualTimelinePlan(sanitized, context ?? ({} as ProjectContext), issue ?? ({} as IssueInput));
   }
 
   // 9b. 确定性判据硬约束 (RULE_13_DETERMINISTIC_VETO_FLOOR)
   // 本地确定性预计算若给出 CRITICAL/FAIL 判据(如母线泵升突破耐压、热失控、时序越界)，
   // 属于不可推翻的硬门禁：AI 的整体风险评级不得低于 Medium-High，更不得把硬冲突误判为
   // Low/Medium 后直接放行。这是"确定性事实否决 AI 输出"的最后一道闭环。
-  const criticalEvidence = (baseline.analysisBasis?.calculatedOutputEvidence || []).filter(
+  const criticalEvidence = (baselineBasis?.calculatedOutputEvidence || []).filter(
     (e: any) => (e.complianceVerdict === 'CRITICAL' || e.complianceVerdict === 'FAIL') && e.status === 'CALCULATED'
   );
-  if (criticalEvidence.length > 0 && sanitized.riskRatings) {
+  if (criticalEvidence.length > 0 && sanitizedEditor.judgment.risk) {
     const riskRank: Record<string, number> = { High: 3, 'Medium-High': 2, Medium: 1, Low: 0 };
-    const aiRank = riskRank[sanitized.riskRatings.overallRisk] ?? 1;
+    const aiRank = riskRank[sanitizedEditor.judgment.risk.overallRisk] ?? 1;
     if (aiRank < 2) {
       flags.push({
         level: 'FATAL',
         ruleId: 'RULE_13_DETERMINISTIC_VETO_FLOOR',
         title: '确定性否决判据被 AI 低估',
-        message: '本地确定性计算给出 ' + criticalEvidence.length + ' 项 CRITICAL/FAIL 判据 (' + criticalEvidence.map((e: any) => e.id).join('、') + ')，但模型整体风险评级仅为 ' + sanitized.riskRatings.overallRisk + '，已强制抬升至 High。',
+        message: '本地确定性计算给出 ' + criticalEvidence.length + ' 项 CRITICAL/FAIL 判据 (' + criticalEvidence.map((e: any) => e.id).join('、') + ')，但模型整体风险评级仅为 ' + sanitizedEditor.judgment.risk.overallRisk + '，已强制抬升至 High。',
         fieldPath: 'riskRatings.overallRisk',
         autoFixApplied: true,
       });
-      sanitized.riskRatings.overallRisk = 'High';
-      if (typeof sanitized.riskRatings.overallRiskScore === 'number') {
-        sanitized.riskRatings.overallRiskScore = Math.max(sanitized.riskRatings.overallRiskScore, 82);
+      sanitizedEditor.judgment.risk.overallRisk = 'High';
+      if (typeof sanitizedEditor.judgment.risk.overallRiskScore === 'number') {
+        sanitizedEditor.judgment.risk.overallRiskScore = Math.max(sanitizedEditor.judgment.risk.overallRiskScore, 82);
       }
       autoFixSummary.push('确定性 CRITICAL 判据强制将整体风险抬升至 High');
     }
@@ -549,17 +556,17 @@ export function auditAiResult(
     flags,
     autoFixSummary,
     auditedAt: new Date().toISOString(),
-    modelIdentifier: sanitized.provenance?.modelIdentifier,
+    modelIdentifier: sanitizedEditor.metadata.provenance?.modelIdentifier,
   };
 
   // 挂载到结果与溯源信息中
-  sanitized.aiAudit = auditResult;
+  sanitizedEditor.metadata.aiAudit = auditResult;
   if (integrityAssessment) {
-    sanitized.inputIntegrity = integrityAssessment;
+    sanitizedEditor.metadata.inputIntegrity = integrityAssessment;
   }
-  if (sanitized.provenance) {
-    sanitized.provenance.aiAudit = auditResult;
-    sanitized.provenance.inputIntegrity = integrityAssessment;
+  if (sanitizedEditor.metadata.provenance) {
+    sanitizedEditor.metadata.provenance.aiAudit = auditResult;
+    sanitizedEditor.metadata.provenance.inputIntegrity = integrityAssessment;
   }
 
   return {

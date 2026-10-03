@@ -357,7 +357,8 @@ interface EngineeringCalculatorViewProps {
 }
 
 export const EngineeringCalculatorView: React.FC<EngineeringCalculatorViewProps> = ({ context, issue, setIssue }) => {
-  const [activeCalc, setActiveCalc] = useState<'wcca' | 'foster_thermal' | 'steady_thermal' | 'voltage' | 'motor_drive'>('motor_drive');
+  const [activeCalc, setActiveCalc] = useState<'wcca' | 'foster_thermal' | 'steady_thermal' | 'voltage'>('wcca');
+  const [motorDriveExpanded, setMotorDriveExpanded] = useState(false);
 
   // WCCA States
   const [wccaParams, setWccaParams] = useState<WccaCalcParams>({
@@ -588,22 +589,6 @@ export const EngineeringCalculatorView: React.FC<EngineeringCalculatorViewProps>
             <span>4. 电源轨动态瞬态跌落与复位安全裕量</span>
           </button>
 
-          <button
-            onClick={() => setActiveCalc('motor_drive')}
-            className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg font-medium transition cursor-pointer ${
-              activeCalc === 'motor_drive'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-            }`}
-          >
-            <Cpu className="w-4 h-4 text-emerald-400" />
-            <span className="flex items-center gap-1.5">
-              5. BLDC 电机驱动专项物理核算工具箱
-              <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded text-[10px]">
-                车载/机器人
-              </span>
-            </span>
-          </button>
         </div>
 
         {/* ===================== 计算器 1: WCCA & 蒙特卡洛直方图 ===================== */}
@@ -1261,10 +1246,31 @@ export const EngineeringCalculatorView: React.FC<EngineeringCalculatorViewProps>
           </div>
         )}
 
-        {/* ===================== 计算器 5: BLDC 电机驱动专项物理核算工具箱 ===================== */}
-        {activeCalc === 'motor_drive' && (
-          <MotorDriveToolbox issue={issue} onIssueChange={setIssue} />
-        )}
+        {/* WP5：BLDC 专项工具与通用计算器平级收纳，默认折叠，避免 1200+ 行工具常驻渲染。 */}
+        <div className="bg-slate-950 border border-emerald-800/40 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setMotorDriveExpanded((v) => !v)}
+            className="w-full px-5 py-4 flex items-center justify-between gap-4 text-left cursor-pointer hover:bg-slate-900/70 transition"
+            aria-expanded={motorDriveExpanded}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <Cpu className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-100">BLDC / 电机驱动专项计算工具</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">7 个专项核算模块；与 WCCA / 通用 Thermal / Voltage Margin 分开，避免重复承担同一事实与结论。</div>
+              </div>
+            </div>
+            <span className="shrink-0 text-[10px] font-semibold text-emerald-300 border border-emerald-700/50 bg-emerald-950/30 rounded px-2 py-1">
+              {motorDriveExpanded ? '收起' : '展开专项工具'}
+            </span>
+          </button>
+          {motorDriveExpanded && (
+            <div className="border-t border-slate-800 p-4 sm:p-5">
+              <MotorDriveToolbox issue={issue} onIssueChange={setIssue} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

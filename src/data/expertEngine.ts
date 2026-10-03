@@ -7,6 +7,7 @@ import { getCrossDomainCouplings } from '../utils/crossDomainCouplingMatrix';
 import { calculateBldcDeterministicCalculations } from '../utils/bldcDeterministicEngine';
 import { extractUnifiedEngineeringModel } from '../utils/unifiedStateExtractor';
 import { runDeterministicPrecomputations } from '../utils/deterministicPrecomputation';
+import { createEmptyLegacyAnalysisResult, createSemanticAnalysisResultEditor } from '../adapters/analysisResultAdapter';
 
 export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue?: Partial<IssueInput>): CopilotAnalysisResult {
   // 缺省上下文不得编造具体项目事实（客户/ECU型号/SOP日期/样品阶段等），
@@ -70,10 +71,12 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   } else {
     // 其余域统一由 applyScenarioDynamicLayer 依据当前工况动态重建候选方案/评分/文档，
     // 此处仅提供最小结构骨架（不再使用写死示例案例数字的 canned 生成器）。
-    result = buildMinimalOfflineResult();
+    result = createEmptyLegacyAnalysisResult();
   }
 
-  // 当前案例的 P0 支柱统一由 scenarioDynamic 基于当前 issue/context 重建。
+    const editor = createSemanticAnalysisResultEditor(result);
+
+// 当前案例的 P0 支柱统一由 scenarioDynamic 基于当前 issue/context 重建。
   // 不再调用 decisionPillars.ts，避免历史模板数字/方案成为运行时事实来源。
 
   // 补全升级2：双层工程时间轴 (T+24h 应急临时遏制 vs 下一阶段永久纠正)
@@ -108,7 +111,7 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     blocks: ['下一工程门禁放行'],
     rationale: '跨域改善不能抵消该领域的硬门禁；需先完成该领域的合格证据闭环。',
   }));
-  result.multiDomainAnalysis = {
+  editor.judgment.multiDomainAnalysis = {
     primaryDomain,
     relatedDomains: domainList.filter((d) => d !== primaryDomain),
     domainAssessments,
@@ -124,7 +127,10 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
     engine: 'deterministicPrecomputation',
     calculation: fact.title,
     formula: fact.formulaOrBasis,
-    value: typeof fact.calculatedValue === 'number' ? fact.calculatedValue : Number(fact.calculatedValue) || 0,
+    value: (() => {
+      const numeric = typeof fact.calculatedValue === 'number' ? fact.calculatedValue : Number(fact.calculatedValue);
+      return Number.isFinite(numeric) ? numeric : undefined;
+    })(),
     unit: fact.unit,
     inputs: fact.inputs || [],
     inputSources: fact.inputSources || {},
@@ -139,14 +145,14 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   if (combinedMetrics.length || factsAsEvidence.length) {
     const calculatedEvidence = Array.from(
       new Map([
-        ...(result.analysisBasis?.calculatedOutputEvidence || []),
+        ...(editor.facts.analysisBasis?.calculatedOutputEvidence || []),
         ...factsAsEvidence,
       ].map((item) => [item.id || item.key, item])).values()
     );
-    result.analysisBasis = {
-      ...(result.analysisBasis || { ruleInputs: [], measuredInputs: [], calculatedOutputs: [], assumptions: [], fixedTemplateFields: [] }),
+    editor.facts.analysisBasis = {
+      ...(editor.facts.analysisBasis || { ruleInputs: [], measuredInputs: [], calculatedOutputs: [], assumptions: [], fixedTemplateFields: [] }),
       calculatedOutputs: Array.from(new Set([
-        ...(result.analysisBasis?.calculatedOutputs || []),
+        ...(editor.facts.analysisBasis?.calculatedOutputs || []),
         ...combinedMetrics.map((m) => `${m.label}=${m.value}`),
         ...factsAsEvidence.filter((e) => e.status === 'CALCULATED' && e.value !== undefined).map((e) => `${e.key}=${e.value} ${e.unit}; margin=${e.safetyMargin ?? 'N/A'}; verdict=${e.complianceVerdict ?? 'N/A'}`),
       ])),
@@ -155,8 +161,8 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   }
 
   // 补充一票否决类型与工程改动影响度评估 (Change Impact)
-  if (result.candidateActions) {
-    result.candidateActions = result.candidateActions.map((action) => {
+  if (editor.action.candidates) {
+    editor.action.candidates = editor.action.candidates.map((action) => {
       let veto_type = action.veto?.veto_type;
       if (action.veto?.rejection_veto && !veto_type) {
         if (action.veto.veto_reason?.includes('SOA') || action.veto.veto_reason?.includes('击穿') || action.veto.veto_reason?.includes('耐压')) {
@@ -253,12 +259,12 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
   result = applyScenarioDynamicLayer(result, context, issue);
 
   // 确保 candidateActions 中的 riskDelta、crossDomainCouplingChecks、veto 100% 完整具备
-  if (result.candidateActions) {
+  if (editor.action.candidates) {
     const pDom = resolveEngineeringDomain(issue);
     const rDoms = resolveEngineeringDomains(issue).filter((d) => d !== pDom);
     const couplings = getCrossDomainCouplings(pDom, rDoms);
 
-    result.candidateActions = result.candidateActions.map((action) => {
+    editor.action.candidates = editor.action.candidates.map((action) => {
       let riskDelta = action.riskDelta;
       if (!riskDelta) {
         if (action.riskBefore && action.riskAfter) {
@@ -319,8 +325,8 @@ export function runExpertAnalysis(rawContext?: Partial<ProjectContext>, rawIssue
       };
     });
   }
-  result.source = 'deterministic-expert';
-  result.provenance = result.provenance || {
+  editor.metadata.source = 'deterministic-expert';
+  editor.metadata.provenance = editor.metadata.provenance || {
     executionMode: 'PURE_OFFLINE_LOCAL',
     engineName: '车规离线专家推演引擎',
     isAiInferred: false,
@@ -353,34 +359,4 @@ function buildCrossDomainLinks(domains: import('../utils/scenarioDomainEngine').
   return links;
 }
 
-/**
- * 最小离线结果骨架：供非 BLDC/非关节域在 applyScenarioDynamicLayer 动态重建前的结构占位。
- * 所有数值/文案均由动态层依据当前 issue/context 填充，此骨架不再内嵌任何写死的示例案例数字。
- */
-function buildMinimalOfflineResult(): CopilotAnalysisResult {
-  return {
-    coreConclusion: { problemSummary: '', recommendedMeasure: '', reasonSummary: '' },
-    riskRatings: {
-      overallRisk: 'Medium', overallRiskScore: 55, technicalRisk: 'Medium', qualityRisk: 'Medium',
-      scheduleRisk: 'Medium', costRisk: 'Medium', reliabilityRisk: 'Medium', functionalSafetyRisk: 'Medium',
-    },
-    knownFacts: [],
-    assumptions: [],
-    unknowns: [],
-    physicalMechanism: { rootCauseAnalysis: '', keyPhysicalFactors: [] },
-    dfmeaView: {
-      failureMode: '', failureCause: '', localEffect: '', systemEffect: '', vehicleEffect: '',
-      safetyImpact: false, regulatoryImpact: false, massProductionImpact: false,
-    },
-    candidateActions: [],
-    finalRecommendation: {
-      recommendedOptionId: '', recommendedOptionName: '', recommendationGrade: 'Caution',
-      whyReason: [], immediateSteps: [], preconditions: [], unacceptableActions: [],
-      stopConditions: [], reEvaluationTriggers: [], planB: '',
-    },
-    raciMatrix: [],
-    containment: { shortTermMeasure: '', validityScope: '', responsibleParty: '', timeline: '' },
-    capa: { rootCauseAction: '', preventiveMeasure: '', lessonsLearned: '', verificationTarget: '' },
-    engineeringDocs: {} as unknown as CopilotAnalysisResult['engineeringDocs'],
-  };
-}
+
